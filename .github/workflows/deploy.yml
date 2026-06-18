@@ -1,0 +1,143 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [dev, prod]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - run: bun install --frozen-lockfile
+
+      - name: Pick environment label for this branch
+        id: env_label
+        run: |
+          if [ "${{ github.ref_name }}" = "prod" ]; then
+            echo "label=prod" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "label=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: bun run build
+        env:
+          VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_POSTHOG_KEY: ${{ vars.VITE_POSTHOG_KEY }}
+          VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
+          VITE_ORBI_SUPABASE_URL: ${{ vars.VITE_ORBI_SUPABASE_URL }}
+          VITE_ORBI_SUPABASE_ANON_KEY: ${{ vars.VITE_ORBI_SUPABASE_ANON_KEY }}
+          # Observability — VITE_* is baked into the bundle at build time, so
+          # the DSN MUST be passed here (Cloudflare Pages env vars wouldn't
+          # take effect on a Wrangler-uploaded build). The wrapper at
+          # src/lib/observability/sentry.ts is a no-op when DSN is unset.
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          # Tags the env in Sentry so dev/prod errors don't pile up together.
+          # import.meta.env.MODE/DEV is "production"/false during `vite build`
+          # of either branch, so we derive it from the workflow ref instead.
+          VITE_DEPLOY_ENV: ${{ steps.env_label.outputs.label }}
+          # Release identifier — paired with the source map upload step below
+          # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
+          # back to readable filenames + line numbers from our checked-in source.
+          VITE_SENTRY_RELEASE: ${{ github.sha }}
+
+      - name: Upload source maps to GlitchTip
+        # Skip when DSN is unset (open-source contributors building dist locally
+        # don't need to upload anywhere). The run block below also skips when
+        # the auth token isn't configured — checking secrets.* in an `if:`
+        # expression is what made the whole workflow fail validation in 0s on
+        # previous attempts, so we keep the gate purely on vars.* here.
+        if: ${{ vars.VITE_SENTRY_DSN != '' }}
+        env:
+          # GlitchTip is Sentry-protocol-compatible; sentry-cli talks to it
+          # natively when SENTRY_URL points at the self-hosted instance.
+          SENTRY_URL: https://pulse.orangeway.app
+          SENTRY_AUTH_TOKEN: ${{ secrets.GLITCHTIP_API_TOKEN }}
+          SENTRY_ORG: orangeway
+          SENTRY_PROJECT: orange-way-web
+          RELEASE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_AUTH_TOKEN}" ]; then
+            echo "GLITCHTIP_API_TOKEN not set in repo/env secrets — skipping source-map upload."
+            exit 0
+          fi
+          # Install sentry-cli to a temp dir so we don't touch /usr (no sudo needed).
+          curl -sL https://sentry.io/get-cli/ | INSTALL_DIR=/tmp/sentry-cli-bin bash
+          export PATH="/tmp/sentry-cli-bin:$PATH"
+
+          # Register the release on the GlitchTip side.
+          sentry-cli releases new "$RELEASE"
+
+          # Inject debug-ids into the built JS + .map files so the SDK can find
+          # the right map for a given stack frame without needing sourceMappingURL
+          # comments (vite.config.ts sets sourcemap: 'hidden').
+          sentry-cli sourcemaps inject ./dist
+
+          # Upload both .js and .js.map files. --strip-prefix drops the runner's
+          # absolute build path so the displayed filename in GlitchTip is "src/..."
+          # not "/home/runner/work/orange-way/orange-way/src/...".
+          sentry-cli sourcemaps upload \
+            --release "$RELEASE" \
+            --strip-prefix "$GITHUB_WORKSPACE" \
+            ./dist
+
+          # Tie the release to the deploying commit (best-effort) and finalize.
+          sentry-cli releases set-commits --auto "$RELEASE" || true
+          sentry-cli releases finalize "$RELEASE"
+
+      - name: Pick Pages project for this branch
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "prod" ]; then
+            echo "project=ow-prod" >> "$GITHUB_OUTPUT"
+            echo "verify_url=https://orangeway.app" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "project=ow-dev" >> "$GITHUB_OUTPUT"
+            echo "verify_url=https://dev.orangeway.app" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unknown branch ${{ github.ref_name }} — skipping deploy"
+            exit 0
+          fi
+
+      - name: Deploy to ${{ steps.target.outputs.project }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          bunx wrangler@4.92.0 pages deploy dist \
+            --project-name=${{ steps.target.outputs.project }} \
+            --branch=${{ github.ref_name }} \
+            --commit-dirty=true
+
+      - name: Verify deploy
+        run: |
+          sleep 8
+          ROUTES=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/routes-[^"]*\.js' | head -1 || true)
+          if [ -z "$ROUTES" ]; then
+            echo "::warning::Could not find routes chunk on ${{ steps.target.outputs.verify_url }}"
+            exit 0
+          fi
+          curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
+          echo "✓ ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"

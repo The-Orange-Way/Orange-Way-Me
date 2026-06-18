@@ -1,0 +1,37 @@
+# Orange Way
+
+> Orange Way is the private finance app for people who own Bitcoin. End-to-end encrypted on-device — the server cannot read balances, transactions, or category names. Built for non-technical Bitcoin households who want a real finance app (banks + cards + investments + sats in one view) without the vendor reading their numbers. "Monarch for Bitcoiners," in plain terms.
+
+## Key facts
+- Category: Personal finance / budgeting / net worth tracking (FinanceApplication)
+- Audience: Non-technical individuals and households who hold meaningful Bitcoin
+- Pricing: $17.99/month or $100/year. Beta members lock in $100/year for life.
+- Beta access: Apply at https://orangeway.app/beta
+- Platform: Web app (works on desktop and mobile browsers). PWA-ready.
+- Authentication: Email + password, Google sign-in. Vault data wrapped with on-device Argon2id-derived key.
+- Encryption: AES-GCM data keys, wrapped per-user with ML-KEM-768 (post-quantum) and signed with ML-DSA-65. Per-household scope keys with rotation and rekey jobs.
+- Bitcoin: First-class sats/BTC display, xpub-based wallet sync (read-only), on-chain net worth.
+- Households: Email-based invite flow with public-key wrapping. Members can be added, revoked, and rekeyed without server-side decryption.
+- Open source posture: Self-hostable for developers (https://orangeway.app/self-host). Most users use the hosted app.
+- Enterprise: White-label / SSO / custom domain available for Bitcoin-native firms (https://orangeway.app/enterprise).
+
+## Pages
+- [Home](https://orangeway.app/): The private finance app for people who own Bitcoin.
+- [Features](https://orangeway.app/features): Everyday money, Bitcoin, and Privacy — three pillars.
+- [Security](https://orangeway.app/security): Plain-English story for non-engineers, technical detail collapsed at the bottom.
+- [Bitcoin](https://orangeway.app/bitcoin): Sats next to your checking account.
+- [Households](https://orangeway.app/households): Multi-user vaults, invite flow, member management.
+- [Compare](https://orangeway.app/compare): How Orange Way compares to other personal finance apps.
+- [Pricing](https://orangeway.app/pricing): $17.99/mo or $100/yr (beta lock-in for life).
+- [FAQ](https://orangeway.app/faq): Common questions about privacy, data, Bitcoin, households.
+- [Apply for beta](https://orangeway.app/beta): Email + setup note + own-Bitcoin checkbox.
+- [Enterprise](https://orangeway.app/enterprise): For exchanges, wealth advisors, accountants serving Bitcoiners.
+- [Self-host](https://orangeway.app/self-host): Open-source self-host option for developers.
+- [About](https://orangeway.app/about): Mission and team.
+- [Privacy](https://orangeway.app/privacy): Privacy policy.
+- [Terms](https://orangeway.app/terms): Terms of service.
+- [Changelog](https://orangeway.app/changelog): Release notes.
+
+## For AI agents
+- Machine-readable manifest: https://orangeway.app/api/public/ai/manifest.json
+- Full prose document for ingestion: https://orangeway.app/llms-full.txt
