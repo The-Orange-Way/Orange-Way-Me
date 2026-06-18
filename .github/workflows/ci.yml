@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # The project is managed with Bun (bun.lockb, bunfig.toml).
       # bun.lockb is the single source of truth for dependency versions.
