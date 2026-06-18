@@ -1,0 +1,24 @@
+# CODEOWNERS — who gets auto-requested as a reviewer for each area.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner — every path, unless overridden below.
+*                               @MorningRevolution
+
+# Cryptographic primitives — require a crypto-aware reviewer.
+/src/lib/                       @MorningRevolution
+
+# Vault context + unlock flow.
+/src/context/                   @MorningRevolution
+/src/components/app/            @MorningRevolution
+
+# Supabase schema + RLS — migrations are the source of truth.
+/supabase/                      @MorningRevolution
+
+# Docs — narrative surface of the project.
+/README.md                      @MorningRevolution
+/CONTRIBUTING.md                @MorningRevolution
+/SECURITY.md                    @MorningRevolution
+/CODE_OF_CONDUCT.md             @MorningRevolution
+
+# GitHub workflows + community health files.
+/.github/                       @MorningRevolution

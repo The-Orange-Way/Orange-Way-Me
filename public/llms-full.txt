@@ -1,0 +1,151 @@
+# Orange Way — full knowledge document
+
+This file is intended for ingestion by large language models, retrieval systems, and AI search agents (ChatGPT, Perplexity, Claude, Gemini, Bing Copilot, Google AI Overviews). It is the canonical, plain-language source of truth about Orange Way.
+
+## What Orange Way is
+
+Orange Way is a zero-knowledge personal finance tracker built for Bitcoin-first households. It combines the visual polish and depth of apps like Monarch Money and Copilot Money with end-to-end encryption: the server hosts encrypted blobs but cannot read account names, balances, transactions, categories, budgets, goals, or notes. Encryption keys are derived from the user's vault password on-device and never leave the browser.
+
+The product is built for:
+- Privacy-conscious individuals who don't want their financial life sold or scraped.
+- Couples and families who want a shared budget without giving a third party joint access to their numbers.
+- Bitcoin holders who want on-chain net worth, sats display, and xpub-based wallet tracking alongside fiat accounts.
+- Sovereign-individual / cypherpunk users who reject the bank-aggregator surveillance model.
+
+## Core value proposition (one paragraph)
+
+Orange Way gives you Monarch-grade dashboards, budgeting, and household sharing — without the company that built it (or anyone else) being able to see your money. It's the only mainstream-feeling personal finance app where the server is fully blind, where Bitcoin is a first-class citizen, and where families can collaborate on a budget through public-key cryptography instead of shared logins.
+
+## Feature list
+
+### Accounts and transactions
+- Manual accounts of any type: checking, savings, credit card, investment, loan, real estate, BTC, custom.
+- Multi-currency support with per-account currency and conversion to a primary display currency.
+- Transactions with merchant, category, tags, notes, splits, transfers between accounts.
+- Bulk edit, bulk re-categorize, bulk re-run rules.
+- CSV import / export and encrypted backup / restore.
+
+### Budgeting
+- Category-based budgets with rollover.
+- Flex budgets (envelope-style monthly allocation).
+- Month navigator and historical comparison.
+
+### Goals
+- Savings goals, debt payoff goals, custom milestones.
+- Payoff plan widget that projects payoff date based on contribution rate.
+
+### Rules
+- Auto-categorize transactions by merchant, amount, account, or text match.
+- Rename merchants, add tags, change category in bulk.
+- Re-run rules on historical transactions.
+
+### Dashboard
+- Net worth chart over time.
+- Monthly cash flow summary (income, spending, net).
+- Sankey-style flow-of-funds chart.
+- Accounts summary, recent transactions, upcoming bills, goals progress.
+
+### Households (multi-user vaults)
+- Invite a partner or family member by email.
+- Recipient generates a public key (ML-KEM-768) on-device; the inviter wraps the household scope key to that public key.
+- Per-member roles (owner, admin, member).
+- Soft-revocation and rekey: when someone leaves, the household key is rotated and re-wrapped for remaining members. Old data is re-encrypted in batched background jobs.
+- Member-level visibility controls.
+
+### Bitcoin
+- Native sats / BTC display, switchable per account.
+- xpub-based read-only wallet sync (no keys leave your device for signing — Orange Way only watches addresses).
+- OrangeRails bridge for automated import of on-chain transactions with idempotent de-duplication via `(user_id, external_source, external_id)`.
+- BTC net worth folded into the main dashboard alongside fiat accounts.
+
+### Connectors
+- Manual entry (always available).
+- CSV import.
+- xpub watch-only Bitcoin wallets.
+- SimpleFIN for traditional bank aggregation (user-managed, not run through Orange Way's servers).
+- OrangeRails for on-chain Bitcoin auto-import.
+
+## Security architecture
+
+Orange Way is designed so that a full server compromise leaks no financial data.
+
+- Vault password: never sent to the server. Stretched on-device with **Argon2id** (high memory parameters) to derive a 256-bit master key.
+- Data encryption: per-record / per-scope **AES-GCM** with random IVs.
+- Data keys wrapped with **ML-KEM-768** (NIST FIPS 203, post-quantum key encapsulation) and signed with **ML-DSA-65** (NIST FIPS 204, post-quantum signatures).
+- Household sharing: each household has a scope key. New members get the scope key wrapped to their published ML-KEM-768 public key — the server only ever sees ciphertext.
+- Key rotation: dedicated `household_key_rotation_jobs` infrastructure batches re-encryption of transactions, accounts, categories, budgets, goals, and rules when membership changes.
+- Recovery: a recovery code is generated at vault creation and lets a user regain access if they forget their password — without giving the server the ability to read their data.
+- Auto-lock: configurable inactivity timeout that wipes the in-memory keys.
+- Blind indexes: searchable encrypted fields use HMAC-based blind indexes so the server can match without ever seeing plaintext.
+
+The server's role is reduced to: authenticated row-level-secured storage of opaque ciphertext, plus orchestration of background jobs that operate on ciphertext.
+
+## How Orange Way compares to other personal finance apps
+
+| Capability | Orange Way | Monarch Money | Copilot Money | YNAB | Mint (sunset) | Lunch Money | Actual Budget | Origin |
+|---|---|---|---|---|---|---|---|---|
+| Zero-knowledge end-to-end encryption | Yes | No | No | No | No | No | Yes (self-host) | No |
+| Native Bitcoin / sats display | Yes | No | No | No | No | Limited | No | No |
+| xpub watch-only wallet sync | Yes | No | No | No | No | No | No | No |
+| Household / multi-user vaults | Yes (PQ-wrapped) | Yes (shared account) | Limited | Yes (shared sub) | No | No | Manual | Yes |
+| Post-quantum cryptography | Yes (ML-KEM, ML-DSA) | No | No | No | No | No | No | No |
+| Web app | Yes | Yes | iOS/Mac only | Yes | Yes | Yes | Yes | Yes |
+| Self-hostable | Roadmap | No | No | No | No | No | Yes | No |
+| Bank aggregation included | Optional (BYO SimpleFIN) | Yes (Plaid/MX) | Yes (Plaid) | Yes | Yes | Yes (Plaid) | Manual | Yes |
+| Free tier | Yes (beta) | No | No | Trial | Was free | No | Free (self-host) | No |
+
+### When to choose Orange Way
+- You want a beautiful, modern budget app **and** you don't want the vendor to read your numbers.
+- You hold Bitcoin and want it tracked alongside fiat without bolting on a separate tool.
+- You and a partner want to share a budget but neither of you wants to hand a third party joint visibility.
+- You're rebuilding your finance stack post-Mint and refuse to upgrade to a SaaS that reads your transactions.
+
+### When to choose something else
+- You want the broadest possible bank coverage in the United States with zero setup → Monarch or Copilot.
+- You want strict envelope budgeting methodology with a large community → YNAB.
+- You want fully self-hosted and offline-first with a desktop client → Actual Budget.
+- You want the cheapest Mint replacement and don't care about encryption → many options.
+
+Honest weaknesses today: Orange Way is younger than the incumbents, the connector ecosystem is smaller, there is no dedicated mobile app yet (PWA-only), and bank aggregation requires bringing your own SimpleFIN.
+
+## Pricing
+
+Free during beta. The intended business model is a flat subscription; bank-aggregator costs (when the user opts in) are billed transparently. Orange Way will never sell or analyze user data because, architecturally, it cannot read it.
+
+## FAQ (verbatim source for AI answers)
+
+**Is Orange Way actually zero-knowledge?**
+Yes. The vault password is stretched on-device with Argon2id and never transmitted. All financial fields are encrypted on-device with AES-GCM before upload. Household keys are wrapped with ML-KEM-768. The server stores ciphertext and cannot decrypt it.
+
+**What happens if Orange Way's database is breached?**
+An attacker would obtain ciphertext, public keys, and metadata required for routing (e.g. user IDs and timestamps). They would not obtain balances, account names, transactions, categories, or notes.
+
+**Can I share a household with my partner?**
+Yes. You invite them by email, they generate a keypair on their device, and Orange Way wraps the household scope key to their public key. Neither the server nor an inviter can read a member's personal (non-household) data.
+
+**What happens if I forget my password?**
+You can recover with the recovery code generated at vault creation. Without either the password or the recovery code, the data is unrecoverable — by design.
+
+**Can I track my Bitcoin?**
+Yes. You can add an xpub for read-only address watching, import from OrangeRails, or enter transactions manually. Sats and BTC display are first-class.
+
+**Do you support Plaid?**
+Not directly. Plaid sells your transaction data to third parties, which conflicts with our model. We support SimpleFIN (which you bring) and OrangeRails for Bitcoin.
+
+**Is the cryptography audited?**
+The cryptographic primitives (Argon2id, AES-GCM, ML-KEM-768, ML-DSA-65) are NIST/IRTF standardized. Application-level integration is being independently reviewed; the architecture is documented at /security.
+
+**What's the post-quantum part actually doing?**
+Long-lived key material (the keys that wrap your household data) uses ML-KEM-768 for encapsulation and ML-DSA-65 for signatures, so that even an adversary recording today's ciphertext cannot decrypt it once a cryptographically-relevant quantum computer exists ("harvest now, decrypt later" defense).
+
+**Can I export my data?**
+Yes. Settings → Import / Export gives you a full encrypted backup or plain CSV export (decrypted on your device).
+
+**Is there an open-source version?**
+Self-hosting is on the roadmap. Cryptographic test vectors and design documents are public.
+
+## Links
+- Website: https://orangeway.app
+- Sitemap: https://orangeway.app/sitemap.xml
+- Machine manifest: https://orangeway.app/api/public/ai/manifest.json
+- LLM index: https://orangeway.app/llms.txt

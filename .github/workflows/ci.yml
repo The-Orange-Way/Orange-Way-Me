@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, prod]
+  push:
+    branches: [dev, prod]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    name: Lint + build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The project is managed with Bun (bun.lockb, bunfig.toml).
+      # bun.lockb is the single source of truth for dependency versions.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Lint
+        # After the 2026-05-27 cleanup the codebase has 0 eslint errors.
+        # Lint now blocks merges on any new error. Warnings don't block
+        # (~128 react-hooks v5 strict-rule warnings remain, slated for
+        # gradual migration — see eslint.config.js for the rationale).
+        run: bun run lint
+
+      - name: Build
+        run: bun run build
+
+      - name: Test
+        run: bun run test
