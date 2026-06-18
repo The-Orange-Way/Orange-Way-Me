@@ -1,0 +1,713 @@
+/**
+ * Vault crypto primitives (zero-knowledge layer).
+ *
+ * Responsibilities:
+ *   - Derive a Master Encryption Key (MEK) from the user's vault password
+ *     using PBKDF2 + SHA-256, 600,000 iterations (OWASP 2023+).
+ *   - AES-256-GCM authenticated encryption for individual fields and blobs.
+ *   - HMAC-SHA-256 blind indexes derived from the MEK via HKDF, so we can
+ *     search encrypted columns (merchant, category) without exposing them.
+ *   - A "verifier" plaintext that we encrypt at vault-creation time and
+ *     try to decrypt on unlock — confirming the password without ever
+ *     transmitting it.
+ *   - A 12-word BIP-39-style recovery code that wraps a copy of the MEK,
+ *     so a forgotten vault password can be recovered without a server-side
+ *     escrow.
+ *
+ * Wire format (encryptText / encryptBlob):
+ *   base64( iv[12] || ciphertext || gcm_tag[16] )
+ *
+ * The MEK is held only as a non-extractable CryptoKey in memory; it is
+ * NEVER serialized, NEVER sent to the server, NEVER written to storage.
+ */
+
+import { argon2id } from "hash-wasm";
+
+const PBKDF2_ITERATIONS = 600_000;
+const HMAC_HKDF_LABEL = "bbp-hmac-v1";
+const RECOVERY_HKDF_LABEL = "bbp-recovery-v1";
+export const VAULT_VERIFIER_PLAINTEXT = "BITBOOKS_PERSONAL_VAULT_V1";
+/**
+ * Minimum password length enforced at vault CREATION by UI components.
+ * NOT enforced inside derive* functions — those must remain usable for
+ * unlocking legacy vaults (and decrypting legacy backup files) that were
+ * created under a looser policy.
+ */
+export const MIN_VAULT_PASSWORD_LENGTH = 14;
+
+// Argon2id parameters (OWASP 2023 recommended tier).
+// 64 MiB memory × 3 iterations × 4 parallelism gives ~500 ms on a modern
+// laptop and is >10,000× harder to attack on GPU/ASIC than PBKDF2-SHA256.
+const ARGON2ID_MEMORY_KIB = 64 * 1024; // 64 MiB
+const ARGON2ID_ITERATIONS = 3;
+const ARGON2ID_PARALLELISM = 4;
+
+// ---------- helpers ----------
+
+function b64encode(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function b64decode(s: string): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+export function randomBytes(length: number): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(length));
+}
+
+export function randomBytesB64(length: number): string {
+  return b64encode(randomBytes(length));
+}
+
+// ---------- key derivation ----------
+
+/**
+ * Derive a non-extractable AES-256-GCM CryptoKey from a vault password +
+ * a per-user salt (base64). Iterations default to 600k.
+ */
+export async function deriveMek(
+  password: string,
+  saltB64: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<CryptoKey> {
+  // Intentionally no minimum-length check here — this path is shared between
+  // vault creation and unlocking existing (possibly legacy) vaults. The
+  // creation-time policy (MIN_VAULT_PASSWORD_LENGTH) is enforced at the UI layer.
+  if (typeof password !== "string" || password.length === 0) {
+    throw new Error("Vault password is required");
+  }
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveKey", "deriveBits"],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: b64decode(saltB64) as BufferSource,
+      iterations,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
+ * Derive an HMAC-SHA-256 key from the MEK via HKDF using a fixed label.
+ * Used for blind-index columns (hmac_merchant, hmac_category).
+ *
+ * The MEK CryptoKey is non-extractable, so we re-derive raw bits from the
+ * password directly via PBKDF2 + HKDF rather than exporting the MEK.
+ * Caller passes the same password + salt that produced the MEK.
+ */
+export async function deriveHmacKey(
+  password: string,
+  saltB64: string,
+  hmacSaltB64: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<CryptoKey> {
+  // Derive 32 raw bytes via PBKDF2 (we cannot export the AES MEK).
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const ikm = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: b64decode(saltB64) as BufferSource,
+      iterations,
+      hash: "SHA-256",
+    },
+    baseKey,
+    256,
+  );
+  // HKDF expand into a dedicated HMAC subkey.
+  const hkdfKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: b64decode(hmacSaltB64) as BufferSource,
+      info: new TextEncoder().encode(HMAC_HKDF_LABEL),
+    },
+    hkdfKey,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+}
+
+/**
+ * Derive a recovery KEK from a recovery code (the 12-word string).
+ * Uses PBKDF2 with a fixed app-wide salt label — recovery codes have
+ * ~128 bits of entropy on their own, so the salt is just domain
+ * separation, not a secret.
+ */
+export async function deriveRecoveryKek(recoveryCode: string): Promise<CryptoKey> {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(recoveryCode.trim().toLowerCase()),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: new TextEncoder().encode(RECOVERY_HKDF_LABEL) as BufferSource,
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+// ---------- AES-GCM encrypt / decrypt ----------
+
+export async function encryptText(plaintext: string, key: CryptoKey): Promise<string> {
+  const iv = randomBytes(12);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    new TextEncoder().encode(plaintext),
+  );
+  const combined = new Uint8Array(12 + ct.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(ct), 12);
+  return b64encode(combined);
+}
+
+export async function decryptText(ciphertextB64: string, key: CryptoKey): Promise<string> {
+  const combined = b64decode(ciphertextB64);
+  if (combined.length < 12) throw new Error("Invalid ciphertext");
+  const iv = combined.slice(0, 12);
+  const data = combined.slice(12);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, data);
+  return new TextDecoder().decode(pt);
+}
+
+export async function encryptBlob(
+  plaintext: ArrayBuffer | Uint8Array,
+  key: CryptoKey,
+): Promise<Blob> {
+  const iv = randomBytes(12);
+  const bytes = plaintext instanceof ArrayBuffer ? new Uint8Array(plaintext) : plaintext;
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource },
+    key,
+    bytes as BufferSource,
+  );
+  const combined = new Uint8Array(12 + ct.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(ct), 12);
+  return new Blob([combined], { type: "application/octet-stream" });
+}
+
+export async function decryptBlob(
+  ciphertext: Blob | ArrayBuffer,
+  key: CryptoKey,
+): Promise<ArrayBuffer> {
+  const buf = ciphertext instanceof Blob ? await ciphertext.arrayBuffer() : ciphertext;
+  const combined = new Uint8Array(buf);
+  if (combined.length < 12) throw new Error("Invalid ciphertext blob");
+  const iv = combined.slice(0, 12);
+  const data = combined.slice(12);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, data);
+}
+
+// ---------- HMAC blind indexes ----------
+
+/**
+ * Compute a base64-encoded HMAC-SHA-256 of the lowercased input.
+ * Use for blind-index columns so equality-search works without
+ * leaking plaintext.
+ */
+export async function blindIndex(input: string, hmacKey: CryptoKey): Promise<string> {
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    hmacKey,
+    new TextEncoder().encode(input.trim().toLowerCase()),
+  );
+  return b64encode(new Uint8Array(sig));
+}
+
+// ---------- recovery code (12-word BIP-39-style) ----------
+
+// Short, friendly wordlist — not full BIP-39, but ~2048-ish entropy when
+// combined into 12 words gives ≥ 128 bits.
+
+/**
+ * Generate a 12-word recovery code using the full EFF Large Wordlist
+ * (7,776 words). Each word is uniformly chosen using rejection sampling
+ * over crypto.getRandomValues(Uint32Array) — no modulo bias.
+ *
+ * log2(7776) * 12 ≈ 155 bits of entropy — exceeds BIP-39 (132 bits)
+ * and is gated by the same PBKDF2 / Argon2id work factor as the vault
+ * password itself.
+ *
+ * Backwards compatibility: existing recovery codes (generated with the
+ * earlier 251-word implementation) keep unlocking their vaults. This
+ * function's output is treated as opaque passphrase input to PBKDF2,
+ * so the distribution of words has no effect on existing-vault recovery.
+ *
+ * ZKA invariant: the returned code is only ever user-facing passphrase
+ * input. Never log it. Never transmit it.
+ */
+export async function generateRecoveryCode(): Promise<string> {
+  const mod = await import("@/assets/eff-wordlist.json");
+  const words = (mod.default ?? mod) as string[];
+  if (!Array.isArray(words) || words.length !== 7776) {
+    throw new Error(
+      `EFF wordlist integrity check failed: expected 7776 words, got ${
+        Array.isArray(words) ? words.length : typeof words
+      }`,
+    );
+  }
+
+  const NEED = 12;
+  const n = words.length; // 7776
+  // Largest multiple of n that fits in uint32. Values >= max would create
+  // modulo bias when reduced via `r % n`, so we reject them and re-roll.
+  // Probability of rejection per draw: (2^32 - max) / 2^32 ≈ 6e-7.
+  const max = Math.floor(0x100000000 / n) * n;
+
+  const out: string[] = [];
+  while (out.length < NEED) {
+    const buf = new Uint32Array(NEED - out.length);
+    crypto.getRandomValues(buf);
+    for (const r of buf) {
+      if (r < max) {
+        out.push(words[r % n]);
+        if (out.length === NEED) break;
+      }
+    }
+  }
+  return out.join(" ");
+}
+
+/**
+ * Wrap raw MEK bytes with a recovery KEK so a forgotten password can
+ * be recovered. We export the MEK material from raw bytes the caller
+ * provides (caller derives once, uses both for the AES key import and
+ * for this wrap).
+ */
+export async function wrapMekWithRecovery(
+  mekRawBytes: ArrayBuffer,
+  recoveryCode: string,
+): Promise<string> {
+  const kek = await deriveRecoveryKek(recoveryCode);
+  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+}
+
+export async function unwrapMekWithRecovery(
+  wrappedB64: string,
+  recoveryCode: string,
+): Promise<Uint8Array> {
+  const kek = await deriveRecoveryKek(recoveryCode);
+  const b64 = await decryptText(wrappedB64, kek);
+  return b64decode(b64);
+}
+
+/**
+ * Derive raw MEK bytes (32) from password + salt — used only at vault
+ * creation time so we can wrap them with the recovery KEK. We never
+ * keep these bytes around after wrapping.
+ */
+export async function deriveMekRawBytes(
+  password: string,
+  saltB64: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<ArrayBuffer> {
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  return crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: b64decode(saltB64) as BufferSource,
+      iterations,
+      hash: "SHA-256",
+    },
+    baseKey,
+    256,
+  );
+}
+
+/** Import 32 raw bytes as a non-extractable AES-256-GCM key. */
+export async function importMekFromRaw(rawBytes: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    rawBytes as BufferSource,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+// ---------- password-based MEK wrap/unwrap (new vault architecture) ----------
+
+/**
+ * Wrap raw MEK bytes with a password-derived KEK (AES-GCM).
+ * Stored as `enc_mek_ciphertext` in vault_metadata. This decouples the MEK
+ * from the password, so changing the vault password does NOT invalidate
+ * any encrypted data — only this wrapper changes.
+ */
+export async function wrapMekWithPassword(
+  mekRawBytes: ArrayBuffer,
+  password: string,
+  saltB64: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<string> {
+  const kek = await deriveMek(password, saltB64, iterations);
+  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+}
+
+export async function unwrapMekWithPassword(
+  ciphertextB64: string,
+  password: string,
+  saltB64: string,
+  iterations: number = PBKDF2_ITERATIONS,
+): Promise<Uint8Array> {
+  const kek = await deriveMek(password, saltB64, iterations);
+  const b64 = await decryptText(ciphertextB64, kek);
+  return b64decode(b64);
+}
+
+/**
+ * Generate and encrypt a 32-byte HMAC key with the MEK.
+ * Stored as `enc_hmac_key` in vault_metadata. Decouples HMAC key from the
+ * vault password, so blind indexes stay valid after a password change.
+ */
+export async function createEncryptedHmacKey(
+  mek: CryptoKey,
+): Promise<{ raw: Uint8Array; ciphertext: string }> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const ciphertext = await encryptText(b64encode(raw), mek);
+  return { raw, ciphertext };
+}
+
+export async function decryptHmacKey(ciphertextB64: string, mek: CryptoKey): Promise<CryptoKey> {
+  const b64 = await decryptText(ciphertextB64, mek);
+  const raw = b64decode(b64);
+  return crypto.subtle.importKey(
+    "raw",
+    raw as BufferSource,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+}
+
+// ---------- Argon2id key derivation (vault key version 3) ----------
+
+/**
+ * Derive 32 raw bytes from a password + salt using Argon2id.
+ *
+ * Argon2id (RFC 9106) is memory-hard, which defeats the GPU/ASIC brute-force
+ * advantage PBKDF2 suffers from. At the parameters below, a single attempt
+ * costs ~500 ms and ~64 MiB of RAM per core on a modern CPU — and that cost
+ * does not drop on specialized hardware.
+ */
+export async function deriveMekRawBytesArgon2id(
+  password: string,
+  saltB64: string,
+): Promise<ArrayBuffer> {
+  if (typeof password !== "string" || password.length === 0) {
+    throw new Error("Vault password is required");
+  }
+  const hex = await argon2id({
+    password: new TextEncoder().encode(password),
+    salt: b64decode(saltB64),
+    iterations: ARGON2ID_ITERATIONS,
+    memorySize: ARGON2ID_MEMORY_KIB,
+    parallelism: ARGON2ID_PARALLELISM,
+    hashLength: 32,
+    outputType: "hex",
+  });
+  // Convert hex string to ArrayBuffer.
+  const len = hex.length / 2;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes.buffer;
+}
+
+/**
+ * Derive a non-extractable AES-256-GCM CryptoKey from a password + salt
+ * using Argon2id. The raw key bytes are used only to import the CryptoKey
+ * and are discarded immediately afterward.
+ */
+export async function deriveMekArgon2id(password: string, saltB64: string): Promise<CryptoKey> {
+  const raw = await deriveMekRawBytesArgon2id(password, saltB64);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+/**
+ * Wrap raw MEK bytes under an Argon2id-derived KEK. Used at vault creation
+ * (v3 vaults) and at upgrade (v2 → v3) to re-wrap the existing MEK without
+ * re-encrypting any data.
+ */
+export async function wrapMekWithPasswordArgon2id(
+  mekRawBytes: ArrayBuffer,
+  password: string,
+  saltB64: string,
+): Promise<string> {
+  const kek = await deriveMekArgon2id(password, saltB64);
+  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+}
+
+export async function unwrapMekWithPasswordArgon2id(
+  ciphertextB64: string,
+  password: string,
+  saltB64: string,
+): Promise<Uint8Array> {
+  const kek = await deriveMekArgon2id(password, saltB64);
+  const b64 = await decryptText(ciphertextB64, kek);
+  return b64decode(b64);
+}
+
+// ---------- OrangeRails subkey derivation (cross-app Bitcoin sync) ----------
+//
+// Orange Way is a platform consumer of OrangeRails. Provider credentials
+// (e.g. Blink API keys) and synced transactions are encrypted in the
+// browser before they ever reach OR's database, using two AES-256-GCM
+// subkeys derived deterministically from the user's vault password.
+//
+// Why a separate derivation (not the vault MEK):
+//   - The vault MEK changes shape across versions (v2 = PBKDF2, v3 = direct
+//     Argon2id, future v4 = random + wrapped). Upgrading vault would
+//     otherwise invalidate all stored OR ciphertexts.
+//   - The per-user `kdf_salt` (vault_metadata.kdf_salt) acts as the salt
+//     context for this namespace.
+//
+// HKDF info strings ('orangerails-creds-v1', 'orangerails-txns-v1') and
+// the salt-context format MUST stay byte-identical to the OR wire contract —
+// OR's edge functions verify ciphertext shape against this exact format.
+//
+// Cost: one extra Argon2id call (~500 ms) per vault unlock. Acceptable
+// for the durability gain.
+
+/**
+ * Derive 32 raw bytes that act as the OR-namespaced "MEK". Stable across
+ * vault key-version upgrades (v2 PBKDF2 → v3 Argon2id → v4 wrapped).
+ *
+ * @param password         User's vault password (never leaves the browser).
+ * @param userId           Supabase auth user.id (uuid string).
+ * @param userVaultSaltB64 Per-user random salt — stored in
+ *                         vault_metadata.kdf_salt.
+ */
+export async function deriveOrMekBytes(
+  password: string,
+  userId: string,
+  userVaultSaltB64: string,
+): Promise<Uint8Array> {
+  if (typeof password !== "string" || password.length === 0) {
+    throw new Error("Vault password is required");
+  }
+  const encoder = new TextEncoder();
+  const saltBytes = encoder.encode("bitbooks-or-mek-v1:" + userId + ":" + userVaultSaltB64);
+  const hashBytes = await argon2id({
+    password: encoder.encode(password),
+    salt: saltBytes,
+    memorySize: ARGON2ID_MEMORY_KIB,
+    iterations: ARGON2ID_ITERATIONS,
+    parallelism: ARGON2ID_PARALLELISM,
+    hashLength: 32,
+    outputType: "binary",
+  });
+  return hashBytes;
+}
+
+async function deriveOrSubkey(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+  hkdfInfo: string,
+): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const saltBytes = encoder.encode("bitbooks-or:" + userVaultSaltB64);
+  const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
+    "deriveBits",
+  ]);
+  const rawBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBytes as BufferSource,
+      info: encoder.encode(hkdfInfo) as BufferSource,
+    },
+    mekAsHkdf,
+    256,
+  );
+  return crypto.subtle.importKey("raw", rawBits, { name: "AES-GCM" }, /* extractable */ true, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+/** Subkey for encrypting connection labels + provider credentials. */
+export async function deriveOrCredsKeyFromMek(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+): Promise<CryptoKey> {
+  return deriveOrSubkey(mekRaw, userVaultSaltB64, "orangerails-creds-v1");
+}
+
+/** Subkey for encrypting synced transaction payloads. */
+export async function deriveOrTxnsKeyFromMek(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+): Promise<CryptoKey> {
+  return deriveOrSubkey(mekRaw, userVaultSaltB64, "orangerails-txns-v1");
+}
+
+/**
+ * Derive the raw 32-byte OPK seed (NOT an AES key) from the OR MEK. Feeds
+ * libsodium crypto_box_seed_keypair to produce the X25519 keypair OR seals
+ * background-synced bank transactions to. Same OR-subkey HKDF family as
+ * creds/txns (salt prefix "bitbooks-or:") so it regenerates deterministically
+ * on every unlock with no separate storage.
+ */
+export async function deriveOrOpkSeedFromMek(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+): Promise<Uint8Array> {
+  const encoder = new TextEncoder();
+  const saltBytes = encoder.encode("bitbooks-or:" + userVaultSaltB64);
+  const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
+    "deriveBits",
+  ]);
+  const rawBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBytes as BufferSource,
+      info: encoder.encode("orangerails-opk-seed-v1") as BufferSource,
+    },
+    mekAsHkdf,
+    256,
+  );
+  return new Uint8Array(rawBits);
+}
+
+// ---------- KDF strategy map (Open/Closed Principle extension point) ----------
+
+export type VaultKeyVersion = 2 | 3;
+export const CURRENT_VAULT_KEY_VERSION: VaultKeyVersion = 3;
+
+export interface KeyDerivationStrategy {
+  deriveMek: (password: string, saltB64: string) => Promise<CryptoKey>;
+  deriveMekRawBytes: (password: string, saltB64: string) => Promise<ArrayBuffer>;
+  wrapMekWithPassword: (mek: ArrayBuffer, password: string, saltB64: string) => Promise<string>;
+  unwrapMekWithPassword: (ct: string, password: string, saltB64: string) => Promise<Uint8Array>;
+}
+
+/**
+ * Strategy map keyed by vault_key_version. New versions (e.g. v4 with
+ * scrypt or a future memory-hard KDF) plug in here without touching the
+ * VaultContext unlock/upgrade flow.
+ *
+ * The v2 adapters bind the default PBKDF2 iteration count (600k) so the
+ * strategy surface matches across versions.
+ */
+export const KEY_DERIVATION_STRATEGIES: Record<VaultKeyVersion, KeyDerivationStrategy> = {
+  2: {
+    deriveMek: (password, saltB64) => deriveMek(password, saltB64, PBKDF2_ITERATIONS),
+    deriveMekRawBytes: (password, saltB64) =>
+      deriveMekRawBytes(password, saltB64, PBKDF2_ITERATIONS),
+    wrapMekWithPassword: (mek, password, saltB64) =>
+      wrapMekWithPassword(mek, password, saltB64, PBKDF2_ITERATIONS),
+    unwrapMekWithPassword: (ct, password, saltB64) =>
+      unwrapMekWithPassword(ct, password, saltB64, PBKDF2_ITERATIONS),
+  },
+  3: {
+    deriveMek: deriveMekArgon2id,
+    deriveMekRawBytes: deriveMekRawBytesArgon2id,
+    wrapMekWithPassword: wrapMekWithPasswordArgon2id,
+    unwrapMekWithPassword: unwrapMekWithPasswordArgon2id,
+  },
+};
+
+// ============================================================================
+// Orange Rails adapter exports — Phase 4.0
+// ----------------------------------------------------------------------------
+// These re-exports (and thin wrappers) expose Orange Way's native vault
+// primitives under the names that Orange Rails' pqc-lifecycle.ts,
+// co-admin.ts, and key-derivation.ts import. This keeps those files
+// byte-identical across the two consumers.
+//
+// Do NOT add new logic here — only name translations over existing exports.
+// ============================================================================
+
+/** OR alias for encryptText — identical semantics (AES-256-GCM). */
+export const encryptString = encryptText;
+
+/** OR alias for decryptText — identical semantics (AES-256-GCM). */
+export const decryptString = decryptText;
+
+/**
+ * OR alias for deriveMekRawBytes, returning Uint8Array instead of
+ * ArrayBuffer to match OR's signature (deriveMekRaw: Uint8Array). The
+ * underlying Argon2id path is the same — the only shape difference is the
+ * view wrapping the same bytes.
+ *
+ * OR's deriveMekRaw uses a single-argument (password, salt) signature
+ * under Argon2id v3 parameters, which matches deriveMekRawBytesArgon2id
+ * byte-for-byte. We route through the Argon2id variant so the co-admin
+ * grant flow uses the vault's current KDF (v3), not the legacy PBKDF2 path.
+ */
+export async function deriveMekRaw(password: string, saltB64: string): Promise<Uint8Array> {
+  const buf = await deriveMekRawBytesArgon2id(password, saltB64);
+  return new Uint8Array(buf);
+}
+
+/**
+ * OR alias for importing 32 raw bytes as an extractable AES-256-GCM key.
+ * OR's importAesKey takes ArrayBuffer and returns an extractable key so
+ * HKDF-derived subkeys can be handed to sync edge functions in-transit.
+ * importMekFromRaw is non-extractable by design, so this wrapper uses
+ * the raw WebCrypto call directly (matching OR's exact behaviour).
+ */
+export async function importAesKey(rawBytes: ArrayBuffer): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", rawBytes, { name: "AES-GCM" }, /* extractable */ true, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+/**
+ * OR alias for importing 32 raw bytes as a non-extractable AES-256-GCM key.
+ * Equivalent to importMekFromRaw but accepts ArrayBuffer (OR's signature)
+ * in addition to Uint8Array. Used for verifier subkeys that must never
+ * leave the browser as raw bytes.
+ */
+export async function importAesKeyNonExtractable(rawBytes: ArrayBuffer): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", rawBytes, { name: "AES-GCM" }, /* extractable */ false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
