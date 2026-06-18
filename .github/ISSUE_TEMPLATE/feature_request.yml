@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a new capability, workflow, or integration.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We prioritize features that strengthen the zero-knowledge story or close a real personal-finance gap. Help us understand both.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the household pain, not the solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you solve it? Sketch the UX or API if useful.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Frontend (UI / workflow)
+        - Supabase schema or RLS
+        - Encryption / vault
+        - Aggregator / OrangeRails integration
+        - Bitcoin reporting
+        - Docs or onboarding
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What alternatives did you consider?
+
+  - type: checkboxes
+    id: zka
+    attributes:
+      label: Zero-knowledge check
+      description: Does this proposal require the server to read data it currently cannot?
+      options:
+        - label: My proposal keeps sensitive data encrypted client-side.
+        - label: My proposal would require the server to read new fields — I've explained why in the description.
