@@ -1,0 +1,84 @@
+# Orange Way — robots.txt
+# Marketing pages are crawlable; the authenticated app is not.
+
+User-agent: *
+Allow: /$
+Allow: /features
+Allow: /security
+Allow: /bitcoin
+Allow: /households
+Allow: /compare
+Allow: /pricing
+Allow: /faq
+Allow: /about
+Allow: /privacy
+Allow: /terms
+Allow: /changelog
+Allow: /ai
+Allow: /llms.txt
+Allow: /llms-full.txt
+Allow: /api/public/ai/manifest.json
+Disallow: /auth
+Disallow: /dashboard
+Disallow: /transactions
+Disallow: /accounts
+Disallow: /accounts/
+Disallow: /budgets
+Disallow: /goals
+Disallow: /goals/
+Disallow: /wallets
+Disallow: /wallets/
+Disallow: /connections
+Disallow: /settings
+Disallow: /settings/
+
+# Explicitly allow modern AI crawlers
+User-agent: GPTBot
+Allow: /
+Disallow: /auth
+Disallow: /dashboard
+Disallow: /transactions
+Disallow: /accounts
+Disallow: /budgets
+Disallow: /goals
+Disallow: /wallets
+Disallow: /connections
+Disallow: /settings
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+Sitemap: https://orangeway.app/sitemap.xml
