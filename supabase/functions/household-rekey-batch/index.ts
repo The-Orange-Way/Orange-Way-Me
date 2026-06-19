@@ -54,6 +54,38 @@ const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
 const MAX_BATCH_SIZE_ROWS = 500;
 const MAX_BATCH_SIZE_WRAPS = 200;
 
+/**
+ * Map a Postgres SQLSTATE (and best-effort message) to a short generic
+ * label that's safe to echo back to a client. Postgres error messages
+ * embed table names, constraint names, and column types: useful
+ * reconnaissance for an attacker probing for the next bypass. The
+ * SQLSTATE itself is documented and stable.
+ *
+ * Keep this list small. The caller of household-rekey-batch is the user's
+ * own browser performing a key rotation it initiated, so they don't need
+ * a detailed error to recover; a brief category is enough.
+ */
+function sanitizeDbError(code: string | undefined, raw: string): string {
+  switch (code) {
+    case "23505":
+      return "row already exists";
+    case "23503":
+      return "referenced row missing";
+    case "23502":
+      return "required value missing";
+    case "42501":
+      return "permission denied";
+    case "PGRST116":
+      return "row not found";
+    default:
+      // No SQLSTATE match: refuse to leak the raw message. The full text
+      // is still written to the edge function's own stdout for operators
+      // (see console.warn above this call site).
+      void raw;
+      return "update failed";
+  }
+}
+
 // Whitelist of shared tables that accept rekey_rows updates. Any other
 // value is rejected so a malicious client cannot overwrite arbitrary
 // rows.
@@ -394,7 +426,15 @@ async function handleRekeyRows(
       .eq("id", u.row_id)
       .eq("household_id", job.household_id);
     if (error) {
-      failedRows.push({ table: u.table, row_id: u.row_id, error: error.message });
+      // Do NOT echo the raw Postgres error message back to the client. It
+      // leaks table names, column names, and constraint names that an
+      // attacker can use as reconnaissance for the next bypass attempt.
+      // Map the Postgres SQLSTATE to a short generic label instead.
+      failedRows.push({
+        table: u.table,
+        row_id: u.row_id,
+        error: sanitizeDbError(error.code, error.message),
+      });
     } else {
       applied += 1;
     }
