@@ -1,0 +1,66 @@
+# Cloudflare Pages reads this file at deploy time and sets the listed
+# headers on every matching response. Documentation:
+#   https://developers.cloudflare.com/pages/configuration/headers/
+#
+# Tagged with finding #8 of the 2026-06-19 ZKA audit. Without explicit
+# headers the deploy falls back to Cloudflare's defaults; that's TLS-OK
+# but leaves Content-Security-Policy, HSTS preload, and X-Frame-Options
+# off, which a future XSS or clickjacking attempt would exploit.
+
+/*
+  # Force HTTPS for one year on every subdomain. The preload directive
+  # is what unlocks inclusion in the browser-bundled HSTS preload list
+  # (so the very first visit is also TLS-only). orangeway.dev is already
+  # in the .dev TLD's preload list; orangeway.app needs the header.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+  # Refuse to be put inside an iframe by another origin. Combined with
+  # CSP frame-ancestors below; both are honoured by modern browsers,
+  # so this is belt-and-suspenders for older clients.
+  X-Frame-Options: DENY
+
+  # Refuse to be MIME-sniffed into running JS as something else.
+  X-Content-Type-Options: nosniff
+
+  # Don't ship full URLs to other origins on navigation. Same-origin
+  # gets the path, cross-origin gets only the origin.
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Browsers default these to "everywhere allowed" if absent. Lock them
+  # off for surfaces the app doesn't use. (Reopen explicitly if a future
+  # feature needs them.)
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+
+  # Content-Security-Policy. The allowlist is the union of every
+  # external host the runtime actually reaches:
+  #
+  #   self                       this origin
+  #   fonts.googleapis.com       Google Fonts CSS
+  #   fonts.gstatic.com          Google Fonts woff2 files
+  #   eu.i.posthog.com           PostHog product analytics (cookieless)
+  #   *.supabase.co              Supabase REST + auth + functions
+  #   wss://*.supabase.co        Supabase realtime
+  #   pulse.orangeway.app        Self-hosted GlitchTip (Sentry protocol)
+  #   feedback.orangeway.app     Public feedback widget endpoint
+  #   mempool.space              Bitcoin price feed
+  #
+  # Notes on what looks loose but is intentional:
+  #   * 'wasm-unsafe-eval' in script-src — libsodium-wrappers-sumo runs
+  #     as WebAssembly. Without this directive, the AEAD primitives
+  #     refuse to load.
+  #   * 'unsafe-inline' in style-src — shadcn/ui + Tailwind utility
+  #     classes attach inline styles via the style attribute. Removing
+  #     this needs a nonce-pass on every styled component (separate PR).
+  #   * img-src data: https: — covers favicons, base64 thumbnails, and
+  #     PostHog's pixel; an attacker who controlled a remote image host
+  #     would still be sandboxed by the rest of the CSP.
+  #   * frame-ancestors 'none' — same intent as X-Frame-Options DENY.
+  #   * base-uri 'self' — prevents <base> hijacking that could rewrite
+  #     all relative URLs to point at an attacker origin.
+  #   * form-action 'self' — forms can only post back here.
+  #
+  # report-uri is intentionally not set; CSP violations show up in the
+  # browser console during dev, and adding a reporting endpoint to a
+  # public site costs noise without buying much over our existing error
+  # tracking. Revisit if we ship a real CSP violation dashboard.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://eu.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://eu.i.posthog.com https://*.supabase.co wss://*.supabase.co https://pulse.orangeway.app https://feedback.orangeway.app https://mempool.space; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
