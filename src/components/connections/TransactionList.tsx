@@ -67,7 +67,7 @@ interface DisplayTx {
 export interface TransactionListProps {
   /** The OR connection these transactions belong to. Used for mapping lookup. */
   orConnectionId: string;
-  /** Caller invokes the bb-or-proxy `or-transactions-list` endpoint and filters by connection. */
+  /** Caller invokes the ow-or-proxy `or-transactions-list` endpoint and filters by connection. */
   fetchEncrypted: () => Promise<EncryptedTxRow[]>;
   /** Decrypts a single encrypted_payload (base64 IV+ciphertext) using ORT. */
   decrypt: (ciphertext: string) => Promise<string>;

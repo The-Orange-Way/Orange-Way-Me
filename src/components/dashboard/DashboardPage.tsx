@@ -25,7 +25,7 @@ import { monthRange } from "@/lib/date-ranges";
  *  household defaults? Set once per user so a manual chip override stays
  *  intact across reloads. */
 function seededKey(userId: string | undefined): string {
-  return `bitbooks.prefsSeededFromHousehold.${userId ?? "anon"}`;
+  return `orangeway.prefsSeededFromHousehold.${userId ?? "anon"}`;
 }
 
 export function DashboardPage() {

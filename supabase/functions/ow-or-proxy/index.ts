@@ -1,5 +1,5 @@
 /**
- * bb-or-proxy — Orange Way ↔ OrangeRails proxy.
+ * ow-or-proxy: the Orange Way to OrangeRails proxy.
  *
  * Orange Way is a Plaid-style platform consumer of OrangeRails. End
  * users never see OR; this proxy holds the OR_PLATFORM_API_KEY
@@ -216,7 +216,7 @@ Deno.serve(async (req: Request) => {
       } catch (mapErr) {
         // Best-effort: don't fail the request if the mapping write
         // hiccups. Next provision call will retry the upsert.
-        console.error("[bb-or-proxy] subaccount map upsert failed:", mapErr);
+        console.error("[ow-or-proxy] subaccount map upsert failed:", mapErr);
       }
     }
 
@@ -225,7 +225,7 @@ Deno.serve(async (req: Request) => {
     // Log the full error server-side for triage; never echo it to the
     // client. `detail: String(err)` previously leaked stack traces and
     // upstream error shapes to anyone who could trigger the catch.
-    console.error("[bb-or-proxy] fatal:", err);
+    console.error("[ow-or-proxy] fatal:", err);
     return jsonResponse({ error: "Internal error" }, 500, cors);
   }
 });

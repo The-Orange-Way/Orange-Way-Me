@@ -26,7 +26,7 @@
  *
  * On verified events we:
  *   1. Resolve user_id from subaccount_id (one subaccount per Orange Way
- *      user, mapped by bb-or-proxy/or-provision when the user first
+ *      user, mapped by ow-or-proxy/or-provision when the user first
  *      connected). Note: Orange Way is per-user, not per-org — compare
  *      V3 which resolves to org_id.
  *   2. Insert a row into public.sync_events. The Connections page
@@ -70,7 +70,7 @@ const service = createClient(SUPABASE_URL, SERVICE_KEY, {
 
 /**
  * Resolve user_id from OR's subaccount_id. The mapping is owned by
- * bb-or-proxy: when a user first calls or-provision, the returned
+ * ow-or-proxy: when a user first calls or-provision, the returned
  * subaccount_id is cached on user_profiles.or_subaccount_id (and in the
  * browser's localStorage). We read the server-side row here.
  *

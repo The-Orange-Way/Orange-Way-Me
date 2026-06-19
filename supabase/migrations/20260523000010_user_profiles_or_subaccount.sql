@@ -8,7 +8,7 @@
 -- Tenancy note: Orange Way is per-user — there is no org table. The
 -- equivalent mapping in V3 lives on `organizations.or_subaccount_id`.
 --
--- Backfill: bb-or-proxy upserts this column on every successful
+-- Backfill: ow-or-proxy upserts this column on every successful
 -- or-provision response (idempotent — subaccount_id is stable per user).
 -- Existing users get backfilled the next time they visit a page that
 -- runs or-provision (Connections, Dashboard with an OR sync, etc.).

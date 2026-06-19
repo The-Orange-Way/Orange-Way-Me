@@ -26,7 +26,7 @@ import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { SUPPORTED_CURRENCIES } from "@/lib/fx-rates";
 
 function dismissKey(userId: string | undefined): string {
-  return `bitbooks.currencyBannerDismissed.${userId ?? "anon"}`;
+  return `orangeway.currencyBannerDismissed.${userId ?? "anon"}`;
 }
 
 /** Subscribe React to localStorage updates for the dismiss flag, scoped
