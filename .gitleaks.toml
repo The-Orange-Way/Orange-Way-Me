@@ -1,0 +1,27 @@
+# Gitleaks configuration for Orange Way Me.
+#
+# We extend the default rules and add an allowlist for confirmed false
+# positives so contributors and CI both see "0 leaks" on a clean tree.
+#
+# To re-scan: gitleaks detect --config .gitleaks.toml --no-banner
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Confirmed false positives — Orange Way Me"
+paths = [
+  # Test fixtures with intentionally-fake credentials
+  '''src/lib/__tests__/key-wrapping\.test\.ts''',
+  '''src/lib/__tests__/vault-upgrade\.test\.ts''',
+  '''src/lib/or/__tests__/widget\.test\.ts''',
+]
+
+# Allowlist specific known-safe constants and public tokens
+regexes = [
+  # Chatwoot websiteToken is public by design (like a GA property ID)
+  '''Token: "kSi4hwVaBkUfr7zhmVdhCwHq"''',
+  # FIPS-204 ML-DSA-65 + hybrid KEM byte-length constants in pqc.ts
+  # — these are SIZES (e.g. 1216, 2432, 1120), not key material
+  '''SECRET_KEY_BYTES =\s+HYBRID_KEM_V1''',
+]
