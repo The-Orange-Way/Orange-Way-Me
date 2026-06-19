@@ -24,9 +24,9 @@
 import { argon2id } from "hash-wasm";
 
 const PBKDF2_ITERATIONS = 600_000;
-const HMAC_HKDF_LABEL = "bbp-hmac-v1";
-const RECOVERY_HKDF_LABEL = "bbp-recovery-v1";
-export const VAULT_VERIFIER_PLAINTEXT = "BITBOOKS_PERSONAL_VAULT_V1";
+const HMAC_HKDF_LABEL = "ow-hmac-v1";
+const RECOVERY_HKDF_LABEL = "ow-recovery-v1";
+export const VAULT_VERIFIER_PLAINTEXT = "ORANGE_WAY_VAULT_V1";
 /**
  * Minimum password length enforced at vault CREATION by UI components.
  * NOT enforced inside derive* functions — those must remain usable for
@@ -530,7 +530,7 @@ export async function deriveOrMekBytes(
     throw new Error("Vault password is required");
   }
   const encoder = new TextEncoder();
-  const saltBytes = encoder.encode("bitbooks-or-mek-v1:" + userId + ":" + userVaultSaltB64);
+  const saltBytes = encoder.encode("ow-or-mek-v1:" + userId + ":" + userVaultSaltB64);
   const hashBytes = await argon2id({
     password: encoder.encode(password),
     salt: saltBytes,
@@ -549,7 +549,7 @@ async function deriveOrSubkey(
   hkdfInfo: string,
 ): Promise<CryptoKey> {
   const encoder = new TextEncoder();
-  const saltBytes = encoder.encode("bitbooks-or:" + userVaultSaltB64);
+  const saltBytes = encoder.encode("ow-or:" + userVaultSaltB64);
   const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
     "deriveBits",
   ]);
@@ -589,7 +589,7 @@ export async function deriveOrTxnsKeyFromMek(
  * Derive the raw 32-byte OPK seed (NOT an AES key) from the OR MEK. Feeds
  * libsodium crypto_box_seed_keypair to produce the X25519 keypair OR seals
  * background-synced bank transactions to. Same OR-subkey HKDF family as
- * creds/txns (salt prefix "bitbooks-or:") so it regenerates deterministically
+ * creds/txns (salt prefix "ow-or:") so it regenerates deterministically
  * on every unlock with no separate storage.
  */
 export async function deriveOrOpkSeedFromMek(
@@ -597,7 +597,7 @@ export async function deriveOrOpkSeedFromMek(
   userVaultSaltB64: string,
 ): Promise<Uint8Array> {
   const encoder = new TextEncoder();
-  const saltBytes = encoder.encode("bitbooks-or:" + userVaultSaltB64);
+  const saltBytes = encoder.encode("ow-or:" + userVaultSaltB64);
   const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
     "deriveBits",
   ]);

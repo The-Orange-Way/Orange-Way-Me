@@ -53,7 +53,7 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
     data: { session },
   } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
-  const res = await supabase.functions.invoke("bb-or-proxy", {
+  const res = await supabase.functions.invoke("ow-or-proxy", {
     body: { endpoint, payload },
   });
   if (res.error) throw new Error(res.error.message || `${endpoint} failed`);
