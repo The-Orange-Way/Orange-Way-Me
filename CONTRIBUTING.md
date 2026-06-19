@@ -17,18 +17,26 @@ bun test        # full suite, ~5s
 
 Validate tests locally before pushing. Pushing untested test assertions is the single biggest source of failure-email noise on this repo. Run `bash scripts/pre-publish-scan.sh` and `bun run test` before every push.
 
-**On a fresh clone, install the pre-push gate:**
+**On a fresh clone, install the git hooks:**
 
 ```bash
 bash scripts/install-hooks.sh
 ```
 
-That wires a `git pre-push` hook into `.git/hooks/pre-push`. Before every push the hook runs `scripts/pre-push-gate.sh`, which refuses the push if any of these fail:
+That wires three local git hooks:
 
-1. The `/pr-this` skill has not been recorded against the current `HEAD` (marker at `.git/.pr-this-ran`)
-2. The pre-publish leak scanner reports anything other than clean
-3. The commits being pushed contain private / internal-only URLs
-4. `gitleaks` reports a secret-shaped string in the prepared commits
+- `pre-push`: runs `scripts/pre-push-gate.sh` before every push and refuses if any of the four checks below fail.
+- `post-commit`: invalidates the `/pr-this` marker on every new commit (a new commit changed HEAD, so the previous gauntlet no longer covers what you're about to push).
+- `post-rewrite`: same invalidation on `git commit --amend`, `git rebase`, etc.
+
+The `pre-push` gate refuses the push if any of these fail:
+
+1. The `/pr-this` skill has not been recorded against the current `HEAD` (marker at `.git/.pr-this-ran` must equal `git rev-parse HEAD`).
+2. The pre-publish leak scanner reports anything other than clean.
+3. The commits being pushed contain private / internal-only URLs (the gate scans for the founder's wiki hostnames, internal Tailscale hosts, internal email addresses, etc.).
+4. `gitleaks` reports a secret-shaped string in the prepared commits.
+
+The marker is written by `scripts/mark-pr-this-ran.sh` as the **last step** of the `/pr-this` skill, so you should never need to write it by hand. If you ever do (true emergency), the script refuses to run on a dirty tree, so the marker can't lie about what was tested.
 
 If a push really must go through (true emergency only), the override is `PR_THIS_BYPASS=1 git push` and the gate emits a loud warning that this happened.
 
