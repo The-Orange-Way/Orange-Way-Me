@@ -14,8 +14,8 @@ import { blindIndexHmac } from "@/lib/blind-index";
 import { DEMO_FAMILIES, type DemoFamily } from "@/lib/demo-families";
 import type { AccountDraft, AccountTypeKey } from "@/lib/connectors";
 
-const FAMILY_KEY = (uid: string) => `bitbooks.demo.family.${uid}`;
-const IDS_KEY = (uid: string) => `bitbooks.demo.ids.${uid}`;
+const FAMILY_KEY = (uid: string) => `orangeway.demo.family.${uid}`;
+const IDS_KEY = (uid: string) => `orangeway.demo.ids.${uid}`;
 
 interface DemoIds {
   accountIds: string[];

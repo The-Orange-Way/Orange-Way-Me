@@ -12,16 +12,35 @@ but you're the only one who has the key — and the key never leaves your head.
 
 ## Encryption stack
 
-### Layer 1 — Password → Key (PBKDF2-SHA256, Argon2id upgrade in progress)
+### Layer 1: Password → Key (Argon2id, with PBKDF2 fallback for legacy vaults)
 
 Your vault password is transformed into a 256-bit Master Encryption Key (MEK)
-using **PBKDF2-SHA256 at 600,000 iterations** — double the OWASP 2023 minimum
-and above any major commercial password manager today.
+using **Argon2id**. The client-side implementation is shipped today; see
+`src/lib/vault.ts` (`deriveMekArgon2id`, `wrapMekWithPasswordArgon2id`).
 
-> **Upgrade path:** The vault library is being updated to Argon2id (64 MiB /
-> 3 iter / 4 thread — OWASP 2023 recommended parameters, already live in
-> OrangeRails). A settings-based migration will let existing vaults upgrade
-> without data loss.
+Argon2id parameters: 64 MiB memory, 3 iterations, 4 lanes. These meet the
+OWASP 2023 recommendation. Memory-hardness shifts the brute-force cost from
+"GPU-friendly bit-twiddling" to "GPU-hostile memory bandwidth", which is the
+specific class of attack PBKDF2 is weak to.
+
+> **A note on parallelism.** The 4-lane setting is conservative for modern
+> 8+ core devices. We could double it to 8 lanes for more parallel work
+> against an offline attacker. We have not: bumping `parallelism` changes
+> the Argon2id output, so a vault created on a 4-lane client cannot be
+> unlocked by an 8-lane client. The right way to raise this is to bump
+> `vault_key_version` and ship a re-key migration that derives the new MEK
+> under the new parameters and re-wraps every existing ciphertext. Tracked
+> as a follow-up next to the PBKDF2 → Argon2id migration RPC.
+
+Legacy vaults created before the Argon2id rollout still derive their MEK with
+**PBKDF2-SHA256 at 600,000 iterations**, double the OWASP 2023 minimum. The
+vault picks the right strategy based on the `vault_key_version` field stored
+next to the vault. Unknown versions fail closed: the client refuses to unlock
+rather than silently downgrade to PBKDF2.
+
+The remaining piece is the server-side migration RPC that lets existing
+vaults move from PBKDF2 to Argon2id on the next password change. Tracked
+as a follow-up.
 
 **Crack-time estimates at current PBKDF2-600k (single RTX 4090):**
 
@@ -72,8 +91,10 @@ encryption and search key-spaces fully independent.
 
 ### Layer 5 — Recovery code
 
-On vault creation, Orange Way generates a **12-word BIP-39-style
-recovery code** (128 bits of entropy). This code:
+On vault creation, Orange Way generates a **12-word recovery code** drawn
+from the EFF Large Wordlist (7,776 words). Twelve words of `log2(7776) ≈
+12.9` bits each gives **~155 bits of entropy**, which exceeds BIP-39's
+132-bit baseline. This code:
 
 - Is shown exactly once (write it down, keep it offline)
 - Is used to derive a recovery KEK (Key Encryption Key)
@@ -143,11 +164,15 @@ random noise.
 
 ## How contributors can help
 
-**1. Argon2id migration**
-OrangeRails has a complete Argon2id implementation in `src/lib/vault.ts`,
-plus a migration orchestrator in `src/lib/vault-migration.ts`. Port both
-to Orange Way's vault setup and create the Supabase RPC for atomic re-key.
-This is the highest-value contribution.
+**1. Server-side Argon2id migration RPC**
+The client-side Argon2id implementation is already shipped in
+`src/lib/vault.ts` (see `deriveMekArgon2id`, `wrapMekWithPasswordArgon2id`).
+What's still open is the Supabase RPC that lets existing PBKDF2 vaults
+re-key atomically: derive the new MEK under Argon2id, re-wrap every
+existing ciphertext with the new MEK, and flip `vault_key_version` on
+success. The client refuses to silently downgrade, so the RPC is the only
+path from a legacy vault to a modern one. Highest-value contribution open
+right now.
 
 **2. Extended blind index coverage**
 Currently only merchant + category fields have HMAC blind indexes. Goal
@@ -176,6 +201,30 @@ Once the Argon2id migration is done, the PQC layer from OrangeRails
 ported directly. The interface contracts are designed to be portable.
 
 ---
+
+## Known operational gaps
+
+The following items are known weaknesses of the current deploy. They do
+not break the zero-knowledge guarantee but they are real gaps that we
+plan to close. Pull requests welcome.
+
+**Signup / waitlist rate limiting.** `functions/api/signup.ts` accepts
+POSTs without a per-IP or per-account rate limit. An attacker can burn
+the email-send quota or pollute the waitlist with junk. The recommended
+mitigation is a Cloudflare Rate Limiting Rule (5 req/min/IP at the page
+level) or a per-IP counter in Cloudflare KV that the function checks
+before forwarding to the email vendor. hCaptcha is already wired but is
+not a full substitute on a high-volume target.
+
+**Argon2id parallelism.** Fixed at 4 lanes (see the Layer 1 callout
+above). Modern devices can comfortably handle 8; raising it requires a
+new vault key version and a re-key migration so existing vaults stay
+unlockable. Tracked alongside the PBKDF2 → Argon2id migration RPC.
+
+**Five build-time-only npm advisories.** `vite` (Windows UNC path on the
+dev server), `dompurify` `IN_PLACE` mode (unused in `src/`), and three
+build-tool DoS / file-read advisories. None are reachable from user
+input at runtime. Tracked for the next deps-bump PR.
 
 ## Supported versions
 

@@ -7,9 +7,9 @@
 --   docs/HOUSEHOLD-SHARING-DESIGN.md §6 "Hard re-key" + maintenance
 --     banner + Quick vs Deep refresh
 --
--- What Phase 4.5 does (MB variant):
+-- What Phase 4.5 does (Orange Way variant):
 --
---   Phase 4.3 (MB side) will wrap a shared household DEK for each
+--   Phase 4.3 (Orange Way side) will wrap a shared household DEK for each
 --   member at invite time. Phase 4.5 establishes the full refresh
 --   pipeline: generate a new household DEK, re-wrap it for every
 --   current member, re-encrypt every household-scoped row (Deep
@@ -27,7 +27,7 @@
 --   3. `household_keys.is_placeholder` — marks Phase 4.3 placeholder
 --      wraps (random DEK, no real shared semantics yet) so Phase 4.5
 --      first-time setup can migrate them without touching real wraps.
---   4. `dek_key_version INT NOT NULL DEFAULT 1` on every MB encrypted
+--   4. `dek_key_version INT NOT NULL DEFAULT 1` on every Orange Way encrypted
 --      business table that got a `scope` column in Phase 4.1:
 --      transactions, accounts, categories, budgets, goals, rules.
 --      Row-level refresh bumps this atomically with the new
@@ -259,7 +259,7 @@ COMMENT ON TABLE public.household_active_key_versions IS
 -- 3. household_keys: is_placeholder column
 -- ══════════════════════════════════════════════════════════════════════
 --
--- Phase 4.3 (MB invite flow) will set is_placeholder = TRUE when
+-- Phase 4.3 (Orange Way invite flow) will set is_placeholder = TRUE when
 -- wrapping a random placeholder DEK for early invites (before the
 -- household has a real shared DEK established). Phase 4.5 first-time
 -- setup swaps those for real DEK wraps (is_placeholder = FALSE) and
@@ -281,7 +281,7 @@ COMMENT ON COLUMN public.household_keys.is_placeholder IS
 -- 4. Shared tables: add dek_key_version column
 -- ══════════════════════════════════════════════════════════════════════
 --
--- Every shared MB table gets a `dek_key_version INT NOT NULL DEFAULT 1`
+-- Every shared Orange Way table gets a `dek_key_version INT NOT NULL DEFAULT 1`
 -- column. Row-level refresh bumps this atomically with the new
 -- ciphertext (Deep mode) or on its own (Quick mode). The client's
 -- decrypt path reads this column to pick the matching DEK during a
@@ -370,7 +370,7 @@ COMMENT ON TABLE public.user_last_seen_household_key_versions IS
 -- Lightweight email outbox. Phase 4.5 writes a `household_ready` row
 -- after first-time setup completes; a future scheduled function
 -- dispatches pending rows through Supabase Auth or an ESP. Leaving the
--- dispatch path out of this migration is intentional — MB does not yet
+-- dispatch path out of this migration is intentional; Orange Way does not yet
 -- have an ESP configured, and V3's polish agent ships its own
 -- dispatcher.
 

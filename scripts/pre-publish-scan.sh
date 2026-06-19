@@ -87,19 +87,6 @@ EXEMPT_GENERIC=(
   "CONTRIBUTING.md"
 )
 
-EXEMPT_BITBOOKS_LITERAL=(
-  # Vault verifier plaintext + KDF salt contexts. Renaming corrupts every
-  # existing user vault — handled by a versioned migration PR, not a
-  # textual sweep.
-  "src/lib/vault.ts"
-  # localStorage key namespaces. Recoverable, but the migration is a
-  # separate scheduled PR.
-  "src/components/dashboard/CurrencySetupBanner.tsx"
-  "src/components/dashboard/DashboardPage.tsx"
-  "src/hooks/useDashboardPrefs.ts"
-  "src/hooks/useDemoSeed.ts"
-)
-
 EXEMPT_OWM_FUNCTION_URLS=(
   # owm-or-* are deployed Supabase Edge Function URL slugs. Renaming
   # requires a coordinated client + function deploy and is scheduled
@@ -187,7 +174,6 @@ join_pipe() {
   printf '%s' "$*"
 }
 
-EXEMPT_BB_RE="$(join_pipe "${EXEMPT_BITBOOKS_LITERAL[@]}")"
 EXEMPT_OWM_RE="$(join_pipe "${EXEMPT_OWM_FUNCTION_URLS[@]}")"
 
 # ----------------------------------------------------------------------
@@ -206,7 +192,7 @@ printf "\033[1m1. Brand + product references\033[0m\n"
 scan "BitBooks brand (all variants)" \
      "\\b(BitBooks|Bitbooks)\\b|\\bbitbooks\\b" \
      "" \
-     "$EXEMPT_BB_RE"
+     ""
 
 scan "Cala / Galoy ledger brand" \
      "\\b(Cala|Galoy|GaloyMoney)\\b" \

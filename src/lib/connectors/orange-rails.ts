@@ -6,7 +6,7 @@ import { ComingSoonFlow } from "./flows/ComingSoonFlow";
  *
  * The full OR connect flow (provider creds → wallet picker →
  * destination mapping) is multi-step, vault-bound, and routes through
- * the bb-or-proxy edge function — none of which fit cleanly inside
+ * the ow-or-proxy edge function. None of these fit cleanly inside
  * the AddAccountDialog's single-modal flow. So clicking the
  * OrangeRails tile in the picker just navigates to /connections,
  * where the full flow lives.
