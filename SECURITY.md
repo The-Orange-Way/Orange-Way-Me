@@ -75,7 +75,7 @@ plaintext search term. Here is how:
 3. On search, compute the same HMAC over your query term
 4. The server compares hash to hash — it never sees the plaintext name
 
-The HMAC key is derived from your MEK via HKDF with label `bbp-hmac-v1`,
+The HMAC key is derived from your MEK via HKDF with label `ow-hmac-v1`,
 completely separate from your encryption subkeys.
 
 ### Layer 4 — Per-user random salt
@@ -178,7 +178,7 @@ right now.
 Currently only merchant + category fields have HMAC blind indexes. Goal
 names and institution names would also benefit from searchability without
 exposing plaintext. Implementation: same HKDF subkey derivation with a
-distinct label per field (`bbp-hmac-goals-v1`, etc.).
+distinct label per field (`ow-hmac-goals-v1`, etc.).
 
 **3. Recovery code UX audit**
 The recovery flow is security-critical and high-anxiety. Review:
