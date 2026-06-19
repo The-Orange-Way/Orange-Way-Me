@@ -177,6 +177,13 @@ ported directly. The interface contracts are designed to be portable.
 
 ---
 
+## Supported versions
+
+Orange Way Me is pre-1.0. Security reports are reviewed against `main`
+(the public open-source baseline) regardless of which version surfaced
+the issue. Once 1.0 ships, security patches will be backported to the
+most recent minor release; older releases will not receive patches.
+
 ## Security disclosure
 
 Found a vulnerability? Please do not open a public GitHub issue.
