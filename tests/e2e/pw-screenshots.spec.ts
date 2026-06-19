@@ -42,7 +42,7 @@ const PUBLIC_ROUTES: RouteCheck[] = [
   { path: "/about", label: "about" },
   { path: "/ai", label: "ai" },
   { path: "/faq", label: "faq" },
-  { path: "/login", label: "login" },
+  { path: "/auth", label: "auth" },
   // Footer-linked legal pages. They render 200 but weren't being
   // screenshotted, so a regression on layout / copy could slip through
   // unnoticed.
