@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Playwright smoke tests.
  *
- * Default target: https://dev.orangeway.app (the deployed dev site).
+ * Default target: https://orangeway.dev (the open-source test domain).
  * Override with: PLAYWRIGHT_BASE_URL=<url> npx playwright test
  *
  * Tests live in tests/e2e/. They are intentionally shallow — page loads,
@@ -19,7 +19,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [["html", { open: "never" }], ["list"]] : "list",
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || "https://dev.orangeway.app",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || "https://orangeway.dev",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

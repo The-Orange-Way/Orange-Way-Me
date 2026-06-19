@@ -204,6 +204,9 @@
         s.parentNode.insertBefore(g, s);
         g.onload = function () {
           window.chatwootSDK.run({
+            // Chatwoot websiteToken is public by design — equivalent to a
+            // Google Analytics property ID, embedded in every page to
+            // identify this site to the Chatwoot widget. Not a secret.
             websiteToken: "kSi4hwVaBkUfr7zhmVdhCwHq",
             baseUrl: BASE_URL,
           });

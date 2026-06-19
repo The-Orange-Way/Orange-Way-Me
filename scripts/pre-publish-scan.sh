@@ -78,6 +78,10 @@ EXEMPT_GENERIC=(
   # This script and the PR template document the forbidden patterns
   # as examples; they intentionally contain the strings they scan for.
   "scripts/pre-publish-scan.sh"
+  # The pre-push gate's private-host regex contains the literal strings
+  # it scans for; install-hooks.sh references it.
+  "scripts/pre-push-gate.sh"
+  "scripts/install-hooks.sh"
   ".github/PULL_REQUEST_TEMPLATE.md"
   ".github/workflows/leak-check.yml"
   "CONTRIBUTING.md"
