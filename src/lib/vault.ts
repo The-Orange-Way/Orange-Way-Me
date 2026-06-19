@@ -27,6 +27,31 @@ const PBKDF2_ITERATIONS = 600_000;
 const HMAC_HKDF_LABEL = "ow-hmac-v1";
 const RECOVERY_HKDF_LABEL = "ow-recovery-v1";
 export const VAULT_VERIFIER_PLAINTEXT = "ORANGE_WAY_VAULT_V1";
+
+/**
+ * Constant-time string equality. Returns true iff a === b. Loops through
+ * both strings to their max length so the comparison time depends on neither
+ * input being shorter than the other.
+ *
+ * Use this for any equality check on a value an attacker might be able to
+ * influence the timing of: vault verifiers, recovery codes, HMAC tags.
+ * For ordinary application equality (e.g. dropdown values), plain === is fine.
+ *
+ * The AES-GCM tag check upstream of the verifier comparison is already
+ * constant-time inside SubtleCrypto.decrypt; this helper closes the small
+ * residual timing channel from the verifier-plaintext string equality.
+ */
+export function constantTimeEquals(a: string, b: string): boolean {
+  const len = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < len; i++) {
+    // charCodeAt returns NaN past the end; coerce to 0 so the XOR still runs.
+    const ai = i < a.length ? a.charCodeAt(i) : 0;
+    const bi = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= ai ^ bi;
+  }
+  return diff === 0;
+}
 /**
  * Minimum password length enforced at vault CREATION by UI components.
  * NOT enforced inside derive* functions — those must remain usable for
@@ -46,7 +71,17 @@ const ARGON2ID_PARALLELISM = 4;
 
 function b64encode(bytes: Uint8Array): string {
   let s = "";
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) {
+    // Each byte is already in [0, 255] when the caller obeys the Uint8Array
+    // type. A future caller passing a Uint16Array (or a typed-array view that
+    // exposes wider values) would silently produce garbage from String.
+    // fromCharCode. Defend the helper so a misuse fails loud instead of
+    // corrupting ciphertext.
+    if (bytes[i] < 0 || bytes[i] > 255) {
+      throw new Error("b64encode: input byte out of range (expected Uint8Array)");
+    }
+    s += String.fromCharCode(bytes[i]);
+  }
   return btoa(s);
 }
 
@@ -55,6 +90,21 @@ function b64decode(s: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function assertUuid(value: string, label: string): void {
+  if (!UUID_RE.test(value)) {
+    throw new Error(`${label}: not a UUID`);
+  }
+}
+
+function assertBase64NoColon(value: string, label: string): void {
+  if (!BASE64_RE.test(value)) {
+    throw new Error(`${label}: not standard base64`);
+  }
 }
 
 export function randomBytes(length: number): Uint8Array {
@@ -180,25 +230,41 @@ export async function deriveRecoveryKek(recoveryCode: string): Promise<CryptoKey
 }
 
 // ---------- AES-GCM encrypt / decrypt ----------
+//
+// Wire format for encryptText/decryptText, stable across the codebase:
+//
+//   base64( IV[12] || ciphertext[N] || GCM-tag[16] )
+//
+// SubtleCrypto.encrypt appends the 16-byte authentication tag to the
+// ciphertext automatically, so `ct.byteLength === plaintext.length + 16`.
+// decryptText therefore requires at least 12 (IV) + 16 (tag) = 28 bytes.
+// A shorter blob cannot be a valid AES-GCM output and is rejected before
+// SubtleCrypto.decrypt is called.
+
+const AES_GCM_IV_BYTES = 12;
+const AES_GCM_TAG_BYTES = 16;
+const AES_GCM_MIN_CIPHERTEXT_BYTES = AES_GCM_IV_BYTES + AES_GCM_TAG_BYTES;
 
 export async function encryptText(plaintext: string, key: CryptoKey): Promise<string> {
-  const iv = randomBytes(12);
+  const iv = randomBytes(AES_GCM_IV_BYTES);
   const ct = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: iv as BufferSource },
     key,
     new TextEncoder().encode(plaintext),
   );
-  const combined = new Uint8Array(12 + ct.byteLength);
+  const combined = new Uint8Array(AES_GCM_IV_BYTES + ct.byteLength);
   combined.set(iv, 0);
-  combined.set(new Uint8Array(ct), 12);
+  combined.set(new Uint8Array(ct), AES_GCM_IV_BYTES);
   return b64encode(combined);
 }
 
 export async function decryptText(ciphertextB64: string, key: CryptoKey): Promise<string> {
   const combined = b64decode(ciphertextB64);
-  if (combined.length < 12) throw new Error("Invalid ciphertext");
-  const iv = combined.slice(0, 12);
-  const data = combined.slice(12);
+  if (combined.length < AES_GCM_MIN_CIPHERTEXT_BYTES) {
+    throw new Error("Invalid ciphertext");
+  }
+  const iv = combined.slice(0, AES_GCM_IV_BYTES);
+  const data = combined.slice(AES_GCM_IV_BYTES);
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, data);
   return new TextDecoder().decode(pt);
 }
@@ -529,6 +595,17 @@ export async function deriveOrMekBytes(
   if (typeof password !== "string" || password.length === 0) {
     throw new Error("Vault password is required");
   }
+  // The salt is constructed by string concatenation with ":" delimiters.
+  // The format ("ow-or-mek-v1:<userId>:<saltB64>") is part of the
+  // wire contract: every existing OR ciphertext was sealed under this
+  // exact salt, so we cannot reformat without breaking decryption for
+  // every existing user. Instead, enforce the implicit invariant that
+  // makes the format collision-free: userId is a UUID (no colons) and
+  // saltB64 is base64 (alphabet has no colons either). Without these
+  // checks an attacker who could control either field could craft inputs
+  // that hash to the same salt as a different user.
+  assertUuid(userId, "deriveOrMekBytes userId");
+  assertBase64NoColon(userVaultSaltB64, "deriveOrMekBytes userVaultSaltB64");
   const encoder = new TextEncoder();
   const saltBytes = encoder.encode("ow-or-mek-v1:" + userId + ":" + userVaultSaltB64);
   const hashBytes = await argon2id({
@@ -563,6 +640,13 @@ async function deriveOrSubkey(
     mekAsHkdf,
     256,
   );
+  // Extractable: true ONLY because the calling code passes this key to OR's
+  // edge functions over TLS (the OR proxy seals it under OPK before storing).
+  // Every other AES key in the codebase is imported with extractable: false.
+  // Do NOT copy this pattern elsewhere. Extracting key material from a
+  // CryptoKey is the kind of footgun that silently survives review until a
+  // future contributor copies the helper into a context where the key
+  // shouldn't ever leave the browser.
   return crypto.subtle.importKey("raw", rawBits, { name: "AES-GCM" }, /* extractable */ true, [
     "encrypt",
     "decrypt",

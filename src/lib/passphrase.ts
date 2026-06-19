@@ -40,14 +40,20 @@ export async function generatePassphrase(
   const words = await loadWords();
   const n = words.length;
   const bitsPerWord = Math.log2(n);
-  // Unbiased selection: draw a 32-bit uint per word and modulo into range.
-  // The tiny modulo bias (n is not a power of 2) is negligible at this
-  // wordlist size — entropy delta < 0.01 bit.
-  const buf = new Uint32Array(numWords);
-  crypto.getRandomValues(buf);
+  // Rejection sampling. Same pattern as generateRecoveryCode in vault.ts.
+  // Direct `random % n` introduces a small modulo bias (n = 7776 is not a
+  // power of 2). Draw a 32-bit uint and reject any value that falls in the
+  // bias zone above `floor(2^32 / n) * n`, redraw until we get one that
+  // doesn't. Loss-of-entropy on rejection is zero by construction.
+  const limit = Math.floor(0x1_00000000 / n) * n; // ≈ 4.294e9, divisible by n
   const out: string[] = [];
-  for (let i = 0; i < numWords; i++) {
-    out.push(words[buf[i] % n]);
+  while (out.length < numWords) {
+    // Draw a generous batch each round to amortize getRandomValues overhead.
+    const batch = new Uint32Array(numWords * 2);
+    crypto.getRandomValues(batch);
+    for (let i = 0; i < batch.length && out.length < numWords; i++) {
+      if (batch[i] < limit) out.push(words[batch[i] % n]);
+    }
   }
   return {
     phrase: out.join(" "),

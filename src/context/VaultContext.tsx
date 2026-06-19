@@ -31,6 +31,7 @@ import {
   CURRENT_VAULT_KEY_VERSION,
   KEY_DERIVATION_STRATEGIES,
   VAULT_VERIFIER_PLAINTEXT,
+  constantTimeEquals,
   type VaultKeyVersion,
   createEncryptedHmacKey,
   decryptBlob as cryptoDecryptBlob,
@@ -704,7 +705,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     let mekBytes: Uint8Array;
     // Null/missing = pre-migration row = v2 by definition.
     const version = (row.vault_key_version ?? 2) as VaultKeyVersion;
-    const strategy = KEY_DERIVATION_STRATEGIES[version] ?? KEY_DERIVATION_STRATEGIES[2];
+    // Fail closed: a vault stored with a version this client doesn't know how
+    // to unlock must NOT silently fall back to v2 (PBKDF2). A silent downgrade
+    // would let a future server-side compromise force older clients onto the
+    // weaker algorithm. Refuse and tell the user to update.
+    const strategy = KEY_DERIVATION_STRATEGIES[version];
+    if (!strategy) {
+      void logSecurityEvent(user.id, "vault_unlock_unknown_version");
+      throw new Error(
+        "Your vault is from a newer version of Orange Way. Please update the app and try again.",
+      );
+    }
 
     if (row.enc_mek_ciphertext) {
       // Current architecture: unwrap MEK using the version-appropriate KDF.
@@ -719,10 +730,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Wrong vault password");
       }
       mek = await importMekFromRaw(mekBytes);
-      // Verify MEK is correct.
+      // Verify MEK is correct. The AES-GCM tag check inside cryptoDecryptText
+      // is already constant-time; the verifier-plaintext equality uses
+      // constantTimeEquals to close the last residual timing channel.
       try {
         const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
-        if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
+        if (!constantTimeEquals(probe, VAULT_VERIFIER_PLAINTEXT)) {
+          throw new Error("verifier mismatch");
+        }
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
         throw new Error("Wrong vault password");
@@ -733,7 +748,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mek = await deriveMek(password, row.kdf_salt, row.kdf_iterations);
       try {
         const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
-        if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
+        if (!constantTimeEquals(probe, VAULT_VERIFIER_PLAINTEXT)) {
+          throw new Error("verifier mismatch");
+        }
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
         throw new Error("Wrong vault password");

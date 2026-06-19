@@ -85,7 +85,10 @@ async function resolveUserId(subaccountId: string): Promise<string | null> {
     .eq("or_subaccount_id", subaccountId)
     .maybeSingle();
   if (error) {
-    console.error("[or-webhook-receiver] user lookup error:", error.message);
+    // Log only the SQLSTATE. The error.message embeds table and column
+    // names which would leak schema info into edge-function logs that
+    // operators (and any future log-shipping integration) can see.
+    console.error("[or-webhook-receiver] user lookup error code:", error.code ?? "unknown");
     return null;
   }
   return (data?.user_id as string | undefined) ?? null;

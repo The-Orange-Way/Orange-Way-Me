@@ -19,6 +19,7 @@ export type VaultSecurityEvent =
   | "vault_setup"
   | "vault_unlock"
   | "vault_unlock_failed"
+  | "vault_unlock_unknown_version"
   | "vault_recover"
   | "vault_password_changed"
   | "recovery_code_regenerated"
