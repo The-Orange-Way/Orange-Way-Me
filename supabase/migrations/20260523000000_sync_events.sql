@@ -4,7 +4,7 @@
 -- to refresh itself when a new row arrives for the active user.
 --
 -- We do NOT mirror the OR connections list here — OR remains source of
--- truth (`bb-or-proxy` → `or-connection-list`). This table just records
+-- truth (`ow-or-proxy` → `or-connection-list`). This table just records
 -- the event so Orange Way can react without polling.
 --
 -- Tenancy note: Orange Way is per-user (no orgs concept — vault is per
@@ -15,7 +15,7 @@ create table if not exists public.sync_events (
   id              bigserial primary key,
   -- The user the event belongs to. We resolve user_id from subaccount_id
   -- inside the receiver via the user_profiles.or_subaccount_id mapping
-  -- maintained by bb-or-proxy at or-provision time. Filtering RLS by
+  -- maintained by ow-or-proxy at or-provision time. Filtering RLS by
   -- user_id is what gives the realtime channel its per-tenant isolation.
   user_id          uuid not null references auth.users(id) on delete cascade,
   -- OR's connection_id (opaque to Orange Way; we keep it for correlation).

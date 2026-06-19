@@ -268,7 +268,7 @@ interface VaultContextType {
   getHmacKey: () => CryptoKey;
   // OrangeRails subkey helpers — used by the Connections page to encrypt
   // provider credentials, decrypt connection metadata, and hand keys
-  // in-transit to OR's or-sync edge function via bb-or-proxy.
+  // in-transit to OR's or-sync edge function via ow-or-proxy.
   encryptOrCipher: (plaintext: string) => Promise<string>;
   decryptOrCipher: (ciphertext: string) => Promise<string>;
   decryptOrTxnCipher: (ciphertext: string) => Promise<string>;

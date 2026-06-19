@@ -18,7 +18,7 @@
  *
  * Single-user adaptation (vs. V3 which is multi-org):
  *   OW has no org concept. The vault is per-user, so `orgId` here is
- *   the authenticated Supabase user.id. bb-or-proxy already maps that
+ *   the authenticated Supabase user.id. ow-or-proxy already maps that
  *   to OR's external_user_id at provision time and uses subaccount_id
  *   for everything else; the mint-token endpoint mirrors that with
  *   app_user_id = user.id.
@@ -129,7 +129,7 @@ async function mintWidgetToken(orgId: string): Promise<string> {
     (typeof process !== "undefined" ? process.env?.SUPABASE_PUBLISHABLE_KEY : undefined) ??
     "";
 
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/bb-or-proxy`, {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/ow-or-proxy`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
