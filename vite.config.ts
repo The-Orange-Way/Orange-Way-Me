@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import prerenderMarketingPlugin from "./scripts/prerender-plugin";
+import prerenderManifestPlugin from "./scripts/prerender-manifest-plugin";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -23,6 +24,8 @@ export default defineConfig(({ mode }) => ({
     tailwindcss(),
     // Build-time per-route HTML prerender (mirrors V3 pattern).
     mode !== "development" && prerenderMarketingPlugin(),
+    // Build-time static prerender for /api/public/ai/manifest.json (issue #7).
+    mode !== "development" && prerenderManifestPlugin(),
   ].filter(Boolean),
   resolve: {
     alias: {
