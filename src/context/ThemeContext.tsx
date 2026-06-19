@@ -15,14 +15,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const stored = (localStorage.getItem("bb-theme") as Theme | null) ?? "dark";
+    const stored = (localStorage.getItem("ow-theme") as Theme | null) ?? "dark";
     setThemeState(stored);
   }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.documentElement.classList.toggle("dark", theme === "dark");
-    if (typeof window !== "undefined") localStorage.setItem("bb-theme", theme);
+    if (typeof window !== "undefined") localStorage.setItem("ow-theme", theme);
   }, [theme]);
 
   return (

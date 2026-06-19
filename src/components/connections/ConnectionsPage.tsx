@@ -1,7 +1,7 @@
 /**
  * Connections — pure consumer of OrangeRails' hosted /connect widget.
  *
- * OW is a Plaid-style platform consumer of OR via the bb-or-proxy edge
+ * OW is a Plaid-style platform consumer of OR via the ow-or-proxy edge
  * function. End users never see "OrangeRails" branding; they see
  * "OrangeWay Connections" backed by a per-user OR subaccount (one per
  * vault / per Supabase user).
@@ -104,7 +104,7 @@ interface ConnectionRow {
 }
 
 /**
- * Error class for failures from the bb-or-proxy edge function. Carries the
+ * Error class for failures from the ow-or-proxy edge function. Carries the
  * upstream HTTP status and (when available) the JSON body so callers can
  * branch on specific status codes — registerOpk's 409 rotation-guard
  * retry, for example. Vanilla `Error` would drop both.
@@ -126,7 +126,7 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
   } = await supabase.auth.getSession();
   if (!session) throw new CallProxyError("Not authenticated", 401, null);
 
-  const res = await supabase.functions.invoke("bb-or-proxy", {
+  const res = await supabase.functions.invoke("ow-or-proxy", {
     body: { endpoint, payload },
   });
   if (res.error) {

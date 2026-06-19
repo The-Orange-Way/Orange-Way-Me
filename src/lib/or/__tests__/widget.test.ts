@@ -4,7 +4,7 @@
  * Tests for openOrConnect() — OW's entry point into OR's hosted
  * /connect widget. The function does three things worth covering:
  *
- *   1. Mints a widget_token via bb-or-proxy.
+ *   1. Mints a widget_token via ow-or-proxy.
  *   2. Builds the /connect URL (with or without provider, fragment-carries
  *      cred_key / txn_key / widget_token).
  *   3. Resolves / rejects on postMessage / popup-close / popup-blocked.
@@ -127,7 +127,7 @@ describe("openOrConnect", () => {
     vi.restoreAllMocks();
   });
 
-  it("mints a widget token via bb-or-proxy with the org_id and resolves on or-link-success", async () => {
+  it("mints a widget token via ow-or-proxy with the org_id and resolves on or-link-success", async () => {
     const { openOrConnect } = await import("../widget");
 
     const pending = openOrConnect({
@@ -141,7 +141,7 @@ describe("openOrConnect", () => {
     // mint-token POST went through.
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [urlArg, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(String(urlArg)).toBe("https://ow.local/functions/v1/bb-or-proxy");
+    expect(String(urlArg)).toBe("https://ow.local/functions/v1/ow-or-proxy");
     expect(init.method).toBe("POST");
     const body = JSON.parse(String(init.body));
     expect(body).toMatchObject({
@@ -211,7 +211,7 @@ describe("openOrConnect", () => {
     ).rejects.toThrow(/popup blocked/i);
   });
 
-  it("rejects when bb-or-proxy returns a non-200 for mint-token", async () => {
+  it("rejects when ow-or-proxy returns a non-200 for mint-token", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
     const { openOrConnect } = await import("../widget");
     await expect(

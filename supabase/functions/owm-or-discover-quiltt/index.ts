@@ -27,7 +27,7 @@ import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-// Canonical Orange Rails API gateway — see bb-or-proxy/index.ts comment block.
+// Canonical Orange Rails API gateway; see ow-or-proxy/index.ts comment block.
 const OR_SUPABASE_URL = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
 const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
 

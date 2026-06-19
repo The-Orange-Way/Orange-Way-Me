@@ -40,7 +40,7 @@ const DEFAULTS: DashboardPrefs = {
 };
 
 function storageKey(userId: string | undefined): string {
-  return `bitbooks.prefs.${userId ?? "anon"}`;
+  return `orangeway.prefs.${userId ?? "anon"}`;
 }
 
 function read(userId: string | undefined): DashboardPrefs {
