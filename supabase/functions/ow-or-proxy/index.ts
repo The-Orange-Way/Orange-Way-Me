@@ -56,11 +56,8 @@ const OR_URL_ALLOWLIST = new Set<string>([
   "https://staging.orangerails.com",
   "https://dev.orangerails.com",
 ]);
-const OR_SUPABASE_URL_RAW =
-  Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
-const OR_SUPABASE_URL = OR_URL_ALLOWLIST.has(OR_SUPABASE_URL_RAW)
-  ? OR_SUPABASE_URL_RAW
-  : null;
+const OR_SUPABASE_URL_RAW = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
+const OR_SUPABASE_URL = OR_URL_ALLOWLIST.has(OR_SUPABASE_URL_RAW) ? OR_SUPABASE_URL_RAW : null;
 if (!OR_SUPABASE_URL) {
   console.error(
     `[ow-or-proxy] OR_SUPABASE_URL=${OR_SUPABASE_URL_RAW} is not in the allowlist; all requests will 500 until the env var is corrected or the code allowlist is extended.`,
