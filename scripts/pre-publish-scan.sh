@@ -82,6 +82,10 @@ EXEMPT_GENERIC=(
   # it scans for; install-hooks.sh references it.
   "scripts/pre-push-gate.sh"
   "scripts/install-hooks.sh"
+  # The post-merge identity scan workflow's PATTERN env var contains the
+  # literal strings it scans for; we exempt the file so the leak scan
+  # doesn't flag the scanner.
+  ".github/workflows/post-merge-identity-scan.yml"
   ".github/PULL_REQUEST_TEMPLATE.md"
   ".github/workflows/leak-check.yml"
   "CONTRIBUTING.md"
