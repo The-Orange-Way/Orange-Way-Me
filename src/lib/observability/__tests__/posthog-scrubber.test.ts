@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import { MAX_SCRUB_DEPTH, scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
 
 // Minimal stand-in for posthog-js's CaptureResult: the scrubber
 // only touches .properties so the rest of the shape can be ignored
@@ -64,17 +64,49 @@ describe("posthog scrubber", () => {
     expect(items[1].account_balance).toBe("[redacted]");
   });
 
-  it("stops at the depth cap and redacts any further nesting", () => {
-    const deep = { a: { b: { c: { d: { e: { secret: "x" } } } } } };
-    const r = event(deep);
-    // The cap is 4, so by the 5th level the deeper object is redacted.
-    let cur: unknown = r?.properties.a;
-    for (const key of ["b", "c", "d"]) {
-      cur = (cur as Record<string, unknown>)[key];
+  it("stops at MAX_SCRUB_DEPTH and replaces deeper containers with the sentinel", () => {
+    // Build a chain with MAX_SCRUB_DEPTH + 1 nested levels. The value
+    // at the deepest level should be the "[redacted-deep]" sentinel
+    // because the scrubber refuses to walk past the cap. The cap is a
+    // compile-time constant exported from the scrubber; the test fails
+    // loudly if the constant moves or the cap logic regresses.
+    const levels = MAX_SCRUB_DEPTH + 1;
+    const keys = Array.from({ length: levels }, (_, i) => `lvl${i}`);
+    let payload: Record<string, unknown> = { deeper: { secret: "x" } };
+    for (let i = levels - 1; i >= 0; i--) {
+      payload = { [keys[i]]: payload };
     }
-    // cur is the object at depth 4 ({ e: { secret: "x" } }); its inner
-    // object should now be the [redacted-deep] sentinel.
-    expect((cur as Record<string, unknown>).e).toBe("[redacted-deep]");
+    const r = event(payload);
+    // Walk down each level; the last lookup yields the sentinel string.
+    let cur: unknown = r?.properties;
+    for (const k of keys) {
+      cur = (cur as Record<string, unknown>)[k];
+    }
+    expect(cur).toBe("[redacted-deep]");
+  });
+
+  it("leaves typed objects (Date, Map, RegExp) untouched instead of flattening", () => {
+    const d = new Date("2026-01-01T00:00:00Z");
+    const r = event({ ts_dropped_here: d });
+    // "ts" doesn't match any hint, so the value passes through. The
+    // important assertion is that we did NOT walk it into {} via
+    // Object.entries.
+    expect(r?.properties.ts_dropped_here).toBe(d);
+  });
+
+  it("skips dangerous keys when walking JSON-shaped input", () => {
+    // An object literal { __proto__: X } sets the prototype, it does
+    // not add an own property, so it does not reach the scrubber.
+    // The realistic source of a __proto__ key is JSON.parse, which
+    // produces an own property. Simulate that here.
+    const parsed = JSON.parse('{ "ctx": { "__proto__": { "polluted": true }, "normal": 1 } }');
+    const r = event(parsed);
+    const ctx = r?.properties.ctx as Record<string, unknown>;
+    expect(ctx.normal).toBe(1);
+    // The __proto__ key was skipped, so the output object has no own
+    // "polluted" property and an unmodified prototype.
+    expect(Object.prototype.hasOwnProperty.call(ctx, "__proto__")).toBe(false);
+    expect((ctx as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it("caps long strings at 256 chars with an ellipsis", () => {

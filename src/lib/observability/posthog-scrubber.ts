@@ -96,11 +96,19 @@ function shouldScrubKey(key: string): boolean {
 // properties are flat by convention, but a callsite could pass a
 // nested shape by accident. A depth of 4 covers any realistic
 // payload while preventing pathological structures from running
-// the scrubber for an unbounded amount of time.
-const MAX_SCRUB_DEPTH = 4;
+// the scrubber for an unbounded amount of time. Exported so the
+// test suite can verify against the same constant rather than a
+// magic number.
+export const MAX_SCRUB_DEPTH = 4;
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  if (typeof v !== "object" || v === null) return false;
+  if (Array.isArray(v)) return false;
+  // Reject typed containers like Date, Map, Set, RegExp, etc. Their
+  // own-property keys are usually empty, so Object.entries(v) would
+  // silently turn them into {}; better to leave them untouched.
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
 }
 
 function scrubValue(key: string, value: unknown, depth: number): unknown {
@@ -132,6 +140,10 @@ function scrubValue(key: string, value: unknown, depth: number): unknown {
   if (isPlainObject(value)) {
     const inner: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
+      // Defensive: skip dangerous key names. Object.entries already
+      // excludes non-enumerable keys, so __proto__ on a literal will
+      // not appear here, but a key parsed from JSON.parse could.
+      if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
       inner[k] = scrubValue(k, v, depth + 1);
     }
     return inner;
