@@ -615,6 +615,21 @@ export async function deriveOrOpkSeedFromMek(
 }
 
 // ---------- KDF strategy map (Open/Closed Principle extension point) ----------
+//
+// STABILITY RULE: a strategy entry MUST never be removed from
+// KEY_DERIVATION_STRATEGIES once it has been deployed, even after
+// CURRENT_VAULT_KEY_VERSION advances past it. Every existing vault
+// row carries its own vault_key_version, and unlock fails permanently
+// if its strategy is no longer registered.
+//
+// The legacy fallback in VaultContext.tsx (`row.vault_key_version ?? 2`)
+// reads vaults that pre-date the column. Removing the v2 entry would
+// brick every one of those vaults on the next unlock attempt.
+//
+// When adding a new version (e.g. v4 with scrypt or a future memory-
+// hard KDF), append a new entry and bump CURRENT_VAULT_KEY_VERSION.
+// Never delete a previous entry. The lazy migration runs on the next
+// successful unlock and rewrites the row to the latest strategy.
 
 export type VaultKeyVersion = 2 | 3;
 export const CURRENT_VAULT_KEY_VERSION: VaultKeyVersion = 3;

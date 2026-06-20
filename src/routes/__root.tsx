@@ -140,13 +140,13 @@ function AnalyticsNotice() {
       setShow(false);
       return;
     }
-    setShow(localStorage.getItem("bb_notice_dismissed") !== "1");
+    setShow(localStorage.getItem("ow_notice_dismissed") !== "1");
   }, [location.pathname]);
   useEffect(() => {
     if (!show) return;
     const onScroll = () => {
       if (window.scrollY > 600) {
-        localStorage.setItem("bb_notice_dismissed", "1");
+        localStorage.setItem("ow_notice_dismissed", "1");
         setShow(false);
       }
     };
@@ -155,7 +155,7 @@ function AnalyticsNotice() {
   }, [show]);
   if (!show) return null;
   const dismiss = () => {
-    localStorage.setItem("bb_notice_dismissed", "1");
+    localStorage.setItem("ow_notice_dismissed", "1");
     setShow(false);
   };
   return (
