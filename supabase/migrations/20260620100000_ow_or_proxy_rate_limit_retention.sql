@@ -6,8 +6,10 @@
 -- request counter and noted that "a separate pg_cron job (configured
 -- outside this migration) trims rows older than 24h." No such cron job
 -- was actually scheduled, leaving user_ids in the table indefinitely.
--- Under GDPR Art. 5(1)(e) and Law 25 s. 23, personal data retained
--- beyond its operational need is non-compliant.
+-- Storage-limitation principles in GDPR Art. 5(1)(e) and Quebec
+-- Law 25 require personal data to be kept no longer than the
+-- operational need that justified collecting it. Keeping rate-limit
+-- evidence forever fails that test.
 --
 -- This migration moves the retention enforcement inside the RPC itself
 -- so it can never drift from the schema. Every increment also drops
