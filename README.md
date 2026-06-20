@@ -185,10 +185,15 @@ Today the app runs locally against a Supabase project you control.
 git clone https://github.com/The-Orange-Way/Orange-Way-Me
 cd Orange-Way-Me
 bun install              # or: npm ci
-cp .env.example .env     # fill in Supabase URL + anon key
+cp .env.example .env     # fill in Supabase URL + anon key (other entries are optional)
 bun run dev              # or: npm run dev
 # Open http://localhost:5173
 ```
+
+The minimum to run is a Supabase project plus the three `VITE_SUPABASE_*` values in `.env`. The rest of the file documents optional secrets:
+
+- **Edge Function secrets** (set in the Supabase Dashboard, not in `.env`): `OR_PLATFORM_API_KEY`, `OR_SUPABASE_URL`, `RESEND_API_KEY`, etc. Required for bank-sync via the `ow-or-proxy` function. The proxy enforces an outbound URL allowlist; if you need to point it somewhere new, add an entry in `supabase/functions/ow-or-proxy/index.ts` and redeploy.
+- **CI/deploy-time vars** (set as GitHub Actions repo vars/secrets): `VITE_SENTRY_DSN`, `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT`, and the `GLITCHTIP_API_TOKEN` secret. Each is optional. Error telemetry is a no-op when the DSN is unset and source-map upload is skipped when the token is unset.
 
 On first launch, create a vault password. Everything you enter from that point is encrypted in your browser before it reaches Supabase.
 

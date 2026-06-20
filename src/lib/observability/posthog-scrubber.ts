@@ -42,6 +42,24 @@ const SCRUB_VALUE_KEY_HINTS = [
   "token",
 ];
 
+// PostHog reserved auto-capture properties that carry quasi-identifiers.
+// These are matched by exact key (with the leading $) and replaced with
+// "[redacted]", separately from the substring-hint list above so a regular
+// "ip" or "browser" inside a payload still passes through unchanged.
+// Audit follow-up 2026-06-20: Law 25 / GDPR recital 75 treat IP, browser,
+// and device fingerprints as identifiers when joined to a user id.
+const SCRUB_RESERVED_KEYS = new Set([
+  "$ip",
+  "$browser",
+  "$browser_version",
+  "$device",
+  "$device_id",
+  "$device_type",
+  "$os",
+  "$os_version",
+  "$user_agent",
+]);
+
 /**
  * UUID and slug-ish path segments that we treat as sensitive when they
  * appear in URL paths. PostHog captures both `$current_url` and
@@ -82,6 +100,10 @@ function scrubProperties(
   for (const [key, value] of Object.entries(props)) {
     if (key === "$current_url" || key === "$referrer" || key === "$pathname") {
       out[key] = scrubUrl(value);
+      continue;
+    }
+    if (SCRUB_RESERVED_KEYS.has(key)) {
+      out[key] = "[redacted]";
       continue;
     }
     if (shouldScrubKey(key)) {
