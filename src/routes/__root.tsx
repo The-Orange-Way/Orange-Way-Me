@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { RootErrorFallback } from "@/components/error/RootErrorFallback";
 import { logBoundaryError } from "@/components/error/logError";
 import { refreshLiveBTCRate } from "@/lib/orbi-rates";
+import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
 
 // Toaster is lazy-loaded: sonner transitively imports lucide-react icons
 // (CheckCircle, Info, etc.), which would otherwise drag the entire
@@ -81,6 +82,16 @@ function RootComponent() {
       autocapture: false,
       disable_session_recording: true,
       respect_dnt: true,
+      // Cybersec audit finding 2026-06-19: PostHog captures URL query
+      // strings and path params on pageview. If a route happens to
+      // surface an account / household / transaction id in the URL,
+      // PostHog would receive it. The before_send hook scrubs:
+      //  - any url field's query string + fragment
+      //  - any path segment that looks like a UUID, slug, or numeric id
+      //  - any property whose key name suggests decrypted content
+      // The Sentry init does the same on its side. Keep the two
+      // scrubbers in shape with each other.
+      before_send: scrubPostHogEvent,
     });
     posthog.register({ app: "orangeway", brand: "orange-way" });
   }, []);
