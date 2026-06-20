@@ -72,10 +72,13 @@ jobs:
         env:
           # GlitchTip is Sentry-protocol-compatible; sentry-cli talks to it
           # natively when SENTRY_URL points at the self-hosted instance.
-          SENTRY_URL: https://pulse.orangeway.app
+          # SENTRY_URL is sourced from repo vars rather than hardcoded so
+          # the source-map upload destination can be rotated without a
+          # workflow edit. Fallback is the production URL.
+          SENTRY_URL: ${{ vars.SENTRY_URL != '' && vars.SENTRY_URL || 'https://pulse.orangeway.app' }}
           SENTRY_AUTH_TOKEN: ${{ secrets.GLITCHTIP_API_TOKEN }}
-          SENTRY_ORG: orangeway
-          SENTRY_PROJECT: orange-way-web
+          SENTRY_ORG: ${{ vars.SENTRY_ORG != '' && vars.SENTRY_ORG || 'orangeway' }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT != '' && vars.SENTRY_PROJECT || 'orange-way-web' }}
           RELEASE: ${{ github.sha }}
         run: |
           set -euo pipefail
