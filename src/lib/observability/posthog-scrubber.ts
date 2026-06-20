@@ -100,15 +100,19 @@ function scrubProperties(
   return out;
 }
 
+import type { CaptureResult } from "posthog-js";
+
 /**
  * Exported as the `before_send` argument to `posthog.init`. PostHog
- * types this as `(event) => event | null`. We always return the event
- * (with scrubbed properties) rather than dropping; dropping silently
- * would hide a bug where a route renders sensitive data in the URL.
+ * types this as `(event: CaptureResult | null) => CaptureResult | null`.
+ * We always return the event (with scrubbed properties) rather than
+ * dropping; dropping silently would hide a bug where a route renders
+ * sensitive data in the URL.
  */
-export function scrubPostHogEvent<T extends { properties?: Record<string, unknown> }>(
-  event: T,
-): T {
+export function scrubPostHogEvent(event: CaptureResult | null): CaptureResult | null {
   if (!event) return event;
-  return { ...event, properties: scrubProperties(event.properties) };
+  return {
+    ...event,
+    properties: scrubProperties(event.properties as Record<string, unknown> | undefined) ?? {},
+  };
 }
