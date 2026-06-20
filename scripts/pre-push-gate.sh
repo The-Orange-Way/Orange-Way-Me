@@ -77,7 +77,12 @@ if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
 fi
 
 # ---- Check 3: private-host / private-wiki URL leaks ----
-PRIVATE_PATTERN='wiki\.abascal|wiki\.bitbooks|[reserved-term]|tail[a-z0-9]+\.ts\.net|100\.(91|94)\.[0-9]+\.[0-9]+|[reserved-host]\.local|@bitbooks\.com|@abascal\.ca'
+# Pattern must stay in lockstep with .github/workflows/post-merge-identity-scan.yml's
+# PATTERN value. The post-merge workflow is the canonical enforcement (it runs
+# even when the pre-push hook was bypassed or never installed); any drift means
+# the local scan reports clean for a string the server-side scan would flag.
+# When adding or removing a term here, change it there too.
+PRIVATE_PATTERN='tail[a-z0-9]+\.ts\.net|\[reserved-host]|\.local\b|wiki\.abascal|wiki\.bitbooks|[reserved-term]|[reserved-host]\.local|100\.(91|94)\.[0-9]+\.[0-9]+|@bitbooks\.com|@abascal\.ca|[reserved-host]'
 
 # Scan commits being pushed: messages + diff
 for sha in "${LOCAL_SHAS[@]}"; do

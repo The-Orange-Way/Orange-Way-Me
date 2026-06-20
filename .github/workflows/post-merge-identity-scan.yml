@@ -51,6 +51,12 @@ jobs:
 
       - name: Scan author + committer + body for private-host patterns
         env:
+          # Pattern must stay in lockstep with scripts/pre-push-gate.sh's
+          # PRIVATE_PATTERN. The two scanners answer the same question on
+          # different surfaces (local diff vs server-side commit metadata);
+          # any drift means one of them reports clean for a string the
+          # other would flag. When adding or removing a term here, change
+          # it there too.
           PATTERN: 'tail[a-z0-9]+\.ts\.net|\[reserved-host]|\.local\b|wiki\.abascal|wiki\.bitbooks|[reserved-term]|[reserved-host]\.local|100\.(91|94)\.[0-9]+\.[0-9]+|@bitbooks\.com|@abascal\.ca|[reserved-host]'
           RANGE: ${{ steps.range.outputs.range }}
         run: |
