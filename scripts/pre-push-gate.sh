@@ -91,9 +91,9 @@ for sha in "${LOCAL_SHAS[@]}"; do
     FAIL=1
   fi
   # Diff content — exclude the gate itself (whose regex literally contains the patterns)
-  if git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
+  if git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' ':!.github/workflows/post-merge-identity-scan.yml' 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
     red "✗ Private-host URL leak in diff content:"
-    git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
+    git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' ':!.github/workflows/post-merge-identity-scan.yml' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
     FAIL=1
   fi
 done
