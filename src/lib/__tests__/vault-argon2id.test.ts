@@ -14,7 +14,7 @@ const toHex = (bytes: Uint8Array | ArrayBuffer): string => {
   return Array.from(view, (b) => b.toString(16).padStart(2, "0")).join("");
 };
 
-describe("vault argon2id (v3)", () => {
+describe("vault argon2id (v1)", () => {
   it("derives a working AES-256-GCM key that round-trips text", async () => {
     const salt = randomBytesB64(16);
     const key = await deriveMekArgon2id("correct-horse-battery-staple", salt);

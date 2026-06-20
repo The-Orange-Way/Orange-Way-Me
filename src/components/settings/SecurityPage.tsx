@@ -14,7 +14,6 @@ import {
   Printer,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,8 +43,7 @@ import { toastError } from "@/lib/friendly-error";
 import { MIN_VAULT_PASSWORD_LENGTH } from "@/lib/vault";
 
 export function SecurityPage() {
-  const { changeVaultPassword, regenerateRecoveryCode, upgradeVaultToArgon2id, vaultKeyVersion } =
-    useVault();
+  const { changeVaultPassword, regenerateRecoveryCode, vaultKeyVersion } = useVault();
   const { prefs, update } = useDashboardPrefs();
   const [recoveryWords, setRecoveryWords] = useState<string | null>(null);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
@@ -79,8 +77,8 @@ export function SecurityPage() {
         </p>
       </div>
 
-      {/* Vault encryption (Argon2id status / upgrade) */}
-      <VaultEncryptionCard vaultKeyVersion={vaultKeyVersion} onUpgrade={upgradeVaultToArgon2id} />
+      {/* Vault encryption status */}
+      <VaultEncryptionCard vaultKeyVersion={vaultKeyVersion} />
 
       {/* Vault password */}
       <Card>
@@ -183,101 +181,23 @@ export function SecurityPage() {
   );
 }
 
-function VaultEncryptionCard({
-  vaultKeyVersion,
-  onUpgrade,
-}: {
-  vaultKeyVersion: number | null;
-  onUpgrade: (currentPassword: string) => Promise<void>;
-}) {
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [show, setShow] = useState(false);
-
-  // Null vaultKeyVersion means we haven't fetched the row yet (loading) or
-  // the column is missing (pre-migration). Treat pre-migration as legacy v2
-  // so users still see an upgrade prompt — the upgrade flow rejects legacy
-  // (no enc_mek_ciphertext) vaults with a clear message.
+function VaultEncryptionCard({ vaultKeyVersion }: { vaultKeyVersion: number | null }) {
+  // Null means the metadata row hasn't loaded yet. Every vault is Argon2id v1;
+  // there is no legacy tier and no upgrade path to surface.
   if (vaultKeyVersion === null) return null;
 
-  if (vaultKeyVersion >= 3) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Lock className="h-4 w-4" />
-            Vault encryption
-          </CardTitle>
-          <CardDescription>
-            Protected by Argon2id (v3) — 64 MiB memory-hard KDF. Your vault is at the highest
-            current tier.
-          </CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await onUpgrade(password);
-      toast.success("Vault upgraded to Argon2id (v3)");
-      setPassword("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upgrade failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <Card className="border-primary/30">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="h-4 w-4 text-primary" />
-          Upgrade to Argon2id (recommended)
+          <Lock className="h-4 w-4" />
+          Vault encryption
         </CardTitle>
         <CardDescription>
-          Your vault uses PBKDF2 (v2). Upgrading to Argon2id (v3) makes it ~10,000× more resistant
-          to GPU brute-force. Takes under a second. Your data is NOT re-encrypted — only the wrapper
-          around your key changes.
+          Protected by Argon2id — 64 MiB memory-hard key derivation. Your data is encrypted on this
+          device before it ever reaches our servers.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={submit} className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="upgrade-pw">Vault password</Label>
-            <div className="relative">
-              <Input
-                id="upgrade-pw"
-                type={show ? "text" : "password"}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setError(null);
-                }}
-                required
-                autoComplete="current-password"
-                disabled={busy}
-              />
-              <button
-                type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                onClick={() => setShow((s) => !s)}
-              >
-                {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={busy || password.length === 0}>
-            {busy ? "Upgrading…" : "Upgrade vault security"}
-          </Button>
-        </form>
-      </CardContent>
     </Card>
   );
 }
