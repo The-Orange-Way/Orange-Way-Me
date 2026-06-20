@@ -40,13 +40,38 @@ import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
 // Canonical Orange Rails API gateway. The Cloudflare Worker at
 // api.orangerails.com proxies /functions/v1/or-* to the live OR
 // project and survives any future OR backend migration without
-// requiring Orange Way to redeploy. Keep OR_SUPABASE_URL as an
-// override knob for one-off / staging integrations only.
-const OR_SUPABASE_URL = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
+// requiring Orange Way to redeploy.
+//
+// OR_URL_ALLOWLIST: any value the OR_SUPABASE_URL env var is permitted
+// to take. An operator who tries to point this function at an
+// unrecognized host (e.g., via a compromised secret store) cannot
+// redirect proxy traffic to an attacker-controlled endpoint. New
+// allowed values land in code review, not as an env-only change.
+const OR_URL_ALLOWLIST = new Set<string>([
+  "https://api.orangerails.com",
+  "https://staging.orangerails.com",
+  "https://dev.orangerails.com",
+]);
+const OR_SUPABASE_URL_RAW = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
+const OR_SUPABASE_URL = OR_URL_ALLOWLIST.has(OR_SUPABASE_URL_RAW) ? OR_SUPABASE_URL_RAW : null;
+if (!OR_SUPABASE_URL) {
+  console.error(
+    `[ow-or-proxy] OR_SUPABASE_URL=${OR_SUPABASE_URL_RAW} is not in the allowlist; all requests will 500 until the env var is corrected or the code allowlist is extended.`,
+  );
+}
+
 const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
+
+// Per-user-per-hour rate limit. 60 requests per hour is roughly one
+// every minute, which covers the legitimate "sync now" + "connect a
+// new bank" + "see my transactions" workflow many times over. The
+// limit exists to stop a compromised user account from being used to
+// flood OR's platform endpoints (or to abuse our quota).
+const RATE_LIMIT_PER_HOUR = 60;
 
 // Service-role client used only for the user_profiles.or_subaccount_id
 // upsert below — so the or-webhook-receiver can resolve inbound
@@ -111,7 +136,18 @@ Deno.serve(async (req: Request) => {
     );
   }
   if (!OR_SUPABASE_URL) {
-    return jsonResponse({ error: "OR_SUPABASE_URL secret not configured" }, 500, cors);
+    // OR_SUPABASE_URL was set to something outside the allowlist (see
+    // OR_URL_ALLOWLIST near the top of the file). Refuse all proxy
+    // traffic until either the env var is corrected or the code's
+    // allowlist is extended via a reviewed PR.
+    return jsonResponse(
+      {
+        error:
+          "Orange Rails endpoint is not in the function's allowlist. This is a deploy-side misconfiguration.",
+      },
+      500,
+      cors,
+    );
   }
 
   try {
@@ -127,6 +163,33 @@ Deno.serve(async (req: Request) => {
       error: authErr,
     } = await userClient.auth.getUser();
     if (authErr || !user) return jsonResponse({ error: "Unauthorized" }, 401, cors);
+
+    // ── Per-user-per-hour rate limit ─────────────────────────────────
+    // Increments a counter in public.ow_or_proxy_rate_limit via the
+    // increment_ow_or_proxy_rate RPC (SECURITY DEFINER, returns the
+    // updated count). If the count exceeds RATE_LIMIT_PER_HOUR the
+    // caller gets 429 with a Retry-After hint of the seconds remaining
+    // in the current hour bucket. Stops a compromised user account
+    // from being weaponized to flood OR's platform endpoints.
+    const { data: rateCount, error: rateErr } = await serviceClient.rpc(
+      "increment_ow_or_proxy_rate",
+      { p_user_id: user.id },
+    );
+    if (rateErr) {
+      console.error("[ow-or-proxy] rate-limit RPC failed:", rateErr.message);
+      // Fail-closed: if we cannot track the limit, refuse the request.
+      return jsonResponse({ error: "Rate-limit check failed" }, 500, cors);
+    }
+    if (typeof rateCount === "number" && rateCount > RATE_LIMIT_PER_HOUR) {
+      const secondsLeft = 3600 - Math.floor((Date.now() % 3_600_000) / 1000);
+      return jsonResponse(
+        {
+          error: `Rate limit exceeded (${RATE_LIMIT_PER_HOUR} requests per hour). Try again shortly.`,
+        },
+        429,
+        { ...cors, "Retry-After": String(secondsLeft) },
+      );
+    }
 
     // ── Parse body ───────────────────────────────────────────────────
     const raw = await readBoundedText(req);
