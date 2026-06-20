@@ -92,32 +92,72 @@ function shouldScrubKey(key: string): boolean {
   return SCRUB_VALUE_KEY_HINTS.some((hint) => k.includes(hint));
 }
 
+// Max recursion depth into nested objects/arrays. PostHog event
+// properties are flat by convention, but a callsite could pass a
+// nested shape by accident. A depth of 4 covers any realistic
+// payload while preventing pathological structures from running
+// the scrubber for an unbounded amount of time. Exported so the
+// test suite can verify against the same constant rather than a
+// magic number.
+export const MAX_SCRUB_DEPTH = 4;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== "object" || v === null) return false;
+  if (Array.isArray(v)) return false;
+  // Reject typed containers like Date, Map, Set, RegExp, etc. Their
+  // own-property keys are usually empty, so Object.entries(v) would
+  // silently turn them into {}; better to leave them untouched.
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+function scrubValue(key: string, value: unknown, depth: number): unknown {
+  if (key === "$current_url" || key === "$referrer" || key === "$pathname") {
+    return scrubUrl(value);
+  }
+  if (SCRUB_RESERVED_KEYS.has(key)) {
+    return "[redacted]";
+  }
+  if (shouldScrubKey(key)) {
+    return "[redacted]";
+  }
+  if (typeof value === "string" && value.length > 256) {
+    // Cap long strings: a 1KB string in an event property is almost
+    // never a deliberate analytics signal, but it's a great way to
+    // accidentally exfiltrate ciphertext or a base64-encoded key.
+    return value.slice(0, 256) + "…";
+  }
+  if (depth >= MAX_SCRUB_DEPTH) {
+    // Past the depth cap: pass primitives through, but redact any
+    // further nesting so a deliberately-deep payload cannot smuggle
+    // sensitive content past the scrubber.
+    if (isPlainObject(value) || Array.isArray(value)) return "[redacted-deep]";
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => scrubValue(key, v, depth + 1));
+  }
+  if (isPlainObject(value)) {
+    const inner: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      // Defensive: skip dangerous key names. Object.entries already
+      // excludes non-enumerable keys, so __proto__ on a literal will
+      // not appear here, but a key parsed from JSON.parse could.
+      if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+      inner[k] = scrubValue(k, v, depth + 1);
+    }
+    return inner;
+  }
+  return value;
+}
+
 function scrubProperties(
   props: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
   if (!props) return props;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(props)) {
-    if (key === "$current_url" || key === "$referrer" || key === "$pathname") {
-      out[key] = scrubUrl(value);
-      continue;
-    }
-    if (SCRUB_RESERVED_KEYS.has(key)) {
-      out[key] = "[redacted]";
-      continue;
-    }
-    if (shouldScrubKey(key)) {
-      out[key] = "[redacted]";
-      continue;
-    }
-    if (typeof value === "string" && value.length > 256) {
-      // Cap long strings: a 1KB string in an event property is almost
-      // never a deliberate analytics signal, but it's a great way to
-      // accidentally exfiltrate ciphertext or a base64-encoded key.
-      out[key] = value.slice(0, 256) + "…";
-      continue;
-    }
-    out[key] = value;
+    out[key] = scrubValue(key, value, 0);
   }
   return out;
 }
