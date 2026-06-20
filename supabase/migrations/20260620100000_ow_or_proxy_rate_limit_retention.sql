@@ -54,3 +54,10 @@ COMMENT ON FUNCTION public.increment_ow_or_proxy_rate(uuid) IS
 
 COMMENT ON TABLE public.ow_or_proxy_rate_limit IS
   'Per-user-per-hour request counter for the ow-or-proxy edge function. Written exclusively by the increment_ow_or_proxy_rate SECURITY DEFINER RPC, which also enforces a 24h retention window on every call.';
+
+-- Re-assert the ACL explicitly. CREATE OR REPLACE preserves existing
+-- grants by default, but spelling them out keeps the audit trail
+-- complete: every migration that touches a SECURITY DEFINER function
+-- should make its callers visible without having to chase prior files.
+REVOKE ALL ON FUNCTION public.increment_ow_or_proxy_rate(uuid) FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_ow_or_proxy_rate(uuid) TO service_role;
