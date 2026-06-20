@@ -617,22 +617,23 @@ export async function deriveOrOpkSeedFromMek(
 // ---------- KDF strategy map (Open/Closed Principle extension point) ----------
 //
 // STABILITY RULE: a strategy entry MUST never be removed from
-// KEY_DERIVATION_STRATEGIES once it has been deployed, even after
-// CURRENT_VAULT_KEY_VERSION advances past it. Every existing vault
-// row carries its own vault_key_version, and unlock fails permanently
-// if its strategy is no longer registered.
+// KEY_DERIVATION_STRATEGIES once a vault has been written under it.
+// Every vault row stores its own vault_key_version, and unlock fails
+// permanently if its strategy is no longer registered.
 //
-// The legacy fallback in VaultContext.tsx (`row.vault_key_version ?? 2`)
-// reads vaults that pre-date the column. Removing the v2 entry would
-// brick every one of those vaults on the next unlock attempt.
+// History: pre-public-launch the registry carried v2 (PBKDF2-SHA256
+// 600k iter) and v3 (Argon2id 64 MiB / 3 iter / 4 lanes), with v3 as
+// the upgrade target driven by an explicit Settings-page button. When
+// the public-launch wipe removed every existing vault row, no vault
+// referenced v2 or v3 anymore, so the registry was renumbered to a
+// single entry at v1 mapping to the same Argon2id parameters. New
+// vaults created after the launch are written under v=1.
 //
-// When adding a new version (e.g. v4 with scrypt or a future memory-
-// hard KDF), append a new entry and bump CURRENT_VAULT_KEY_VERSION.
-// Never delete a previous entry. The lazy migration runs on the next
-// successful unlock and rewrites the row to the latest strategy.
+// When adding a new version, append a new entry and bump
+// CURRENT_VAULT_KEY_VERSION. Never delete a previous entry.
 
-export type VaultKeyVersion = 2 | 3;
-export const CURRENT_VAULT_KEY_VERSION: VaultKeyVersion = 3;
+export type VaultKeyVersion = 1;
+export const CURRENT_VAULT_KEY_VERSION: VaultKeyVersion = 1;
 
 export interface KeyDerivationStrategy {
   deriveMek: (password: string, saltB64: string) => Promise<CryptoKey>;
@@ -642,24 +643,12 @@ export interface KeyDerivationStrategy {
 }
 
 /**
- * Strategy map keyed by vault_key_version. New versions (e.g. v4 with
- * scrypt or a future memory-hard KDF) plug in here without touching the
- * VaultContext unlock/upgrade flow.
- *
- * The v2 adapters bind the default PBKDF2 iteration count (600k) so the
- * strategy surface matches across versions.
+ * Strategy map keyed by vault_key_version. A new entry plugs in here
+ * (e.g. v=2 with bumped Argon2id parameters or a future memory-hard
+ * KDF) without touching the VaultContext unlock flow.
  */
 export const KEY_DERIVATION_STRATEGIES: Record<VaultKeyVersion, KeyDerivationStrategy> = {
-  2: {
-    deriveMek: (password, saltB64) => deriveMek(password, saltB64, PBKDF2_ITERATIONS),
-    deriveMekRawBytes: (password, saltB64) =>
-      deriveMekRawBytes(password, saltB64, PBKDF2_ITERATIONS),
-    wrapMekWithPassword: (mek, password, saltB64) =>
-      wrapMekWithPassword(mek, password, saltB64, PBKDF2_ITERATIONS),
-    unwrapMekWithPassword: (ct, password, saltB64) =>
-      unwrapMekWithPassword(ct, password, saltB64, PBKDF2_ITERATIONS),
-  },
-  3: {
+  1: {
     deriveMek: deriveMekArgon2id,
     deriveMekRawBytes: deriveMekRawBytesArgon2id,
     wrapMekWithPassword: wrapMekWithPasswordArgon2id,

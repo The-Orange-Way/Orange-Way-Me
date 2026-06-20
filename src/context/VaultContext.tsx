@@ -240,8 +240,6 @@ interface VaultContextType {
   recoverWithCode: (recoveryCode: string, newPassword: string) => Promise<void>;
   /** Change vault password without re-encrypting data (new arch only). */
   changeVaultPassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  /** Re-wrap the MEK under an Argon2id-derived KEK (v2 → v3). */
-  upgradeVaultToArgon2id: (currentPassword: string) => Promise<void>;
   /** Regenerate the recovery code (vault must be unlocked). Returns new code. */
   regenerateRecoveryCode: () => Promise<string>;
   encryptText: (plaintext: string) => Promise<string>;
@@ -425,7 +423,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       setHasVault(Boolean(data));
       if (data) {
         const row = data as { vault_key_version: number | null };
-        setVaultKeyVersion(row.vault_key_version ?? 2);
+        setVaultKeyVersion(row.vault_key_version ?? 1);
       } else {
         setVaultKeyVersion(null);
       }
@@ -702,9 +700,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     let mek: CryptoKey;
     let mekBytes: Uint8Array;
-    // Null/missing = pre-migration row = v2 by definition.
-    const version = (row.vault_key_version ?? 2) as VaultKeyVersion;
-    const strategy = KEY_DERIVATION_STRATEGIES[version] ?? KEY_DERIVATION_STRATEGIES[2];
+    // Null/missing = should not occur post-wipe; defensive fallback to v1.
+    const version = (row.vault_key_version ?? 1) as VaultKeyVersion;
+    const strategy = KEY_DERIVATION_STRATEGIES[version] ?? KEY_DERIVATION_STRATEGIES[1];
 
     if (row.enc_mek_ciphertext) {
       // Current architecture: unwrap MEK using the version-appropriate KDF.
@@ -853,9 +851,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Legacy vault — recreate to enable password change.");
 
     // Verify old password using whichever KDF currently protects the MEK.
-    const currentVersion = (row.vault_key_version ?? 2) as VaultKeyVersion;
+    const currentVersion = (row.vault_key_version ?? 1) as VaultKeyVersion;
     const currentStrategy =
-      KEY_DERIVATION_STRATEGIES[currentVersion] ?? KEY_DERIVATION_STRATEGIES[2];
+      KEY_DERIVATION_STRATEGIES[currentVersion] ?? KEY_DERIVATION_STRATEGIES[1];
     try {
       await currentStrategy.unwrapMekWithPassword(
         row.enc_mek_ciphertext,
@@ -920,61 +918,6 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn("[vault] rewrapUserKeypair failed; will retry next unlock", e);
     }
-  }, []);
-
-  const upgradeVaultToArgon2id = useCallback(async (currentPassword: string) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not authenticated");
-
-    const { data, error } = await vaultTable()
-      .select("kdf_salt,kdf_iterations,enc_mek_ciphertext,vault_key_version")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (error || !data) throw new Error("Vault metadata not found");
-    const row = data as Pick<
-      VaultMetadataRow,
-      "kdf_salt" | "kdf_iterations" | "enc_mek_ciphertext" | "vault_key_version"
-    >;
-    if (!row.enc_mek_ciphertext) throw new Error("Legacy vault — change your password to upgrade");
-    if ((row.vault_key_version ?? 2) >= 3) throw new Error("Vault already on Argon2id");
-
-    // Unwrap the existing MEK using v2 (the only version that can precede v3).
-    let mekBytes: Uint8Array;
-    try {
-      mekBytes = await KEY_DERIVATION_STRATEGIES[2].unwrapMekWithPassword(
-        row.enc_mek_ciphertext,
-        currentPassword,
-        row.kdf_salt,
-      );
-    } catch {
-      throw new Error("Current vault password is incorrect");
-    }
-
-    // Re-wrap the same MEK under an Argon2id-derived KEK with a fresh salt.
-    // Intentionally leave kdf_iterations unchanged: the column is meaningless
-    // for v3 (Argon2id parameters are constants in vault.ts), but preserving
-    // the previous value keeps v2 back-compat for any row that gets inspected.
-    const newSalt = randomBytesB64(16);
-    const newEncMek = await KEY_DERIVATION_STRATEGIES[3].wrapMekWithPassword(
-      mekBytes.buffer as ArrayBuffer,
-      currentPassword,
-      newSalt,
-    );
-
-    const { error: upErr } = await vaultTable()
-      .update({
-        kdf_salt: newSalt,
-        enc_mek_ciphertext: newEncMek,
-        vault_key_version: 3,
-      })
-      .eq("user_id", user.id);
-    if (upErr) throw new Error(upErr.message);
-
-    setVaultKeyVersion(3);
-
-    void logSecurityEvent(user.id, "vault_upgraded", { from_version: 2, to_version: 3 });
   }, []);
 
   const regenerateRecoveryCode = useCallback(async (): Promise<string> => {
@@ -1461,7 +1404,6 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         lock,
         recoverWithCode,
         changeVaultPassword,
-        upgradeVaultToArgon2id,
         regenerateRecoveryCode,
         encryptText,
         decryptText,
