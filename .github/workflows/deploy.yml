@@ -144,3 +144,24 @@ jobs:
           fi
           curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
           echo "✓ ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
+
+      # E2E smoke against the freshly-deployed environment. Chromium
+      # only on every push so deploys stay fast; the Firefox / WebKit
+      # / mobile projects in playwright.config.ts run locally (and in
+      # a future nightly matrix workflow). Tests stub /api/signup
+      # internally, so this step does NOT actually call Resend.
+      - name: Install Playwright (chromium)
+        run: bunx playwright install --with-deps chromium
+
+      - name: Playwright smoke + marketing-form interaction
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
+        run: bunx playwright test --project=chromium --reporter=list
+
+      - name: Upload Playwright HTML report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.ref_name }}
+          path: playwright-report/
+          retention-days: 7
