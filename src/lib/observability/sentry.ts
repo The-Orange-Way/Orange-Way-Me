@@ -117,6 +117,27 @@ const TOKEN_PATTERNS: Array<[RegExp, string]> = [
 
 const REDACTED = "[redacted]";
 
+/**
+ * Default Sentry integrations we explicitly disable. Each name is the
+ * integration's `.name` property as exposed by the @sentry/react default
+ * integration set. Exported so the contract test in
+ * __tests__/sentry.test.ts can assert against the same source of truth.
+ *
+ * When bumping `@sentry/react` to a new major, re-verify against the
+ * SDK's current default integration list:
+ *   - new PII-leaning integration shipped? Add the name here.
+ *   - one of these renamed? Update the name here AND in the test.
+ * The companion test asserts the filtered list is a subset of a known-
+ * safe allowlist so a future SDK shipping a new default we missed will
+ * be caught by a positive failure.
+ */
+export const DROPPED_INTEGRATIONS: ReadonlySet<string> = new Set([
+  "BrowserTracing",
+  "Replay",
+  "BrowserSession",
+  "HttpContext",
+]);
+
 function scrubString(s: string): string {
   let out = s;
   for (const [re, repl] of TOKEN_PATTERNS) {
@@ -190,11 +211,36 @@ export function initSentry(): void {
     environment,
     release,
     tracesSampleRate: 0,
-    // Drop the heavy integrations explicitly — Sentry would otherwise auto-
-    // enable BrowserTracing and Replay, both of which fight ZKA (Replay
-    // ships DOM mutations including form inputs).
-    integrations: (defaults) =>
-      defaults.filter((i) => i.name !== "BrowserTracing" && i.name !== "Replay"),
+    // Explicit no-PII guarantee. The default in @sentry/react v10 is
+    // already false, but Sentry has shifted privacy-relevant defaults
+    // across major versions before; pinning this here keeps the
+    // no-tracking marketing claim ("we can't see your data") honest
+    // even if a future minor flips the default. When true, Sentry
+    // attaches the request IP, User-Agent, and cookies to every
+    // event.
+    sendDefaultPii: false,
+    // Drop the heavy or PII-leaning integrations explicitly. Sentry
+    // would otherwise auto-enable:
+    //   - BrowserTracing: performance traces with URL + route metadata
+    //   - Replay: DOM mutations including form inputs (a direct ZKA
+    //     breach)
+    //   - BrowserSession: per-pageload session id keyed against ingest
+    //     IP, a fingerprint at the Sentry edge with no value for an
+    //     error-only deployment (in Sentry v10 sessions are managed
+    //     via this integration, not the v8 `autoSessionTracking`
+    //     option)
+    //   - HttpContext: attaches request.url + request.headers +
+    //     request.cookies to every event from document/navigator.
+    //     Cookies include the Supabase auth JWT. The `beforeSend`
+    //     scrubber catches this on the way out, but dropping the
+    //     integration means cookie strings never enter the pipeline.
+    //
+    // SDK-version note: the filter is name-string based. When bumping
+    // `@sentry/react`, re-verify against the SDK's current default
+    // integrations; if any of these are renamed the filter is
+    // silently vacuous. The companion test asserts each name is
+    // dropped against a synthetic defaults list.
+    integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
     beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
