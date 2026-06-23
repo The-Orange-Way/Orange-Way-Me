@@ -76,7 +76,7 @@
     "embla-carousel-react": "^8.6.0",
     "hash-wasm": "^4.12.0",
     "input-otp": "^1.4.2",
-    "libsodium-wrappers-sumo": "^0.7.13",
+    "libsodium-wrappers-sumo": "^0.8.4",
     "lucide-react": "^1.16.0",
     "papaparse": "^5.5.3",
     "posthog-js": "^1.376.2",
