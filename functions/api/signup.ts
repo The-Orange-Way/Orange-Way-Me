@@ -1,7 +1,6 @@
 /**
  * Cloudflare Pages Function — signup endpoint.
- * Sends transactional confirmation via Resend; persists to Resend
- * Audiences as the marketing-list system of record.
+ * Sends a transactional confirmation via Resend.
  *
  * Routed by the `form` field in the POST body:
  *   - "waitlist": OrangeWay marketing waitlist
@@ -13,23 +12,25 @@
  *
  * Hardening:
  *   - Per-IP rate limit via `caches.default` (1 req / 20 sec ~= 3/min).
- *     This is a coarse defense against casual scrapers and burst-from-
- *     one-IP enumeration. Edge-cache writes are best-effort; for a
- *     stronger guarantee, layer Cloudflare WAF Rate Limiting Rules
- *     on top in the zone dashboard.
- *   - Upstream Resend error messages are passed through `redactEmails`
- *     before any logging. Resend's failure body can echo the submitted
- *     recipient address in validation messages; without scrubbing,
- *     that real user email would land in Workers tail logs / Logpush.
- *   - Resend Audiences persistence is fire-and-forget via
- *     `ctx.waitUntil` so an Audiences-side failure cannot bubble into
- *     the user-facing response. The Audience IDs are optional env
- *     vars; if either is unset the persistence step no-ops.
+ *     Coarse defense against casual scrapers and burst-from-one-IP
+ *     enumeration. Edge-cache writes are best-effort; for a stronger
+ *     guarantee, layer Cloudflare WAF Rate Limiting Rules on top in
+ *     the zone dashboard.
+ *   - Upstream Resend error messages pass through `redactEmails`
+ *     before any logging. Resend's failure body can echo the
+ *     submitted recipient address in validation messages; without
+ *     scrubbing, that real user email would land in Workers tail
+ *     logs / Logpush.
+ *
+ * Marketing-list system of record: deliberately NOT plumbed yet. The
+ * Resend "Emails" log already captures every send, which is enough
+ * to reconstruct the list at launch-announcement time. Adding a
+ * Resend Audience (or any second store) before there's a broadcast
+ * to send only adds compliance load (GDPR Art. 13/14, Quebec Law 25,
+ * CASL) without operational benefit. Roadmapped for closer to launch.
  *
  * Env vars (set on the orangeway-dev + orangeway-prod CF Pages projects):
- *   RESEND_API_KEY_OW              required, Resend API key scoped to send.orangeway.app.
- *   RESEND_AUDIENCE_ID_WAITLIST    optional, Audience ID for "waitlist" signups.
- *   RESEND_AUDIENCE_ID_BOOK        optional, Audience ID for "book" signups.
+ *   RESEND_API_KEY_OW   required, Resend API key scoped to send.orangeway.app.
  */
 
 import {
@@ -41,8 +42,6 @@ import {
 
 interface Env {
   RESEND_API_KEY_OW: string;
-  RESEND_AUDIENCE_ID_WAITLIST?: string;
-  RESEND_AUDIENCE_ID_BOOK?: string;
 }
 
 const FROM_NAME = "OrangeWay";
@@ -174,26 +173,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ error: "send failed" }, 502);
   }
 
-  // Persist to Resend Audiences as the marketing-list system of
-  // record. Fire-and-forget: the user's confirmation email already
-  // sent, and an Audiences-side failure should not surface as a
-  // signup error. ctx.waitUntil keeps the worker alive long enough
-  // for the call to complete past the response.
-  const audienceId =
-    body.form === "waitlist"
-      ? ctx.env.RESEND_AUDIENCE_ID_WAITLIST
-      : ctx.env.RESEND_AUDIENCE_ID_BOOK;
-  if (audienceId) {
-    ctx.waitUntil(
-      addToAudience({
-        apiKey,
-        audienceId,
-        email: body.email,
-        rayId: ctx.request.headers.get("cf-ray"),
-      }),
-    );
-  }
-
   return json({ ok: true }, 200);
 };
 
@@ -230,41 +209,6 @@ async function hitRateLimit(clientIp: string): Promise<boolean> {
   });
   await cache.put(key, sentinel);
   return false;
-}
-
-/**
- * POST a contact to a Resend Audience. Errors are logged (with PII
- * scrubbed) but never thrown; the caller is fire-and-forget.
- */
-async function addToAudience(args: {
-  apiKey: string;
-  audienceId: string;
-  email: string;
-  rayId: string | null;
-}): Promise<void> {
-  try {
-    const resp = await fetch(`https://api.resend.com/audiences/${args.audienceId}/contacts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${args.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email: args.email, unsubscribed: false }),
-    });
-    if (!resp.ok) {
-      const rawDetail = await resp.text().catch(() => "");
-      console.error("signup: Resend Audiences add failed", {
-        rayId: args.rayId,
-        status: resp.status,
-        detail: redactEmails(rawDetail).slice(0, 200),
-      });
-    }
-  } catch (err) {
-    console.error("signup: Resend Audiences add threw", {
-      rayId: args.rayId,
-      message: redactEmails(String(err)).slice(0, 200),
-    });
-  }
 }
 
 /**
