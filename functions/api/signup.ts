@@ -6,72 +6,88 @@
  *   - "waitlist": OrangeWay marketing waitlist
  *   - "book":     Sato & the Chocolate Coins book early-access list
  *
+ * Body shape and email validation are shared with the client hook via
+ * `src/lib/marketing/signup-schema.ts`. That module is React-free so
+ * importing it here does not pull React into the Worker bundle.
+ *
  * Env vars required (set on the orangeway-dev + orangeway-prod CF Pages projects):
  *   RESEND_API_KEY_OW   — Resend API key, scoped to send.orangeway.app
  */
 
+import {
+  buildSignupRequestSchema,
+  type SignupFormType,
+  type SignupKidsAge,
+} from "../../src/lib/marketing/signup-schema";
+
 interface Env {
   RESEND_API_KEY_OW: string;
-}
-
-type FormType = "waitlist" | "book";
-type KidsAge = "not_yet" | "little" | "bigger" | "just_me";
-
-interface SignupBody {
-  form: FormType;
-  email: string;
-  kids?: KidsAge;
 }
 
 const FROM_NAME = "OrangeWay";
 const FROM_ADDR = "support@send.orangeway.app"; // verified Resend sending domain
 const REPLY_TO = "support@orangeway.app";
 
-const COPY: Record<FormType, { subject: string; html: (email: string, kids?: KidsAge) => string }> =
-  {
-    waitlist: {
-      subject: "You're on the OrangeWay waitlist",
-      html: (_email) => `
+const COPY: Record<
+  SignupFormType,
+  { subject: string; html: (email: string, kids?: SignupKidsAge) => string }
+> = {
+  waitlist: {
+    subject: "You're on the OrangeWay waitlist",
+    html: (_email) => `
 <p>Thanks for joining the OrangeWay waitlist.</p>
 <p>The first 100 households get lifetime founder pricing — $100 a year, locked in forever. We'll email you before launch.</p>
 <p>OrangeWay is open source: <a href="https://github.com/The-Orange-Way/Orange-Way-Me">github.com/The-Orange-Way/Orange-Way-Me</a>. Don't trust. Verify.</p>
 <p>— OrangeWay</p>
 <p style="color: #888; font-size: 12px;">The finance app that minds its own business around your data. Not your keys, not your privacy.</p>`,
-    },
-    book: {
-      subject: "We'll email you when Sato ships",
-      html: (_email, kids) => {
-        const kidsBlurb = (
-          {
-            not_yet: "Saving Sato for the future kids.",
-            little: "Reading to the little ones — perfect age.",
-            bigger: "Reading with bigger kids — they'll still love the pig.",
-            just_me: "For the inner kid. Respect.",
-          } as const
-        )[kids ?? "little"];
-        return `
+  },
+  book: {
+    subject: "We'll email you when Sato ships",
+    html: (_email, kids) => {
+      const kidsBlurb = (
+        {
+          not_yet: "Saving Sato for the future kids.",
+          little: "Reading to the little ones: perfect age.",
+          bigger: "Reading with bigger kids; they'll still love the pig.",
+          just_me: "For the inner kid. Respect.",
+        } as const
+      )[kids ?? "little"];
+      return `
 <p>Thanks for signing up for <em>Sato &amp; the Chocolate Coins</em>.</p>
 <p>${kidsBlurb}</p>
 <p>We'll email you the moment the book is ready to ship. Until then, the rest of OrangeWay is being built around the same idea: helping families get good with money.</p>
 <p>— OrangeWay</p>`;
-      },
     },
-  };
+  },
+};
 
-function emailValid(s: unknown): s is string {
-  return typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) && s.length <= 255;
-}
+// Request body schema. Shared with the client hook so the email
+// regex, max length, and form/kids enum values cannot drift between
+// client and server.
+const requestSchema = buildSignupRequestSchema();
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
-  let body: SignupBody;
+  let raw: unknown;
   try {
-    body = await ctx.request.json();
+    raw = await ctx.request.json();
   } catch {
     return json({ error: "invalid JSON" }, 400);
   }
 
-  if (!emailValid(body.email)) return json({ error: "invalid email" }, 400);
-  if (body.form !== "waitlist" && body.form !== "book") return json({ error: "invalid form" }, 400);
+  const parsed = requestSchema.safeParse(raw);
+  if (!parsed.success) {
+    // Route to the matching error bucket based on which field failed.
+    // Default unknown failures (kids enum, malformed body shape) to
+    // "invalid form" rather than "invalid email" so a debugging
+    // contributor isn't sent looking for an email problem that isn't
+    // there. Specific names also avoid the audit's enumeration-vector
+    // concern: nothing about the response tells an attacker whether
+    // the email was specifically valid or not.
+    const firstField = parsed.error.issues[0]?.path[0];
+    const errKey = firstField === "email" ? "invalid email" : "invalid form";
+    return json({ error: errKey }, 400);
+  }
+  const body = parsed.data;
 
   const copy = COPY[body.form];
   const apiKey = ctx.env.RESEND_API_KEY_OW;
