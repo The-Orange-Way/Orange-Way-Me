@@ -29,6 +29,12 @@ export function VaultGate() {
   );
 }
 
+// e2e-anchor: tests/e2e/auth.setup.ts unlocks the vault via the
+// #v-pw input and the "Unlock" button. tests/e2e/authenticated-
+// routes.spec.ts asserts that #v-pw is NOT visible on every
+// authenticated route as the canonical "auth state still holds"
+// check. Renaming the id or the button text breaks both; update the
+// specs in the same change.
 function UnlockForm() {
   const { unlock } = useVault();
   const { signOut } = useAuth();

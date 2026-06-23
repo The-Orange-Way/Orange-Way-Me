@@ -64,7 +64,31 @@ bunx playwright test --project=chromium
 PLAYWRIGHT_BASE_URL=https://dev.orangeway.app bunx playwright test --project=chromium
 ```
 
-`playwright.config.ts` declares five projects: `chromium`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari`. CI runs the `chromium` project against the freshly-deployed environment in `.github/workflows/deploy.yml`. The other projects are opt-in locally; install the browsers once with `bunx playwright install firefox webkit` (Linux contributors will also need `bunx playwright install-deps`). When you add a new spec that depends on a specific selector (a `#anchor`, a `<select>`, a `data-testid`), add a comment in the component naming the spec that depends on it: see `BookForm` and `FinalCTA` in `src/routes/landing-classic.tsx` for the pattern.
+`playwright.config.ts` declares five public-surface projects: `chromium`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari`. CI runs the `chromium` project against the freshly-deployed environment in `.github/workflows/deploy.yml`. The other projects are opt-in locally; install the browsers once with `bunx playwright install firefox webkit` (Linux contributors will also need `bunx playwright install-deps`). When you add a new spec that depends on a specific selector (a `#anchor`, a `<select>`, a `data-testid`), add a comment in the component naming the spec that depends on it: see `BookForm` and `FinalCTA` in `src/routes/landing-classic.tsx` for the pattern.
+
+### Authenticated suite (vault-aware)
+
+Two more projects exist for the post-login app:
+
+- `authenticated-setup` runs `tests/e2e/auth.setup.ts` once, which logs the test user in, unlocks the vault, and writes the browser context's cookies + localStorage to `tests/e2e/.auth/user.json` (gitignored).
+- `authenticated` runs `tests/e2e/authenticated-routes.spec.ts` and starts every test already authenticated by loading that storage state. Depends on `authenticated-setup`, so a single project run takes care of both.
+
+> **Use a dedicated fixture/test account.** Never run the harness against a real customer account or your own production account. The harness captures full-page screenshots of authenticated content (dashboard, transactions, balances), and the setup spec refuses to run against the production `orangeway.app` host as a backstop. Screenshots land under `tests/e2e/screenshots/` (gitignored): treat that directory like financial data: do not share, attach to public issues, or paste into chat/wiki without redaction; delete after review.
+
+Required env vars (the setup spec fails fast with instructions if any are missing):
+
+```bash
+export E2E_USER_EMAIL=...      # Supabase auth email for the fixture user
+export E2E_USER_PASSWORD=...   # Supabase auth password for the fixture user
+export E2E_VAULT_PASSWORD=...  # The vault password (the secret the
+                               # client uses to derive the OPK key
+                               # material; see /security for the
+                               # full scheme)
+PLAYWRIGHT_BASE_URL=https://dev.orangeway.app \
+  bunx playwright test --project=authenticated
+```
+
+The setup spec explicitly asserts the post-unlock destination is `/dashboard` and the harness asserts the vault-password input (`#v-pw`) is NOT visible on every authenticated route, so a green run means the auth state actually held, not that we screenshotted the lock screen 9 times. Contributors without credentials should pass `--project=chromium` (or omit `--project` to run only the unauthenticated projects) and the authenticated suite is silently skipped.
 
 ---
 
