@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { z } from "zod";
 import { useAuth } from "@/context/AuthContext";
+import { useSignupForm } from "@/lib/marketing/useSignupForm";
 import bookCover from "@/assets/orange-way/book-cover.png";
 import { BudgetMockup } from "@/components/marketing/mockups/BudgetMockup";
 import { BitcoinMockup } from "@/components/marketing/mockups/BitcoinMockup";
@@ -1266,48 +1266,11 @@ function BookSection() {
   );
 }
 
-const bookSchema = z.object({
-  // zod 4 prefers z.email() over the older z.string().email() alias;
-  // the .pipe() wrapper preserves trim-before-validate UX so pasted
-  // emails with stray whitespace still pass. See src/routes/index.tsx
-  // for the full reasoning.
-  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
-  kids: z.enum(["not_yet", "little", "bigger", "just_me"]),
-});
-
 function BookForm() {
-  const [email, setEmail] = useState("");
-  const [kids, setKids] = useState<"not_yet" | "little" | "bigger" | "just_me">("little");
-  const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    const parsed = bookSchema.safeParse({ email, kids });
-    if (!parsed.success) {
-      setErr(parsed.error.issues[0]?.message ?? "Something's off.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resp = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ form: "book", email: parsed.data.email, kids: parsed.data.kids }),
-      });
-      if (!resp.ok) {
-        setErr("Something went wrong. Try again in a minute.");
-        setSubmitting(false);
-        return;
-      }
-      setDone(true);
-    } catch {
-      setErr("Network error. Try again in a minute.");
-      setSubmitting(false);
-    }
-  };
+  const { email, setEmail, kids, setKids, err, done, submitting, onSubmit } = useSignupForm({
+    form: "book",
+    withKids: true,
+  });
 
   if (done) {
     return (
@@ -1389,44 +1352,10 @@ function FinalCTA() {
   );
 }
 
-const waitlistSchema = z.object({
-  // Same pattern as bookSchema above: trim before validate so pasted
-  // emails with stray whitespace still pass under zod 4 z.email().
-  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
-});
-
 function WaitlistForm() {
-  const [email, setEmail] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    const p = waitlistSchema.safeParse({ email });
-    if (!p.success) {
-      setErr(p.error.issues[0]?.message ?? "Something's off.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resp = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ form: "waitlist", email: p.data.email }),
-      });
-      if (!resp.ok) {
-        setErr("Something went wrong. Try again in a minute.");
-        setSubmitting(false);
-        return;
-      }
-      setDone(true);
-    } catch {
-      setErr("Network error. Try again in a minute.");
-      setSubmitting(false);
-    }
-  };
+  const { email, setEmail, err, done, submitting, onSubmit } = useSignupForm({
+    form: "waitlist",
+  });
 
   if (done) {
     return (

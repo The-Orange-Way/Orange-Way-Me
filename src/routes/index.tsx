@@ -17,8 +17,8 @@
  */
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { z } from "zod";
 import bookCover from "@/assets/orange-way/book-cover.png";
+import { useSignupForm } from "@/lib/marketing/useSignupForm";
 import { BitcoinMockup } from "@/components/marketing/mockups/BitcoinMockup";
 import { BudgetMockup } from "@/components/marketing/mockups/BudgetMockup";
 import { HouseholdMockup } from "@/components/marketing/mockups/HouseholdMockup";
@@ -576,52 +576,8 @@ function PrivacyVisual() {
 // Book — Sato + Chocolate Coins lead magnet
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TODO: extract a shared <BookEmailForm /> with src/routes/landing-classic.tsx
-// BookForm: both routes carry near-identical schema + submit logic. Tracked
-// as a follow-up so this PR stays focused on un-breaking the form.
-const bookSchema = z.object({
-  // zod 4 promotes z.email() to the canonical form; z.string().email() is
-  // still aliased but slated for removal in zod 5. The .pipe() wrapper
-  // preserves the original "trim before validate" UX semantics: a user
-  // who pastes "  foo@bar.com  " gets accepted, not failed (that fails
-  // under a bare z.email().trim() chain because the email regex runs on
-  // the raw input first). Same shape used at the two landing-classic
-  // sites for parity.
-  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
-});
-
 function Book() {
-  const [email, setEmail] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    const parsed = bookSchema.safeParse({ email });
-    if (!parsed.success) {
-      setErr(parsed.error.issues[0]?.message ?? "Something is off.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resp = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ form: "book", email: parsed.data.email }),
-      });
-      if (!resp.ok) {
-        setErr("Something went wrong. Try again in a minute.");
-        setSubmitting(false);
-        return;
-      }
-      setDone(true);
-    } catch {
-      setErr("Network error. Try again in a minute.");
-      setSubmitting(false);
-    }
-  };
+  const { email, setEmail, err, done, submitting, onSubmit } = useSignupForm({ form: "book" });
 
   return (
     <section id="book" className="px-6 py-24 md:py-32">
