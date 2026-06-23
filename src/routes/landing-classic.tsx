@@ -1267,7 +1267,11 @@ function BookSection() {
 }
 
 const bookSchema = z.object({
-  email: z.string().trim().email("That doesn't look like an email").max(255),
+  // zod 4 prefers z.email() over the older z.string().email() alias;
+  // the .pipe() wrapper preserves trim-before-validate UX so pasted
+  // emails with stray whitespace still pass. See src/routes/index.tsx
+  // for the full reasoning.
+  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
   kids: z.enum(["not_yet", "little", "bigger", "just_me"]),
 });
 
@@ -1386,7 +1390,9 @@ function FinalCTA() {
 }
 
 const waitlistSchema = z.object({
-  email: z.string().trim().email("That doesn't look like an email").max(255),
+  // Same pattern as bookSchema above: trim before validate so pasted
+  // emails with stray whitespace still pass under zod 4 z.email().
+  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
 });
 
 function WaitlistForm() {
