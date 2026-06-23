@@ -1,11 +1,11 @@
 /**
- * useSignupForm pure-core contract tests.
+ * Signup schema + submit pipeline contract tests.
  *
- * Targets the non-React `postSignup` function (and the schema it builds
- * internally), so we exercise the validation + network pipeline without
- * pulling @testing-library/react into the dev tree. The React hook is a
- * thin wrapper around `postSignup` and is exercised end-to-end by
- * Playwright on the marketing routes.
+ * Targets the isomorphic `signup-schema.ts` module that both the
+ * React hook (`useSignupForm`) and the Cloudflare Pages function at
+ * `functions/api/signup.ts` import. Keeping these tests on the pure
+ * core means we exercise the validation + network pipeline without
+ * pulling @testing-library/react into the dev tree.
  *
  * Load-bearing surfaces tested here:
  *   - schema accepts pasted emails with stray whitespace (trim-before-
@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { buildSignupEmailSchema, postSignup } from "../useSignupForm";
+import { buildSignupEmailSchema, postSignup } from "../signup-schema";
 
 function okResponse(): Response {
   return new Response("{}", { status: 200 });
