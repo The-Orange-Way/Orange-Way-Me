@@ -51,6 +51,34 @@ export function buildSignupRequestSchema(errorMessage: string = DEFAULT_SIGNUP_E
   });
 }
 
+/**
+ * Strip email-like substrings from a string, replacing each with
+ * `<redacted-email>`. Used by functions/api/signup.ts to scrub PII
+ * out of upstream error messages before they hit Workers logs.
+ *
+ * Resend's failure body can echo the submitted recipient address back
+ * in validation messages (e.g. "Invalid `to` field: not.an.email"),
+ * which would otherwise persist a real user email in any log surface
+ * (tail logs, Logpush, error-tracking pipelines). The replacement
+ * pattern is intentionally a touch wider than RFC 5321 so a malformed
+ * but email-shaped string still gets caught; over-redaction here is
+ * always safer than under-redaction.
+ */
+export function redactEmails(s: string): string {
+  // Single greedy "non-whitespace @ non-whitespace . non-whitespace"
+  // pass. Catches the full address regardless of local-part character
+  // class — apostrophes (o'hara@x.co), IDN domains (user@münchen.de),
+  // Unicode local-parts (日本@example.jp), and dotted/plused/dashed
+  // RFC shapes alike. Over-redaction is always safer than under.
+  //
+  // A narrower RFC-shaped pass was considered and rejected: running
+  // it first left a tail of the original local-part when the address
+  // contained characters outside the narrow class (e.g. apostrophes),
+  // and the backstop then no longer saw an `@`. One greedy pass is
+  // simpler and cannot fail that way.
+  return s.replace(/\S+@\S+\.\S+/g, "<redacted-email>");
+}
+
 export type SignupPostResult = { ok: true } | { ok: false; err: string };
 
 /**
