@@ -45,5 +45,80 @@ export default tseslint.config(
       "react-hooks/preserve-manual-memoization": "warn",
     },
   },
+  // Cloudflare Pages Functions live in functions/ and bundle to the Worker
+  // runtime, not the SPA. React + every SPA-only module (components, hooks,
+  // route trees) is unavailable there. A future contributor adding such an
+  // import would either crash at runtime or silently balloon the Worker
+  // bundle. This block forbids the patterns at lint time. Cross-tree
+  // imports from src/lib/ are intentionally still allowed: that's the
+  // mechanism used to share validation schemas between client and server
+  // (see src/lib/marketing/signup-schema.ts and functions/api/signup.ts).
+  {
+    files: ["functions/**/*.{ts,tsx,js,mjs,cjs}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "react",
+              message:
+                "Pages Functions run on the Workers runtime; React is not available. Use a React-free helper instead.",
+            },
+            {
+              name: "react-dom",
+              message:
+                "Pages Functions run on the Workers runtime; React is not available. Use a React-free helper instead.",
+            },
+            {
+              name: "react-dom/client",
+              message:
+                "Pages Functions run on the Workers runtime; React is not available. Use a React-free helper instead.",
+            },
+            {
+              name: "@tanstack/react-router",
+              message:
+                "Pages Functions run on the Workers runtime; the SPA router is not available. Use a React-free helper instead.",
+            },
+            {
+              name: "@tanstack/react-start",
+              message:
+                "Pages Functions run on the Workers runtime; @tanstack/react-start is SPA-only. Use a React-free helper instead.",
+            },
+          ],
+          // Belt-and-suspenders: this is a denylist of SPA-only path roots
+          // (components, hooks, context, routes, pages, integrations,
+          // marketing UI, generated route tree, app entrypoint, styles).
+          // The whitelist of shared-with-server modules is src/lib/, which
+          // must stay React-free — enforced by code review until we add a
+          // companion rule restricting react imports under src/lib/.
+          patterns: [
+            {
+              group: [
+                "@/components/*",
+                "@/hooks/*",
+                "@/context/*",
+                "@/routes/*",
+                "@/pages/*",
+                "@/integrations/*",
+                "@/marketing/*",
+                "@/router",
+                "@/router/*",
+                "@/routeTree",
+                "@/routeTree.gen",
+                "@/main",
+                "@/main.*",
+                "@/styles/*",
+                "@/lib/marketing/useSignupForm",
+                "@/lib/connectors/flows/*",
+              ],
+              message:
+                "Pages Functions cannot import SPA-only modules. If you need shared logic, factor it into a React-free helper under src/lib/ (see signup-schema.ts for the canonical pattern).",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslintPluginPrettier,
 );
