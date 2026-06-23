@@ -6,7 +6,7 @@ Thank you for helping. This project uses GitHub as a **marketing and trust surfa
 
 ## Local setup
 
-Node 22 or newer is required — vitest 4 (our test runner) drops Node 18 and 20 doesn't ship `util.styleText`, so the test suite errors at startup on older runtimes. CI uses Node 24; pin locally via `.nvmrc` if you use nvm/fnm:
+Node 22 or newer is required: vitest 4 (our test runner) drops Node 18 and 20 doesn't ship `util.styleText`, so the test suite errors at startup on older runtimes. CI uses Node 24; pin locally via `.nvmrc` if you use nvm/fnm:
 
 ```bash
 nvm install 22  # one time
@@ -39,6 +39,32 @@ The `pre-push` gate refuses the push if any of these fail:
 The marker is written by `scripts/mark-pr-this-ran.sh` as the **last step** of the `/pr-this` skill, so you should never need to write it by hand. If you ever do (true emergency), the script refuses to run on a dirty tree, so the marker can't lie about what was tested.
 
 If a push really must go through (true emergency only), the override is `PR_THIS_BYPASS=1 git push` and the gate emits a loud warning that this happened.
+
+---
+
+## End-to-end tests (Playwright)
+
+The `tests/e2e/` directory holds Playwright specs that run against a real browser:
+
+- `smoke.spec.ts` (shallow): the home page loads with no console errors and the expected landmarks.
+- `pw-screenshots.spec.ts`: visits every public marketing route at desktop and mobile viewports, capturing screenshots for visual review.
+- `marketing-forms.spec.ts` (interactive): fills each signup form, stubs `/api/signup` with `page.route()`, asserts the POST body shape matches the shared `signup-schema` contract and the success copy renders.
+
+Run them locally:
+
+```bash
+# Default target is http://localhost:4173 (Vite preview server). Spin it up first:
+bun run build && bun run preview &
+
+# Then in another shell: chromium only (fastest):
+bunx playwright install chromium
+bunx playwright test --project=chromium
+
+# Or point at a deployed environment:
+PLAYWRIGHT_BASE_URL=https://dev.orangeway.app bunx playwright test --project=chromium
+```
+
+`playwright.config.ts` declares five projects: `chromium`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari`. CI runs the `chromium` project against the freshly-deployed environment in `.github/workflows/deploy.yml`. The other projects are opt-in locally; install the browsers once with `bunx playwright install firefox webkit` (Linux contributors will also need `bunx playwright install-deps`). When you add a new spec that depends on a specific selector (a `#anchor`, a `<select>`, a `data-testid`), add a comment in the component naming the spec that depends on it: see `BookForm` and `FinalCTA` in `src/routes/landing-classic.tsx` for the pattern.
 
 ---
 
@@ -104,10 +130,10 @@ Looking for somewhere to land your first contribution? Filter the issue list by 
 
 ## Ground rules
 
-1. **Never commit secrets** — no Supabase service keys, Cloudflare account IDs with embedded tokens, production URLs with credentials. Use placeholders in docs and local `.env` for real values.
-2. **Migrations are law** — if you change the database, add a migration. Regenerate TypeScript types if your workflow uses generated Supabase types.
-3. **Match existing patterns** — encryption goes through the shared vault + field-level helpers; never add a code path that reads sensitive data server-side.
-4. **Zero-knowledge check every PR** — if your change could let the server read new content, call it out explicitly in the PR body and link to the architectural decision.
+1. **Never commit secrets**: no Supabase service keys, Cloudflare account IDs with embedded tokens, production URLs with credentials. Use placeholders in docs and local `.env` for real values.
+2. **Migrations are law**: if you change the database, add a migration. Regenerate TypeScript types if your workflow uses generated Supabase types.
+3. **Match existing patterns**: encryption goes through the shared vault + field-level helpers; never add a code path that reads sensitive data server-side.
+4. **Zero-knowledge check every PR**: if your change could let the server read new content, call it out explicitly in the PR body and link to the architectural decision.
 
 ---
 
@@ -119,7 +145,7 @@ When you ship code, your commit message and your PR description are the only rec
 
 **Explain WHY, not WHAT.**
 
-Git already shows the diff — the reader can see what changed. What they cannot see is:
+Git already shows the diff: the reader can see what changed. What they cannot see is:
 
 - what problem you were solving
 - what you tried that did not work
@@ -139,7 +165,7 @@ non-engineer could understand it.>
 
 <optional: what you considered and rejected, one line each.>
 
-<optional: anything the next contributor must know — follow-ups,
+<optional: anything the next contributor must know: follow-ups,
 known limitations, pre-existing bugs you fixed incidentally to
 unblock this work. Label the last one "Incidental fix:" so it's
 easy to spot.>
