@@ -42,6 +42,66 @@ If a push really must go through (true emergency only), the override is `PR_THIS
 
 ---
 
+## Dependency updates (Dependabot + Bun)
+
+**This is a maintainer follow-up workflow.** External contributors can stop reading here. A maintainer will refresh the lockfile after reviewing the bump.
+
+We use Dependabot for security and version-bump PRs, but as of 2026-06 Dependabot's Bun support is incomplete: it updates `package.json` but does **not** refresh `bun.lock`. Every Dependabot PR therefore lands with a CI failure on:
+
+```
+error: lockfile had changes, but lockfile is frozen
+```
+
+That is **expected**, not a regression introduced by the bump. The fix is a maintainer follow-up commit on the Dependabot branch.
+
+Before running `bun install` on a PR branch, verify the PR is actually from Dependabot and the diff is what it claims to be. `bun install` runs postinstall scripts on every package in the resolved tree; a tampered branch (compromised Dependabot token, malicious force-push, contributor PR mislabelled as Dependabot) can execute arbitrary code on the maintainer's laptop before any gauntlet check runs.
+
+```bash
+# 1. Verify author + scope BEFORE pulling the branch.
+gh pr view <PR-number> --json author,headRefName
+# author.login MUST be "app/dependabot"; headRefName must start with
+# "dependabot/" prefix; otherwise stop and surface to the founder.
+
+# 2. Pull the PR head into a local branch and inspect.
+git fetch origin pull/<PR-number>/head:dep-<short-name>
+git checkout dep-<short-name>
+git log --oneline origin/dev..HEAD
+# Every commit on this list MUST be authored by dependabot[bot].
+git diff origin/dev -- package.json
+# Diff MUST match the single bump (or group of bumps) the PR title
+# claims; if it touches anything else, stop.
+
+# 3. Refresh the lockfile.
+bun install
+
+# 4. Run the rest of the /pr-this gauntlet on the refreshed tree.
+bunx tsc --noEmit
+bun run lint
+bun run test
+bun run build
+bash scripts/pre-publish-scan.sh
+```
+
+If anything in the gauntlet caught real fallout from the bump, fix it in a second commit on the same branch. Recent example: react-day-picker v10 dropped its ClassNames `table` slot, so the bump branch needed a `calendar.tsx` markup update to typecheck.
+
+```bash
+# 5. Commit + push back to the Dependabot branch's remote name.
+git add bun.lock <any-other-files>
+git commit -m "chore(deps): refresh bun.lock for <package> bump"
+bash scripts/mark-pr-this-ran.sh
+git push origin dep-<short-name>:<dependabot-branch-name>
+```
+
+The Step 5 five-persona audit still applies to Dependabot PRs the same as any other push. Single-package patch or minor bumps with no new transitive deps and no postinstall / preinstall scripts can usually run the cybersec persona from the /pr-this Step 5 council on the lib upgrade alone. Major-version group bumps, anything that touches the build pipeline, and anything that adds transitive deps with install scripts need the full five.
+
+---
+
+## Where to start
+
+Looking for somewhere to land your first contribution? Filter the issue list by [`good first issue`](https://github.com/The-Orange-Way/Orange-Way-Me/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [`help wanted`](https://github.com/The-Orange-Way/Orange-Way-Me/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). If neither label has anything open and you're unsure, open a discussion describing what you'd like to work on and we'll point you at the right surface.
+
+---
+
 ## Ground rules
 
 1. **Never commit secrets** — no Supabase service keys, Cloudflare account IDs with embedded tokens, production URLs with credentials. Use placeholders in docs and local `.env` for real values.
@@ -156,6 +216,12 @@ If the answer is no, rewrite it.
 
 ---
 
+## Code of conduct
+
+Participation in this repo is covered by the Contributor Covenant, captured in [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). Report incidents to the address listed there.
+
+---
+
 ## Questions?
 
-Open a discussion or issue. For security-sensitive reports, see `SECURITY.md`.
+Open a discussion or issue. For security-sensitive reports, see [`SECURITY.md`](./SECURITY.md).
