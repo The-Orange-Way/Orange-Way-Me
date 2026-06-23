@@ -163,4 +163,11 @@ describe("redactEmails", () => {
     expect(out).not.toContain("日本");
     expect(out).toContain("<redacted-email>");
   });
+
+  it("redacts addresses with apostrophes in the local part (Codex regression)", () => {
+    const out = redactEmails("Resend said o'hara@example.com was invalid");
+    expect(out).not.toContain("o'hara");
+    expect(out).not.toContain("example.com");
+    expect(out).toContain("<redacted-email>");
+  });
 });

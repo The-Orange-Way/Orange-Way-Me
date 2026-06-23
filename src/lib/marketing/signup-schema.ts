@@ -65,16 +65,18 @@ export function buildSignupRequestSchema(errorMessage: string = DEFAULT_SIGNUP_E
  * always safer than under-redaction.
  */
 export function redactEmails(s: string): string {
-  // Two passes:
-  //   (1) the conservative ASCII/RFC-shaped pattern, which catches the
-  //       overwhelming majority of real-world emails Resend will return;
-  //   (2) a Unicode-aware backstop that catches IDN domains
-  //       (user@münchen.de), exotic but unquoted local-parts, and any
-  //       "non-whitespace @ non-whitespace . non-whitespace" shape the
-  //       first pass missed. Over-redaction is always safer than under.
-  return s
-    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<redacted-email>")
-    .replace(/\S+@\S+\.\S+/g, "<redacted-email>");
+  // Single greedy "non-whitespace @ non-whitespace . non-whitespace"
+  // pass. Catches the full address regardless of local-part character
+  // class — apostrophes (o'hara@x.co), IDN domains (user@münchen.de),
+  // Unicode local-parts (日本@example.jp), and dotted/plused/dashed
+  // RFC shapes alike. Over-redaction is always safer than under.
+  //
+  // A narrower RFC-shaped pass was considered and rejected: running
+  // it first left a tail of the original local-part when the address
+  // contained characters outside the narrow class (e.g. apostrophes),
+  // and the backstop then no longer saw an `@`. One greedy pass is
+  // simpler and cannot fail that way.
+  return s.replace(/\S+@\S+\.\S+/g, "<redacted-email>");
 }
 
 export type SignupPostResult = { ok: true } | { ok: false; err: string };
