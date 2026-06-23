@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { buildSignupEmailSchema, postSignup } from "../signup-schema";
+import { buildSignupEmailSchema, postSignup, redactEmails } from "../signup-schema";
 
 function okResponse(): Response {
   return new Response("{}", { status: 200 });
@@ -123,5 +123,44 @@ describe("postSignup — result shape", () => {
       expect(r.err).toBe("That doesn't look like an email");
     }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("redactEmails", () => {
+  it("replaces a bare email with the redaction marker", () => {
+    expect(redactEmails("contact alice@example.com today")).toBe("contact <redacted-email> today");
+  });
+
+  it("redacts every email in a multi-email string", () => {
+    expect(redactEmails("a@x.io and b@y.co")).toBe("<redacted-email> and <redacted-email>");
+  });
+
+  it("redacts emails that appear inside upstream JSON messages", () => {
+    const upstream = '{"name":"validation_error","message":"Invalid `to`: user+tag@x.co"}';
+    const out = redactEmails(upstream);
+    expect(out).not.toContain("user+tag@x.co");
+    expect(out).toContain("<redacted-email>");
+  });
+
+  it("handles dots, pluses, dashes, percent signs in the local part", () => {
+    expect(redactEmails("first.last+filter%env-2@sub.domain.example")).toBe("<redacted-email>");
+  });
+
+  it("leaves strings without an email shape untouched", () => {
+    expect(redactEmails("no email here, only @handles and prices like $5")).toBe(
+      "no email here, only @handles and prices like $5",
+    );
+  });
+
+  it("redacts IDN / Unicode-domain emails via the backstop pass", () => {
+    const out = redactEmails("contact user@münchen.de about it");
+    expect(out).not.toContain("münchen");
+    expect(out).toContain("<redacted-email>");
+  });
+
+  it("redacts exotic unquoted local-parts via the backstop pass", () => {
+    const out = redactEmails("ref 日本@example.jp here");
+    expect(out).not.toContain("日本");
+    expect(out).toContain("<redacted-email>");
   });
 });

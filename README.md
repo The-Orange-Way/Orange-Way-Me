@@ -194,6 +194,7 @@ The minimum to run is a Supabase project plus the three `VITE_SUPABASE_*` values
 
 - **Edge Function secrets** (set in the Supabase Dashboard, not in `.env`): `OR_PLATFORM_API_KEY`, `OR_SUPABASE_URL`, `RESEND_API_KEY`, etc. Required for bank-sync via the `ow-or-proxy` function. The proxy enforces an outbound URL allowlist; if you need to point it somewhere new, add an entry in `supabase/functions/ow-or-proxy/index.ts` and redeploy.
 - **CI/deploy-time vars** (set as GitHub Actions repo vars/secrets): `VITE_SENTRY_DSN`, `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT`, and the `GLITCHTIP_API_TOKEN` secret. Each is optional. Error telemetry is a no-op when the DSN is unset and source-map upload is skipped when the token is unset.
+- **Marketing signup endpoint** (Cloudflare Pages Function at `functions/api/signup.ts`, set in the Pages project env): `RESEND_API_KEY_OW` is required (the function returns a `502 send failed` without it). `RESEND_AUDIENCE_ID_WAITLIST` and `RESEND_AUDIENCE_ID_BOOK` are optional Audience IDs for persisting signups; when unset, the function still sends the transactional confirmation but does not add the contact to any Audience. Leave them unset until your privacy policy discloses Resend Audiences as a sub-processor for the marketing list.
 
 On first launch, create a vault password. Everything you enter from that point is encrypted in your browser before it reaches Supabase.
 
