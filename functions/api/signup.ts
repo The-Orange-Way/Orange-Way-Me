@@ -93,8 +93,36 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   });
 
   if (!resp.ok) {
-    const detail = await resp.text().catch(() => "");
-    return json({ error: "send failed", detail: detail.slice(0, 200) }, 502);
+    // Log the upstream Resend error server-side for debugging, but do NOT
+    // echo it into the 502 client response. Resend's error body can name
+    // the verified sending identity, headers, and config that an attacker
+    // probing the endpoint would use for enumeration. The client only
+    // needs to know the send failed.
+    //
+    // Privacy note for the next contributor: do NOT add body.email (or
+    // any other plaintext PII) to this log object. Resend's failure body
+    // sometimes echoes the `to` field in validation messages, which is
+    // why we parse the structured fields (`name`, `message`) only and
+    // fall back to a length-bounded raw slice with zero PII intent.
+    // Cloudflare Workers logs are short-lived by default, but a future
+    // Logpush configuration would turn this into a processing record.
+    const rawDetail = await resp.text().catch(() => "");
+    const safeDetail: { name?: string; message?: string; rawLength?: number } = {
+      rawLength: rawDetail.length,
+    };
+    try {
+      const parsed = JSON.parse(rawDetail) as { name?: unknown; message?: unknown };
+      if (typeof parsed.name === "string") safeDetail.name = parsed.name.slice(0, 100);
+      if (typeof parsed.message === "string") safeDetail.message = parsed.message.slice(0, 200);
+    } catch {
+      // Resend body was not JSON; leave safeDetail with rawLength only.
+    }
+    console.error("signup: Resend send failed", {
+      rayId: ctx.request.headers.get("cf-ray"),
+      status: resp.status,
+      ...safeDetail,
+    });
+    return json({ error: "send failed" }, 502);
   }
 
   return json({ ok: true }, 200);
