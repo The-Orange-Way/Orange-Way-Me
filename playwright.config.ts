@@ -74,9 +74,19 @@ export default defineConfig({
       testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
     },
     {
+      // The setup project types the Supabase password, the vault
+      // password, and briefly holds an unlocked session before saving
+      // state. The global `trace: "on-first-retry"` would otherwise
+      // embed all of that into the trace.zip on a retry. Override to
+      // "off" here so the same protections the authenticated project
+      // gets also apply to the producer.
       name: "authenticated-setup",
       testMatch: /auth\.setup\.ts/,
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        trace: "off",
+        screenshot: "off",
+      },
     },
     {
       // Chromium only by default: the authenticated session state is

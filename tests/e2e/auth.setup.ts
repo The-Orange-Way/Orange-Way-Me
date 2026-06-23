@@ -27,11 +27,22 @@
  *                       below for the deny list.
  *
  * Behaviour when any input is missing:
- *   The setup test fails fast with a clear instruction message. The
- *   authenticated routes project depends on this, so the dependent
- *   suite is skipped automatically by Playwright's project graph;
- *   contributors without creds get a clean "skipped" line instead
- *   of a misleading auth-screen screenshot.
+ *   The setup test SKIPS (not throws) so `bunx playwright test`
+ *   without `--project` doesn't hard-fail on a clean clone. The
+ *   dependent `authenticated` project's beforeEach also checks for
+ *   E2E_VAULT_PASSWORD and skips for the same reason, so the whole
+ *   authenticated suite resolves to a clean "skipped" line for any
+ *   contributor without fixture credentials in scope.
+ *
+ * Storage-state caveat:
+ *   page.context().storageState({path}) only persists cookies and
+ *   localStorage. The vault unlock state lives in React memory
+ *   (VaultContext's `isUnlocked` useState; src/context/VaultContext
+ *   .tsx ~line 340) and is NOT written to localStorage by design
+ *   (ZKA: persisting the unlocked state across sessions would
+ *   weaken the threat model). The authenticated spec therefore
+ *   re-runs the vault-unlock step on every fresh page in its own
+ *   beforeEach; this setup spec only saves the Supabase session.
  */
 
 import { test as setup, expect } from "@playwright/test";
@@ -51,13 +62,21 @@ setup("authenticate the test user and unlock the vault", async ({ page }) => {
   const password = process.env.E2E_USER_PASSWORD;
   const vaultPassword = process.env.E2E_VAULT_PASSWORD;
 
-  if (!email || !password || !vaultPassword) {
-    throw new Error(
-      "auth.setup.ts: missing E2E_USER_EMAIL / E2E_USER_PASSWORD / " +
-        "E2E_VAULT_PASSWORD. Set them in the shell or skip the " +
-        "authenticated project with `--project=chromium` etc.",
-    );
-  }
+  // Skip-not-throw when credentials are absent. Throwing here would
+  // hard-fail any plain `bunx playwright test` invocation (which
+  // runs all projects by default), even on a clean clone with no
+  // fixture credentials in scope. Skipping lets the authenticated
+  // dependent project also skip cleanly and contributors see a
+  // "skipped" line instead of a stack trace.
+  setup.skip(
+    !email || !password || !vaultPassword,
+    "auth.setup.ts: skipping (E2E_USER_EMAIL / E2E_USER_PASSWORD / " +
+      "E2E_VAULT_PASSWORD not set). The authenticated suite skips with it.",
+  );
+  // After setup.skip, the test body still executes until the next
+  // await; narrow the type so the rest of the spec sees non-empty
+  // strings instead of `string | undefined`.
+  if (!email || !password || !vaultPassword) return;
 
   const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "";
   try {

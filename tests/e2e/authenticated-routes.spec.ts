@@ -24,9 +24,15 @@
  *   - Dynamic-ID routes (accounts/$id, goals/$id). They need a
  *     real ID resolution step; tracked as a follow-up.
  *
- * Auth state: loaded automatically via playwright.config.ts (the
- * `authenticated` project sets `use.storageState` to the path
- * produced by auth.setup.ts).
+ * Auth state: the Supabase session cookie is loaded automatically
+ * via playwright.config.ts (the `authenticated` project sets
+ * `use.storageState` to the path produced by auth.setup.ts). The
+ * vault unlock state lives in React memory (VaultContext) and is
+ * deliberately NOT persisted to localStorage, so storage state alone
+ * leaves the vault locked. The `test.beforeEach` below re-unlocks
+ * the vault on every fresh page using E2E_VAULT_PASSWORD; without
+ * that step every authenticated route would render the vault gate
+ * and the harness would fail with `#v-pw visible`.
  */
 
 import { test, expect, type ConsoleMessage, type Page } from "@playwright/test";
@@ -60,16 +66,34 @@ interface RouteCheck {
   expectText?: RegExp;
 }
 
+// `expectText` is asserted INSIDE the `<main>` element (see the
+// page.locator("main").getByText below). The app shell renders the
+// route labels in its sidebar / bottom nav too, so an unscoped
+// matcher would happily report green on a blank main area as long
+// as the nav button was visible. Scoping to `main` forces the
+// assertion to find content the route actually rendered.
+//
+// /households was excluded on purpose: it's a public marketing
+// page (uses MarketingShell, has no AppGate). The authenticated
+// household surface lives at /settings/household.
 const AUTHENTICATED_ROUTES: RouteCheck[] = [
-  { path: "/dashboard", label: "dashboard", expectText: /dashboard|net worth|overview/i },
-  { path: "/accounts", label: "accounts", expectText: /account/i },
-  { path: "/transactions", label: "transactions", expectText: /transaction/i },
-  { path: "/budgets", label: "budgets", expectText: /budget/i },
-  { path: "/cash-flow", label: "cash-flow", expectText: /cash flow|income|expense/i },
-  { path: "/connections", label: "connections", expectText: /connection|bank|link/i },
-  { path: "/goals", label: "goals", expectText: /goal/i },
-  { path: "/households", label: "households", expectText: /household|member/i },
-  { path: "/settings", label: "settings", expectText: /setting|profile|account/i },
+  { path: "/dashboard", label: "dashboard", expectText: /net worth|overview|this month|balance/i },
+  { path: "/accounts", label: "accounts", expectText: /add account|no accounts|connect/i },
+  {
+    path: "/transactions",
+    label: "transactions",
+    expectText: /no transactions|category|date/i,
+  },
+  { path: "/budgets", label: "budgets", expectText: /no budgets|create budget|category/i },
+  { path: "/cash-flow", label: "cash-flow", expectText: /income|expense|net/i },
+  { path: "/connections", label: "connections", expectText: /add bank|link bank|connection/i },
+  { path: "/goals", label: "goals", expectText: /goal|target|create/i },
+  {
+    path: "/settings/household",
+    label: "settings-household",
+    expectText: /member|invite|household/i,
+  },
+  { path: "/settings", label: "settings", expectText: /profile|preference|security|categor/i },
 ];
 
 const VIEWPORTS = [
@@ -77,9 +101,33 @@ const VIEWPORTS = [
   { label: "mobile-390x844", width: 390, height: 844 },
 ];
 
+/**
+ * Re-unlock the vault on a fresh page. The Supabase session
+ * restores from storageState, but VaultContext's `isUnlocked` is
+ * pure React state (see src/context/VaultContext.tsx line ~340)
+ * and resets to false on every new browser context. /auth detects
+ * the locked vault and renders VaultGate; we fill #v-pw and wait
+ * for the post-unlock /dashboard navigation. Skips the test if the
+ * vault password env var is missing.
+ */
+async function unlockVault(page: Page) {
+  const vaultPassword = process.env.E2E_VAULT_PASSWORD;
+  test.skip(!vaultPassword, "E2E_VAULT_PASSWORD not set; authenticated suite skipped.");
+  await page.goto("/auth");
+  const vaultField = page.locator("#v-pw");
+  await vaultField.waitFor({ state: "visible", timeout: 30000 });
+  await vaultField.fill(vaultPassword!);
+  await page.getByRole("button", { name: /^unlock/i }).click();
+  await page.waitForURL((url) => url.pathname === "/dashboard", { timeout: 30000 });
+}
+
 for (const viewport of VIEWPORTS) {
   test.describe(`authenticated surface: ${viewport.label}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test.beforeEach(async ({ page }) => {
+      await unlockVault(page);
+    });
 
     for (const route of AUTHENTICATED_ROUTES) {
       test(`${route.label} renders and screenshots`, async ({ page }) => {
@@ -108,7 +156,12 @@ for (const viewport of VIEWPORTS) {
         ).not.toBeVisible({ timeout: 1000 });
 
         if (route.expectText) {
-          await expect(page.getByText(route.expectText).first()).toBeVisible({
+          // Scope to the page's <main> so the assertion can't be
+          // satisfied by the persistent sidebar / bottom nav (which
+          // renders the same route labels everywhere). A blank or
+          // stale main area now fails the test instead of reporting
+          // green from a nav button.
+          await expect(page.locator("main").getByText(route.expectText).first()).toBeVisible({
             timeout: 10000,
           });
         }
