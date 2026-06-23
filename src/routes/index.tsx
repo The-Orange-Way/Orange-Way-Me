@@ -580,7 +580,14 @@ function PrivacyVisual() {
 // BookForm: both routes carry near-identical schema + submit logic. Tracked
 // as a follow-up so this PR stays focused on un-breaking the form.
 const bookSchema = z.object({
-  email: z.string().trim().email("That doesn't look like an email").max(255),
+  // zod 4 promotes z.email() to the canonical form; z.string().email() is
+  // still aliased but slated for removal in zod 5. The .pipe() wrapper
+  // preserves the original "trim before validate" UX semantics: a user
+  // who pastes "  foo@bar.com  " gets accepted, not failed (that fails
+  // under a bare z.email().trim() chain because the email regex runs on
+  // the raw input first). Same shape used at the two landing-classic
+  // sites for parity.
+  email: z.string().trim().pipe(z.email("That doesn't look like an email").max(255)),
 });
 
 function Book() {
