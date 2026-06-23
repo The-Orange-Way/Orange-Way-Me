@@ -7,13 +7,17 @@
  *
  * Notes:
  *   - CTAs wired to /auth so the funnel works today.
- *   - Email capture is client-only; awaiting backend.
+ *   - Book email capture POSTs to the Cloudflare Pages function at
+ *     functions/api/signup.ts with form: "book"; Resend delivers the
+ *     transactional confirmation. Same endpoint and pattern as the
+ *     BookForm + WaitlistForm on /landing-classic.
  *   - Book cover uses our existing asset at @/assets/orange-way/book-cover.png.
  *   - No auth-state redirect — a live Supabase session does not imply an
  *     unlocked vault, and the bounce confused first-time visitors.
  */
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { z } from "zod";
 import bookCover from "@/assets/orange-way/book-cover.png";
 import { BitcoinMockup } from "@/components/marketing/mockups/BitcoinMockup";
 import { BudgetMockup } from "@/components/marketing/mockups/BudgetMockup";
@@ -572,8 +576,46 @@ function PrivacyVisual() {
 // Book — Sato + Chocolate Coins lead magnet
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TODO: extract a shared <BookEmailForm /> with src/routes/landing-classic.tsx
+// BookForm: both routes carry near-identical schema + submit logic. Tracked
+// as a follow-up so this PR stays focused on un-breaking the form.
+const bookSchema = z.object({
+  email: z.string().trim().email("That doesn't look like an email").max(255),
+});
+
 function Book() {
   const [email, setEmail] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    const parsed = bookSchema.safeParse({ email });
+    if (!parsed.success) {
+      setErr(parsed.error.issues[0]?.message ?? "Something is off.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const resp = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ form: "book", email: parsed.data.email }),
+      });
+      if (!resp.ok) {
+        setErr("Something went wrong. Try again in a minute.");
+        setSubmitting(false);
+        return;
+      }
+      setDone(true);
+    } catch {
+      setErr("Network error. Try again in a minute.");
+      setSubmitting(false);
+    }
+  };
+
   return (
     <section id="book" className="px-6 py-24 md:py-32">
       <div
@@ -596,30 +638,59 @@ function Book() {
           <p className="mt-6 text-lg leading-relaxed" style={{ color: C.body, opacity: 0.9 }}>
             {COPY.bookBody}
           </p>
-          <form
-            onSubmit={(e) => e.preventDefault()}
-            className="mt-7 flex flex-col gap-2 sm:flex-row"
-          >
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className="flex-1 rounded-full border px-5 py-3 text-base outline-none focus:ring-2"
-              style={{ borderColor: C.border, background: "#fff" }}
-            />
-            <button
-              type="submit"
-              className="rounded-full px-6 py-3 text-base font-semibold transition-transform hover:-translate-y-0.5"
-              style={{ background: C.deep, color: "#fff" }}
+          {done ? (
+            <p
+              className="mt-7 text-base font-semibold"
+              style={{ color: C.deep }}
+              role="status"
+              aria-live="polite"
             >
-              {COPY.bookFormSubmit}
-            </button>
-          </form>
-          <p className="mt-3 text-xs" style={{ color: C.muted }}>
-            {COPY.bookMicrocopy}
-          </p>
+              {"Saved. We'll email you when the book ships."}
+            </p>
+          ) : (
+            <form onSubmit={onSubmit} className="mt-7 flex flex-col gap-2 sm:flex-row">
+              <label htmlFor="book-email" className="sr-only">
+                Email address
+              </label>
+              <input
+                id="book-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                disabled={submitting}
+                className="flex-1 rounded-full border px-5 py-3 text-base outline-none focus:ring-2"
+                style={{ borderColor: C.border, background: "#fff" }}
+                aria-invalid={err ? true : undefined}
+              />
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-full px-6 py-3 text-base font-semibold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: C.deep, color: "#fff" }}
+              >
+                {submitting ? "Sending…" : COPY.bookFormSubmit}
+              </button>
+            </form>
+          )}
+          {err ? (
+            <p className="mt-3 text-sm font-medium" style={{ color: "#B91C1C" }} role="alert">
+              {err}
+            </p>
+          ) : (
+            <p className="mt-3 text-xs" style={{ color: C.muted }}>
+              {COPY.bookMicrocopy}{" "}
+              <Link
+                to="/privacy"
+                className="underline underline-offset-2 hover:opacity-80"
+                style={{ color: C.muted }}
+              >
+                Privacy
+              </Link>
+              .
+            </p>
+          )}
         </div>
         <div className="flex items-center justify-center">
           <img
