@@ -1266,6 +1266,10 @@ function BookSection() {
   );
 }
 
+// E2E anchor: tests/e2e/marketing-forms.spec.ts identifies BookForm by
+// being the form on /landing-classic that contains a <select>. If the
+// kids segmentation moves to radio buttons / a separate component, the
+// test selector must be updated alongside it.
 function BookForm() {
   const { email, setEmail, kids, setKids, err, done, submitting, onSubmit } = useSignupForm({
     form: "book",
@@ -1321,6 +1325,11 @@ function BookForm() {
 
 /* ──────────────────────────────  FINAL CTA  ────────────────────────────── */
 
+// E2E anchor: tests/e2e/marketing-forms.spec.ts scopes the WaitlistForm
+// to the `#waitlist` section to disambiguate it from the BookForm (and
+// from any future form on the page). The id is also a real fragment
+// link from the page nav, so it's load-bearing for both UX and tests;
+// keep it when restructuring.
 function FinalCTA() {
   return (
     <section
