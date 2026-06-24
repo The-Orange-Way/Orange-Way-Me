@@ -17,6 +17,8 @@ bun test        # full suite, ~5s
 
 Validate tests locally before pushing. Pushing untested test assertions is the single biggest source of failure-email noise on this repo. Run `bash scripts/pre-publish-scan.sh` and `bun run test` before every push.
 
+To exercise the sign-up form locally (it ships gated behind the "Private beta" message in production), set `VITE_DEV_SIGNUP_OPEN=1` in your machine-only Vite environment file (the gitignored overlay Vite picks up automatically; see https://vite.dev/guide/env-and-mode for the supported filenames) before `bun run dev` or `bun run build`. The dev branch CI sets this flag automatically; prod CI does not (the value is branch-derived in `.github/workflows/deploy.yml`, not a repo variable, so a typo cannot accidentally open prod sign-ups).
+
 **On a fresh clone, install the git hooks:**
 
 ```bash
