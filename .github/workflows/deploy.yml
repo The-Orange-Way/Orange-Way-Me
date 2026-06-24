@@ -126,7 +126,7 @@ jobs:
             echo "verify_url=https://orangeway.app" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref_name }}" = "dev" ]; then
             echo "project=ow-dev" >> "$GITHUB_OUTPUT"
-            echo "verify_url=https://dev.orangeway.app" >> "$GITHUB_OUTPUT"
+            echo "verify_url=https://orangeway.dev" >> "$GITHUB_OUTPUT"
           else
             echo "Unknown branch ${{ github.ref_name }} — skipping deploy"
             exit 0

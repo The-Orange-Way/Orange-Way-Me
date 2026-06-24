@@ -63,7 +63,7 @@ bunx playwright install chromium
 bunx playwright test --project=chromium
 
 # Or point at a deployed environment:
-PLAYWRIGHT_BASE_URL=https://dev.orangeway.app bunx playwright test --project=chromium
+PLAYWRIGHT_BASE_URL=https://orangeway.dev bunx playwright test --project=chromium
 ```
 
 `playwright.config.ts` declares five projects: `chromium`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari`. CI runs the `chromium` project against the freshly-deployed environment in `.github/workflows/deploy.yml`. The other projects are opt-in locally; install the browsers once with `bunx playwright install firefox webkit` (Linux contributors will also need `bunx playwright install-deps`). When you add a new spec that depends on a specific selector (a `#anchor`, a `<select>`, a `data-testid`), add a comment in the component naming the spec that depends on it: see `BookForm` and `FinalCTA` in `src/routes/landing-classic.tsx` for the pattern.
