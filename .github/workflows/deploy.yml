@@ -57,6 +57,14 @@ jobs:
           # import.meta.env.MODE/DEV is "production"/false during `vite build`
           # of either branch, so we derive it from the workflow ref instead.
           VITE_DEPLOY_ENV: ${{ steps.env_label.outputs.label }}
+          # Open the sign-up form ONLY on the dev branch deploy. The
+          # AuthScreen `SIGNUP_OPEN` constant reads
+          # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`. Vite inlines
+          # this at build time, so the prod bundle never contains the
+          # flag-on branch of the code; the "Private beta" gate is the
+          # only thing the prod build can render. Branch-derived rather
+          # than repo-variable so a future env-var typo can't open prod.
+          VITE_DEV_SIGNUP_OPEN: ${{ github.ref_name == 'dev' && '1' || '' }}
           # Release identifier — paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
