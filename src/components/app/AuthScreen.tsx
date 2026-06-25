@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,6 +68,26 @@ export function AuthScreen() {
   const onSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
+    // Beta allowlist pre-check runs BEFORE the supabase.auth.signUp
+    // call so a not-on-list email doesn't burn the Turnstile token
+    // either. Fail-closed: if the RPC errors (network blip, RLS
+    // surprise) we treat it as "not allowed" and surface the
+    // private-beta toast. A determined attacker can call
+    // supabase.auth.signUp directly and bypass this gate; the
+    // Supabase Auth Before-User-Created Hook tracked as a follow-up
+    // is the unbypassable enforcement.
+    // @ts-expect-error supabase types are generated against the deployed schema; this PR's
+    // migration adds the RPC and types regenerate on the next `supabase gen types` pass.
+    const { data: allowed, error: rpcError } = await supabase.rpc("is_email_in_beta_allowlist", {
+      p_email: email,
+    });
+    if (rpcError || !allowed) {
+      setBusy(false);
+      toast.error(
+        "Orange Way is currently in private beta. Email hello@orangeway.app to request access.",
+      );
+      return;
+    }
     const { error, isNew } = await signUp(email, password, captchaToken);
     setBusy(false);
     if (error) {
