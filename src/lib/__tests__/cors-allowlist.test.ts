@@ -12,7 +12,7 @@ import { isOriginAllowed, parseAllowedOrigins } from "../../../supabase/function
 
 const PROD_ALLOWLIST = [
   "https://orangeway.app",
-  "https://dev.orangeway.app",
+  "https://orangeway.dev",
   "https://orangeway-dev.pages.dev",
   "https://orangeway-prod.pages.dev",
   "http://localhost:8080",
@@ -36,11 +36,9 @@ describe("parseAllowedOrigins", () => {
   });
 
   it("strips trailing slashes and whitespace from each entry", () => {
-    const parsed = parseAllowedOrigins(
-      "  https://orangeway.app/  ,  https://dev.orangeway.app///  ",
-    );
+    const parsed = parseAllowedOrigins("  https://orangeway.app/  ,  https://orangeway.dev///  ");
     expect(parsed!.has("https://orangeway.app")).toBe(true);
-    expect(parsed!.has("https://dev.orangeway.app")).toBe(true);
+    expect(parsed!.has("https://orangeway.dev")).toBe(true);
     // No slash-bearing entries leaked through
     expect(parsed!.has("https://orangeway.app/")).toBe(false);
   });

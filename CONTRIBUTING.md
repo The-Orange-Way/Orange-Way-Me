@@ -6,7 +6,7 @@ Thank you for helping. This project uses GitHub as a **marketing and trust surfa
 
 ## Local setup
 
-Node 22 or newer is required — vitest 4 (our test runner) drops Node 18 and 20 doesn't ship `util.styleText`, so the test suite errors at startup on older runtimes. CI uses Node 24; pin locally via `.nvmrc` if you use nvm/fnm:
+Node 22 or newer is required: vitest 4 (our test runner) drops Node 18 and 20 doesn't ship `util.styleText`, so the test suite errors at startup on older runtimes. CI uses Node 24; pin locally via `.nvmrc` if you use nvm/fnm:
 
 ```bash
 nvm install 22  # one time
@@ -16,6 +16,8 @@ bun test        # full suite, ~5s
 ```
 
 Validate tests locally before pushing. Pushing untested test assertions is the single biggest source of failure-email noise on this repo. Run `bash scripts/pre-publish-scan.sh` and `bun run test` before every push.
+
+To exercise the sign-up form locally (it ships gated behind the "Private beta" message in production), set `VITE_DEV_SIGNUP_OPEN=1` in your machine-only Vite environment file (the gitignored overlay Vite picks up automatically; see https://vite.dev/guide/env-and-mode for the supported filenames) before `bun run dev` or `bun run build`. The dev branch CI sets this flag automatically; prod CI does not (the value is branch-derived in `.github/workflows/deploy.yml`, not a repo variable, so a typo cannot accidentally open prod sign-ups).
 
 **On a fresh clone, install the git hooks:**
 
@@ -42,12 +44,98 @@ If a push really must go through (true emergency only), the override is `PR_THIS
 
 ---
 
+## End-to-end tests (Playwright)
+
+The `tests/e2e/` directory holds Playwright specs that run against a real browser:
+
+- `smoke.spec.ts` (shallow): the home page loads with no console errors and the expected landmarks.
+- `pw-screenshots.spec.ts`: visits every public marketing route at desktop and mobile viewports, capturing screenshots for visual review.
+- `marketing-forms.spec.ts` (interactive): fills each signup form, stubs `/api/signup` with `page.route()`, asserts the POST body shape matches the shared `signup-schema` contract and the success copy renders.
+
+Run them locally:
+
+```bash
+# Default target is http://localhost:4173 (Vite preview server). Spin it up first:
+bun run build && bun run preview &
+
+# Then in another shell: chromium only (fastest):
+bunx playwright install chromium
+bunx playwright test --project=chromium
+
+# Or point at a deployed environment:
+PLAYWRIGHT_BASE_URL=https://orangeway.dev bunx playwright test --project=chromium
+```
+
+`playwright.config.ts` declares five projects: `chromium`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari`. CI runs the `chromium` project against the freshly-deployed environment in `.github/workflows/deploy.yml`. The other projects are opt-in locally; install the browsers once with `bunx playwright install firefox webkit` (Linux contributors will also need `bunx playwright install-deps`). When you add a new spec that depends on a specific selector (a `#anchor`, a `<select>`, a `data-testid`), add a comment in the component naming the spec that depends on it: see `BookForm` and `FinalCTA` in `src/routes/landing-classic.tsx` for the pattern.
+
+---
+
+## Dependency updates (Dependabot + Bun)
+
+**This is a maintainer follow-up workflow.** External contributors can stop reading here. A maintainer will refresh the lockfile after reviewing the bump.
+
+We use Dependabot for security and version-bump PRs, but as of 2026-06 Dependabot's Bun support is incomplete: it updates `package.json` but does **not** refresh `bun.lock`. Every Dependabot PR therefore lands with a CI failure on:
+
+```
+error: lockfile had changes, but lockfile is frozen
+```
+
+That is **expected**, not a regression introduced by the bump. The fix is a maintainer follow-up commit on the Dependabot branch.
+
+Before running `bun install` on a PR branch, verify the PR is actually from Dependabot and the diff is what it claims to be. `bun install` runs postinstall scripts on every package in the resolved tree; a tampered branch (compromised Dependabot token, malicious force-push, contributor PR mislabelled as Dependabot) can execute arbitrary code on the maintainer's laptop before any gauntlet check runs.
+
+```bash
+# 1. Verify author + scope BEFORE pulling the branch.
+gh pr view <PR-number> --json author,headRefName
+# author.login MUST be "app/dependabot"; headRefName must start with
+# "dependabot/" prefix; otherwise stop and surface to the founder.
+
+# 2. Pull the PR head into a local branch and inspect.
+git fetch origin pull/<PR-number>/head:dep-<short-name>
+git checkout dep-<short-name>
+git log --oneline origin/dev..HEAD
+# Every commit on this list MUST be authored by dependabot[bot].
+git diff origin/dev -- package.json
+# Diff MUST match the single bump (or group of bumps) the PR title
+# claims; if it touches anything else, stop.
+
+# 3. Refresh the lockfile.
+bun install
+
+# 4. Run the rest of the /pr-this gauntlet on the refreshed tree.
+bunx tsc --noEmit
+bun run lint
+bun run test
+bun run build
+bash scripts/pre-publish-scan.sh
+```
+
+If anything in the gauntlet caught real fallout from the bump, fix it in a second commit on the same branch. Recent example: react-day-picker v10 dropped its ClassNames `table` slot, so the bump branch needed a `calendar.tsx` markup update to typecheck.
+
+```bash
+# 5. Commit + push back to the Dependabot branch's remote name.
+git add bun.lock <any-other-files>
+git commit -m "chore(deps): refresh bun.lock for <package> bump"
+bash scripts/mark-pr-this-ran.sh
+git push origin dep-<short-name>:<dependabot-branch-name>
+```
+
+The Step 5 five-persona audit still applies to Dependabot PRs the same as any other push. Single-package patch or minor bumps with no new transitive deps and no postinstall / preinstall scripts can usually run the cybersec persona from the /pr-this Step 5 council on the lib upgrade alone. Major-version group bumps, anything that touches the build pipeline, and anything that adds transitive deps with install scripts need the full five.
+
+---
+
+## Where to start
+
+Looking for somewhere to land your first contribution? Filter the issue list by [`good first issue`](https://github.com/The-Orange-Way/Orange-Way-Me/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [`help wanted`](https://github.com/The-Orange-Way/Orange-Way-Me/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). If neither label has anything open and you're unsure, open a discussion describing what you'd like to work on and we'll point you at the right surface.
+
+---
+
 ## Ground rules
 
-1. **Never commit secrets** — no Supabase service keys, Cloudflare account IDs with embedded tokens, production URLs with credentials. Use placeholders in docs and local `.env` for real values.
-2. **Migrations are law** — if you change the database, add a migration. Regenerate TypeScript types if your workflow uses generated Supabase types.
-3. **Match existing patterns** — encryption goes through the shared vault + field-level helpers; never add a code path that reads sensitive data server-side.
-4. **Zero-knowledge check every PR** — if your change could let the server read new content, call it out explicitly in the PR body and link to the architectural decision.
+1. **Never commit secrets**: no Supabase service keys, Cloudflare account IDs with embedded tokens, production URLs with credentials. Use placeholders in docs and local `.env` for real values.
+2. **Migrations are law**: if you change the database, add a migration. Regenerate TypeScript types if your workflow uses generated Supabase types.
+3. **Match existing patterns**: encryption goes through the shared vault + field-level helpers; never add a code path that reads sensitive data server-side.
+4. **Zero-knowledge check every PR**: if your change could let the server read new content, call it out explicitly in the PR body and link to the architectural decision.
 
 ---
 
@@ -59,7 +147,7 @@ When you ship code, your commit message and your PR description are the only rec
 
 **Explain WHY, not WHAT.**
 
-Git already shows the diff — the reader can see what changed. What they cannot see is:
+Git already shows the diff: the reader can see what changed. What they cannot see is:
 
 - what problem you were solving
 - what you tried that did not work
@@ -79,7 +167,7 @@ non-engineer could understand it.>
 
 <optional: what you considered and rejected, one line each.>
 
-<optional: anything the next contributor must know — follow-ups,
+<optional: anything the next contributor must know: follow-ups,
 known limitations, pre-existing bugs you fixed incidentally to
 unblock this work. Label the last one "Incidental fix:" so it's
 easy to spot.>
@@ -156,6 +244,12 @@ If the answer is no, rewrite it.
 
 ---
 
+## Code of conduct
+
+Participation in this repo is covered by the Contributor Covenant, captured in [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md). Report incidents to the address listed there.
+
+---
+
 ## Questions?
 
-Open a discussion or issue. For security-sensitive reports, see `SECURITY.md`.
+Open a discussion or issue. For security-sensitive reports, see [`SECURITY.md`](./SECURITY.md).

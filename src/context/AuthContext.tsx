@@ -7,10 +7,27 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: Error | null; isNew: boolean }>;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  /**
+   * Sign up a new account. `captchaToken` is the Turnstile-issued
+   * token from the `CaptchaWidget`; when the Supabase project is
+   * configured with Cloudflare Turnstile, supplying a valid token is
+   * required. Pass `null` when the project does not enforce captcha
+   * (dev project today, or when `VITE_TURNSTILE_SITE_KEY` is unset).
+   */
+  signUp: (
+    email: string,
+    password: string,
+    captchaToken: string | null,
+  ) => Promise<{ error: Error | null; isNew: boolean }>;
+  /** Same captcha contract as signUp. */
+  signIn: (
+    email: string,
+    password: string,
+    captchaToken: string | null,
+  ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ error: Error | null }>;
+  /** Same captcha contract as signUp. */
+  resetPassword: (email: string, captchaToken: string | null) => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -23,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // One-shot sweep of legacy `ow_bank_label_<connId>` localStorage keys.
     // The old AddBankDialog cached institution names (e.g. "Mercury", "TD")
-    // in cleartext — exactly the identifier the encrypted connection label
+    // in cleartext: exactly the identifier the encrypted connection label
     // was supposed to protect. We dropped that cache, but existing browser
     // profiles still have the rows. Sweep runs at app startup so users who
     // never open Connections still get cleaned up.
@@ -33,14 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (k && k.startsWith("ow_bank_label_")) localStorage.removeItem(k);
       }
     } catch {
-      /* localStorage blocked — non-fatal */
+      /* localStorage blocked: non-fatal */
     }
 
     // Set up listener BEFORE getSession.
     //
     // We DO NOT call posthog.identify here. PostHog is configured with
     // person_profiles: "never" (__root.tsx) so identify is a no-op today,
-    // but leaving the calls in is a foot-gun — flipping the config
+    // but leaving the calls in is a foot-gun: flipping the config
     // upstream would immediately ship the Supabase user id (UUID, but
     // user-correlatable) to PostHog. ZKA-aligned posture is "don't
     // associate any identifier with the analytics stream"; reset on
@@ -62,12 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const signUp: AuthContextValue["signUp"] = async (email, password) => {
+  const signUp: AuthContextValue["signUp"] = async (email, password, captchaToken) => {
     const redirectUrl = `${window.location.origin}/`;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirectUrl },
+      options: {
+        emailRedirectTo: redirectUrl,
+        ...(captchaToken ? { captchaToken } : {}),
+      },
     });
     return {
       error: error as Error | null,
@@ -75,8 +95,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const signIn: AuthContextValue["signIn"] = async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const signIn: AuthContextValue["signIn"] = async (email, password, captchaToken) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      ...(captchaToken ? { options: { captchaToken } } : {}),
+    });
     return { error: error as Error | null };
   };
 
@@ -84,9 +108,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  const resetPassword: AuthContextValue["resetPassword"] = async (email) => {
+  const resetPassword: AuthContextValue["resetPassword"] = async (email, captchaToken) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
+      ...(captchaToken ? { captchaToken } : {}),
     });
     return { error: error as Error | null };
   };

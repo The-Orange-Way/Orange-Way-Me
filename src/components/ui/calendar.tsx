@@ -73,7 +73,6 @@ function Calendar({
             : "[&>svg]:text-muted-foreground flex h-8 items-center gap-1 rounded-md pl-2 pr-1 text-sm [&>svg]:size-3.5",
           defaultClassNames.caption_label,
         ),
-        table: "w-full border-collapse",
         weekdays: cn("flex", defaultClassNames.weekdays),
         weekday: cn(
           "text-muted-foreground flex-1 select-none rounded-md text-[0.8rem] font-normal",
@@ -121,12 +120,16 @@ function Calendar({
         },
         DayButton: CalendarDayButton,
         WeekNumber: ({ children, ...props }) => {
+          // react-day-picker v10 dropped the <table> layout (everything is
+          // <div> now). Rendering a <td> outside a <table> would be invalid
+          // HTML; use a <div> with the same cell sizing to match the
+          // surrounding day cells.
           return (
-            <td {...props}>
+            <div {...props}>
               <div className="flex size-(--cell-size) items-center justify-center text-center">
                 {children}
               </div>
-            </td>
+            </div>
           );
         },
         ...components,

@@ -57,6 +57,26 @@ jobs:
           # import.meta.env.MODE/DEV is "production"/false during `vite build`
           # of either branch, so we derive it from the workflow ref instead.
           VITE_DEPLOY_ENV: ${{ steps.env_label.outputs.label }}
+          # Open the sign-up form ONLY on the dev branch deploy. The
+          # AuthScreen `SIGNUP_OPEN` constant reads
+          # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`. Vite inlines
+          # this at build time, so the prod bundle never contains the
+          # flag-on branch of the code; the "Private beta" gate is the
+          # only thing the prod build can render. Branch-derived rather
+          # than repo-variable so a future env-var typo can't open prod.
+          VITE_DEV_SIGNUP_OPEN: ${{ github.ref_name == 'dev' && '1' || '' }}
+          # Cloudflare Turnstile captcha widget. Build-time inlined
+          # public site key; the matching SECRET key lives in the
+          # Supabase Auth project config (Studio: Auth -> Bot and
+          # Abuse Protection -> CAPTCHA Protection -> Provider:
+          # Cloudflare Turnstile -> Secret key). Per-env keys so the
+          # dev widget can authenticate against a dev Turnstile site
+          # bound to orangeway.dev, and prod against a separate site
+          # bound to orangeway.app. Empty value when no captcha is
+          # configured for the env yet; the SPA renders no widget and
+          # submits without a token. Supabase Auth must also be
+          # configured to skip captcha verification in that case.
+          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || vars.TURNSTILE_SITE_KEY_DEV }}
           # Release identifier — paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
@@ -118,7 +138,7 @@ jobs:
             echo "verify_url=https://orangeway.app" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref_name }}" = "dev" ]; then
             echo "project=ow-dev" >> "$GITHUB_OUTPUT"
-            echo "verify_url=https://dev.orangeway.app" >> "$GITHUB_OUTPUT"
+            echo "verify_url=https://orangeway.dev" >> "$GITHUB_OUTPUT"
           else
             echo "Unknown branch ${{ github.ref_name }} — skipping deploy"
             exit 0
@@ -144,3 +164,24 @@ jobs:
           fi
           curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
           echo "✓ ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
+
+      # E2E smoke against the freshly-deployed environment. Chromium
+      # only on every push so deploys stay fast; the Firefox / WebKit
+      # / mobile projects in playwright.config.ts run locally (and in
+      # a future nightly matrix workflow). Tests stub /api/signup
+      # internally, so this step does NOT actually call Resend.
+      - name: Install Playwright (chromium)
+        run: bunx playwright install --with-deps chromium
+
+      - name: Playwright smoke + marketing-form interaction
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
+        run: bunx playwright test --project=chromium --reporter=list
+
+      - name: Upload Playwright HTML report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.ref_name }}
+          path: playwright-report/
+          retention-days: 7
