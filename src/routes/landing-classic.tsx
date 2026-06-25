@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { z } from "zod";
 import { useAuth } from "@/context/AuthContext";
+import { useSignupForm } from "@/lib/marketing/useSignupForm";
 import bookCover from "@/assets/orange-way/book-cover.png";
 import { BudgetMockup } from "@/components/marketing/mockups/BudgetMockup";
 import { BitcoinMockup } from "@/components/marketing/mockups/BitcoinMockup";
@@ -1266,44 +1266,15 @@ function BookSection() {
   );
 }
 
-const bookSchema = z.object({
-  email: z.string().trim().email("That doesn't look like an email").max(255),
-  kids: z.enum(["not_yet", "little", "bigger", "just_me"]),
-});
-
+// E2E anchor: tests/e2e/marketing-forms.spec.ts identifies BookForm by
+// being the form on /landing-classic that contains a <select>. If the
+// kids segmentation moves to radio buttons / a separate component, the
+// test selector must be updated alongside it.
 function BookForm() {
-  const [email, setEmail] = useState("");
-  const [kids, setKids] = useState<"not_yet" | "little" | "bigger" | "just_me">("little");
-  const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    const parsed = bookSchema.safeParse({ email, kids });
-    if (!parsed.success) {
-      setErr(parsed.error.issues[0]?.message ?? "Something's off.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resp = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ form: "book", email: parsed.data.email, kids: parsed.data.kids }),
-      });
-      if (!resp.ok) {
-        setErr("Something went wrong. Try again in a minute.");
-        setSubmitting(false);
-        return;
-      }
-      setDone(true);
-    } catch {
-      setErr("Network error. Try again in a minute.");
-      setSubmitting(false);
-    }
-  };
+  const { email, setEmail, kids, setKids, err, done, submitting, onSubmit } = useSignupForm({
+    form: "book",
+    withKids: true,
+  });
 
   if (done) {
     return (
@@ -1354,6 +1325,11 @@ function BookForm() {
 
 /* ──────────────────────────────  FINAL CTA  ────────────────────────────── */
 
+// E2E anchor: tests/e2e/marketing-forms.spec.ts scopes the WaitlistForm
+// to the `#waitlist` section to disambiguate it from the BookForm (and
+// from any future form on the page). The id is also a real fragment
+// link from the page nav, so it's load-bearing for both UX and tests;
+// keep it when restructuring.
 function FinalCTA() {
   return (
     <section
@@ -1385,42 +1361,10 @@ function FinalCTA() {
   );
 }
 
-const waitlistSchema = z.object({
-  email: z.string().trim().email("That doesn't look like an email").max(255),
-});
-
 function WaitlistForm() {
-  const [email, setEmail] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(null);
-    const p = waitlistSchema.safeParse({ email });
-    if (!p.success) {
-      setErr(p.error.issues[0]?.message ?? "Something's off.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resp = await fetch("/api/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ form: "waitlist", email: p.data.email }),
-      });
-      if (!resp.ok) {
-        setErr("Something went wrong. Try again in a minute.");
-        setSubmitting(false);
-        return;
-      }
-      setDone(true);
-    } catch {
-      setErr("Network error. Try again in a minute.");
-      setSubmitting(false);
-    }
-  };
+  const { email, setEmail, err, done, submitting, onSubmit } = useSignupForm({
+    form: "waitlist",
+  });
 
   if (done) {
     return (
