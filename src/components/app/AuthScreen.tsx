@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { Lock } from "lucide-react";
+import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
 
 /**
  * Open the sign-up form when this flag is set to "1" at build time.
@@ -26,22 +28,50 @@ export function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * Turnstile-issued challenge token. Stays null until the widget
+   * fires `onSuccess`; the submit button is disabled while null AND
+   * the build has a site key configured (CAPTCHA_REQUIRED). When
+   * the build has no site key, the form submits without a token and
+   * Supabase Auth is expected to be configured to accept tokenless
+   * calls on the matching project: the dev project today, or any
+   * env where the operator has not yet flipped captcha on in
+   * Studio.
+   */
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  /**
+   * Ref to the widget so the auth call's error branch can call
+   * `widgetRef.current?.reset()` and re-issue a fresh challenge
+   * without remounting the entire form. Turnstile tokens are
+   * single-use: a stale token on retry would fail; resetting on
+   * error is the canonical recovery.
+   */
+  const widgetRef = useRef<TurnstileInstance | null>(null);
+
+  const resetCaptcha = () => {
+    widgetRef.current?.reset();
+    setCaptchaToken(null);
+  };
 
   const onSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { error } = await signIn(email, password);
+    const { error } = await signIn(email, password, captchaToken);
     setBusy(false);
-    if (error) toastError(error);
+    if (error) {
+      toastError(error);
+      resetCaptcha();
+    }
   };
 
   const onSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { error, isNew } = await signUp(email, password);
+    const { error, isNew } = await signUp(email, password, captchaToken);
     setBusy(false);
     if (error) {
       toastError(error);
+      resetCaptcha();
       return;
     }
     if (isNew) {
@@ -55,11 +85,17 @@ export function AuthScreen() {
   const onReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { error } = await resetPassword(email);
+    const { error } = await resetPassword(email, captchaToken);
     setBusy(false);
-    if (error) toastError(error);
-    else toast.success("Check your email for a reset link.");
+    if (error) {
+      toastError(error);
+      resetCaptcha();
+    } else {
+      toast.success("Check your email for a reset link.");
+    }
   };
+
+  const submitDisabled = busy || (CAPTCHA_REQUIRED && !captchaToken);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
@@ -108,7 +144,13 @@ export function AuthScreen() {
                       required
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
+                  <CaptchaWidget
+                    ref={widgetRef}
+                    onSuccess={setCaptchaToken}
+                    onError={resetCaptcha}
+                    onExpire={resetCaptcha}
+                  />
+                  <Button type="submit" className="w-full" disabled={submitDisabled}>
                     {busy ? "Signing in…" : "Sign in"}
                   </Button>
                   <button
@@ -163,7 +205,13 @@ export function AuthScreen() {
                           required
                         />
                       </div>
-                      <Button type="submit" className="w-full" disabled={busy}>
+                      <CaptchaWidget
+                        ref={widgetRef}
+                        onSuccess={setCaptchaToken}
+                        onError={resetCaptcha}
+                        onExpire={resetCaptcha}
+                      />
+                      <Button type="submit" className="w-full" disabled={submitDisabled}>
                         {busy ? "Creating account…" : "Create account"}
                       </Button>
                     </form>
@@ -226,7 +274,13 @@ export function AuthScreen() {
                       required
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
+                  <CaptchaWidget
+                    ref={widgetRef}
+                    onSuccess={setCaptchaToken}
+                    onError={resetCaptcha}
+                    onExpire={resetCaptcha}
+                  />
+                  <Button type="submit" className="w-full" disabled={submitDisabled}>
                     {busy ? "Sending…" : "Send reset link"}
                   </Button>
                   <button
