@@ -260,6 +260,7 @@ export function CreateVaultFlow() {
         finalizeVaultSetup();
         navigate({ to: "/dashboard" });
       }}
+      onBack={() => setStep("reveal")}
     />
   );
 }
@@ -387,7 +388,21 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
   );
 }
 
-function RecoveryVerify({ code, onDone }: { code: string; onDone: () => void }) {
+function RecoveryVerify({
+  code,
+  onDone,
+  onBack,
+}: {
+  code: string;
+  onDone: () => void;
+  /**
+   * Step back to the reveal screen so the user can re-read their
+   * recovery code if they typed a wrong word or forgot one. The
+   * reveal screen still has the code in memory (the parent only
+   * wipes it on `onDone`), so no re-generation is needed.
+   */
+  onBack: () => void;
+}) {
   const words = useMemo(() => code.trim().split(/\s+/), [code]);
   // Pick two distinct random indices once
   const [indices] = useState(() => {
@@ -452,16 +467,25 @@ function RecoveryVerify({ code, onDone }: { code: string; onDone: () => void }) 
           <Button type="submit" className="w-full">
             Confirm and continue
           </Button>
-          <button
-            type="button"
-            onClick={() => {
-              toast.success("Welcome to Orange Way.");
-              onDone();
-            }}
-            className="block w-full text-center text-xs text-muted-foreground hover:text-foreground"
-          >
-            Skip verification
-          </button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← Back to recovery code
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                toast.success("Welcome to Orange Way.");
+                onDone();
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Skip verification
+            </button>
+          </div>
         </form>
       </CardContent>
     </Card>
