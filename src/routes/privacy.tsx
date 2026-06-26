@@ -32,7 +32,7 @@ function PrivacyPage() {
       <article className="mx-auto max-w-3xl px-6 py-16">
         <h1 className="text-4xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Version: 2026.06.26.{" "}
+          Version: 2026.06.26b.{" "}
           <Link to="/privacy-changelog" className="underline">
             See changes to this policy.
           </Link>
@@ -228,8 +228,23 @@ function PrivacyPage() {
           metadata.
         </p>
 
+        <h2 className="mt-8 text-xl font-semibold">Controller</h2>
+        <p className="mt-2 text-muted-foreground">
+          The controller responsible for the personal information described on this page, for
+          purposes of Quebec Law 25 §8.1 and GDPR Art. 13(1)(a), is reachable at:
+        </p>
+        <address className="mt-2 not-italic text-muted-foreground">
+          Orange Way
+          <br />
+          24 Maple Ave #1
+          <br />
+          Barrie, ON L4N 1R6
+          <br />
+          Canada
+        </address>
+
         <p className="mt-10 text-xs text-muted-foreground">
-          Questions? Email privacy@orangeway.app.
+          Questions? Email privacy@orangeway.app or write to the address above.
         </p>
       </article>
     </MarketingShell>
