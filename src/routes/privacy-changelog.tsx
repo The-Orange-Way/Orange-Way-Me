@@ -44,6 +44,16 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.06.26b</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Added Controller section with postal address (Quebec Law 25 §8.1 + GDPR Art.
+                13(1)(a) controller-identity disclosure).
+              </li>
+            </ul>
+          </div>
+
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.06.26</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>Added Cross-border data transfers section (SCC + DPF + Quebec Law 25 §17).</li>
