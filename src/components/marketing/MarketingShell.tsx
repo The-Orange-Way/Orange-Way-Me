@@ -6,27 +6,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-// Inline Bitcoin SVG — avoids pulling the entire lucide-react chunk (~611 KB)
-// into the marketing entry just for one icon. Path mirrors lucide-react's
-// <Bitcoin /> source so the visual stays identical.
-function BitcoinIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M11.767 19.089c4.924.868 6.14-6.025 1.216-6.894m-1.216 6.894L5.86 18.047m5.908 1.042-.347 1.97m1.563-8.864c4.924.869 6.14-6.025 1.215-6.893m-1.215 6.893-3.94-.694m5.155-6.2L8.29 4.26m5.908 1.042.348-1.97M7.48 20.364l3.126-17.727" />
-    </svg>
-  );
-}
-
 const NAV = [
   { to: "/features", label: "Features" },
   { to: "/security", label: "Security" },
@@ -42,9 +21,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
-              <BitcoinIcon className="h-4 w-4" />
-            </div>
+            <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8 rounded-lg" />
             <span className="text-sm font-semibold tracking-tight">Orange Way</span>
           </Link>
           <nav className="hidden items-center gap-5 md:flex" aria-label="Primary">
@@ -82,7 +59,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         <div className="mx-auto grid max-w-6xl gap-6 px-6 py-10 text-sm md:grid-cols-4">
           <div>
             <div className="flex items-center gap-2">
-              <BitcoinIcon className="h-4 w-4 text-primary" />
+              <img src="/icon-192.png" alt="" width={16} height={16} className="h-4 w-4 rounded" />
               <span className="font-semibold">Orange Way</span>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
