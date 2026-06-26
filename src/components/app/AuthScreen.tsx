@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
-import { Lock } from "lucide-react";
 import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 
@@ -122,9 +121,13 @@ export function AuthScreen() {
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Lock className="h-5 w-5" />
-          </div>
+          <img
+            src="/icon-192.png"
+            alt=""
+            width={48}
+            height={48}
+            className="h-12 w-12 rounded-2xl"
+          />
           <div className="text-center">
             <h1 className="text-2xl font-semibold tracking-tight">Orange Way</h1>
             <p className="mt-1 text-sm text-muted-foreground">Zero-knowledge personal finance</p>

@@ -250,12 +250,7 @@ function Nav() {
 function Logo() {
   return (
     <Link to="/" className="flex items-center gap-2.5">
-      <span
-        className="grid h-8 w-8 place-items-center rounded-lg text-base font-bold"
-        style={{ background: C.orange, color: "#fff", fontFamily: FONT_HEADING }}
-      >
-        O
-      </span>
+      <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8 rounded-lg" />
       <span
         className="text-base font-bold tracking-tight"
         style={{ fontFamily: FONT_HEADING, color: C.deep }}
