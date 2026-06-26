@@ -16,6 +16,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SelfHostRouteImport } from './routes/self-host'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as PrivacyChangelogRouteImport } from './routes/privacy-changelog'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as LandingClassicRouteImport } from './routes/landing-classic'
@@ -86,6 +87,11 @@ const SecurityRoute = SecurityRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyChangelogRoute = PrivacyChangelogRouteImport.update({
+  id: '/privacy-changelog',
+  path: '/privacy-changelog',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -293,6 +299,7 @@ export interface FileRoutesByFullPath {
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/privacy-changelog': typeof PrivacyChangelogRoute
   '/reset-password': typeof ResetPasswordRoute
   '/security': typeof SecurityRoute
   '/self-host': typeof SelfHostRoute
@@ -338,6 +345,7 @@ export interface FileRoutesByTo {
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/privacy-changelog': typeof PrivacyChangelogRoute
   '/reset-password': typeof ResetPasswordRoute
   '/security': typeof SecurityRoute
   '/self-host': typeof SelfHostRoute
@@ -383,6 +391,7 @@ export interface FileRoutesById {
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/privacy-changelog': typeof PrivacyChangelogRoute
   '/reset-password': typeof ResetPasswordRoute
   '/security': typeof SecurityRoute
   '/self-host': typeof SelfHostRoute
@@ -430,6 +439,7 @@ export interface FileRouteTypes {
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
+    | '/privacy-changelog'
     | '/reset-password'
     | '/security'
     | '/self-host'
@@ -475,6 +485,7 @@ export interface FileRouteTypes {
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
+    | '/privacy-changelog'
     | '/reset-password'
     | '/security'
     | '/self-host'
@@ -519,6 +530,7 @@ export interface FileRouteTypes {
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
+    | '/privacy-changelog'
     | '/reset-password'
     | '/security'
     | '/self-host'
@@ -565,6 +577,7 @@ export interface RootRouteChildren {
   LandingClassicRoute: typeof LandingClassicRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
+  PrivacyChangelogRoute: typeof PrivacyChangelogRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SecurityRoute: typeof SecurityRoute
   SelfHostRoute: typeof SelfHostRoute
@@ -624,6 +637,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy-changelog': {
+      id: '/privacy-changelog'
+      path: '/privacy-changelog'
+      fullPath: '/privacy-changelog'
+      preLoaderRoute: typeof PrivacyChangelogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/privacy': {
@@ -968,6 +988,7 @@ const rootRouteChildren: RootRouteChildren = {
   LandingClassicRoute: LandingClassicRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
+  PrivacyChangelogRoute: PrivacyChangelogRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SecurityRoute: SecurityRoute,
   SelfHostRoute: SelfHostRoute,
