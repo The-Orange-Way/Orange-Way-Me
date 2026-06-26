@@ -294,6 +294,13 @@ function RotatingWord() {
 function Hero() {
   return (
     <section className="mx-auto max-w-7xl px-6 pt-10 pb-16 text-center md:pt-14 md:pb-20">
+      <img
+        src="/icon-192.png"
+        alt=""
+        width={96}
+        height={96}
+        className="mx-auto mb-6 h-20 w-20 rounded-2xl md:mb-8 md:h-24 md:w-24"
+      />
       <h1
         className="mx-auto max-w-5xl text-4xl font-bold leading-[1.05] tracking-tighter sm:text-5xl md:text-6xl lg:text-7xl"
         style={{ fontFamily: FONT_HEADING, color: C.deep, letterSpacing: "-0.02em" }}
