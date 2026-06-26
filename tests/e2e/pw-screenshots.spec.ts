@@ -107,12 +107,18 @@ for (const vp of VIEWPORTS) {
         await page.screenshot({ path: path.join(SHOT_DIR, fname), fullPage: true });
 
         // Console error filter — same as smoke spec.
+        // On /auth, Supabase emits a 401 on the initial session probe when
+        // captcha is enabled at the project level and no token is attached
+        // yet (the user has not interacted). Browser logs that as a generic
+        // "Failed to load resource: 401". That's expected; the form still
+        // renders and is interactive. Filter it on /auth only.
         const significantErrors = consoleErrors.filter(
           (e) =>
             !e.includes("Download the React DevTools") &&
             !e.includes("chrome-extension://") &&
             !e.includes("Loading chunk") &&
-            !e.includes("PostHog"),
+            !e.includes("PostHog") &&
+            !(route.path === "/auth" && e.includes("status of 401")),
         );
         expect(significantErrors, `${route.label} no console errors`).toEqual([]);
       });
