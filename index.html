@@ -4,6 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+    <!--
+      Content-Security-Policy (Report-Only rollout).
+      Shipped via <meta> so the policy travels with the static HTML even on
+      hosts that can't set response headers. The authoritative copy (with
+      report-uri + frame-ancestors) is the HTTP header in public/_headers,
+      which Cloudflare Pages serves; keep the two in sync.
+
+      Report-Only first: this logs violations to GlitchTip without blocking
+      anything, so we can confirm we caught every host (Supabase, PostHog EU,
+      GlitchTip at pulse.orangeway.app, Cloudflare Turnstile, Chatwoot at
+      support.orangeway.app) before flipping to enforcing. Flip criterion:
+      zero legitimate violations across the observation window.
+
+      script-src is strict (no 'unsafe-inline'): the only inline executable
+      script is the Chatwoot bootstrap below, allow-listed by its sha256.
+      JSON-LD blocks use type="application/ld+json" (non-executable) and are
+      not governed by script-src. 'wasm-unsafe-eval' is required by hash-wasm
+      for the Argon2id vault-unlock WASM (runs on the main thread, no worker).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy-Report-Only"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-r4AVBYwsGmCAKbOHMNtiv4cA1b/wnZveBhmkrbVktEo=' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'"
+    />
+
     <!-- Defaults overridden per-route by TanStack Router's head() + HeadContent.
          Pre-rendered marketing routes (scripts/prerender-plugin.ts) rewrite
          <title>, <meta description>, and <link rel=canonical> per route at
