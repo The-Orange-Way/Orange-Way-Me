@@ -112,12 +112,18 @@ for (const vp of VIEWPORTS) {
         // yet (the user has not interacted). Browser logs that as a generic
         // "Failed to load resource: 401". That's expected; the form still
         // renders and is interactive. Filter it on /auth only.
+        //
+        // posthog-js prints a `%c%d` formatted line on init that some browsers
+        // surface as a console error. The format-substitution carrier ends up
+        // as the literal string `font-size:0;color:transparent` with no other
+        // self-identifying token in it, so match by that substring.
         const significantErrors = consoleErrors.filter(
           (e) =>
             !e.includes("Download the React DevTools") &&
             !e.includes("chrome-extension://") &&
             !e.includes("Loading chunk") &&
             !e.includes("PostHog") &&
+            !e.includes("font-size:0;color:transparent") &&
             !(route.path === "/auth" && e.includes("status of 401")),
         );
         expect(significantErrors, `${route.label} no console errors`).toEqual([]);
