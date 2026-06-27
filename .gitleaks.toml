@@ -21,6 +21,11 @@ paths = [
 regexes = [
   # Chatwoot websiteToken is public by design (like a GA property ID)
   '''Token: "kSi4hwVaBkUfr7zhmVdhCwHq"''',
+  # GlitchTip/Sentry DSN public key in the CSP report-uri (public/_headers).
+  # Public by design, already shipped in the client bundle; permits SENDING
+  # error/CSP reports only, never reading data. Same class as the DSN any
+  # client-side Sentry SDK embeds.
+  '''557469b0d58a45a3b7626e1329b014ee''',
   # FIPS-204 ML-DSA-65 + hybrid KEM byte-length constants in pqc.ts
   # — these are SIZES (e.g. 1216, 2432, 1120), not key material
   '''SECRET_KEY_BYTES =\s+HYBRID_KEM_V1''',
