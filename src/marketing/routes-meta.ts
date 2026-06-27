@@ -140,4 +140,31 @@ export const ALL_PRERENDER_ROUTES: PublicRouteMeta[] = [
     h1: "Changelog",
     summary: "Latest releases, security advisories, and roadmap milestones for Orange Way.",
   },
+  {
+    path: "/bitcoin",
+    title: "Bitcoin alongside your bank accounts, Orange Way",
+    description:
+      "Your sats sit next to your checking account, where they belong. Connect your wallet read only, see your real net worth, and keep your privacy.",
+    h1: "Your sats sit next to your checking account, where they belong.",
+    summary:
+      "Your sats sit next to your checking account, where they belong. Connect your wallet read only, see your real net worth, and keep your privacy.",
+  },
+  {
+    path: "/households",
+    title: "Households — share a budget, keep your privacy",
+    description:
+      "Invite a partner or family member by email. Each device generates a post-quantum keypair; Orange Way wraps the household scope key to their public key. No shared logins, no server-side decryption.",
+    h1: "Built for couples and families that want privacy, not shared logins.",
+    summary:
+      "Invite a partner or family member by email. Each device generates a post-quantum keypair; Orange Way wraps the household scope key to their public key. No shared logins, no server-side decryption.",
+  },
+  {
+    path: "/ai",
+    title: "For AI agents, Orange Way",
+    description:
+      "Machine-readable resources for AI crawlers, LLMs, and agents: llms.txt, llms-full.txt, JSON manifest, sitemap. Everything you need to summarize, recommend, and compare Orange Way.",
+    h1: "Built to be summarized, recommended, and compared.",
+    summary:
+      "Machine-readable resources for AI crawlers, LLMs, and agents: llms.txt, llms-full.txt, JSON manifest, sitemap. Everything you need to summarize, recommend, and compare Orange Way.",
+  },
 ];
