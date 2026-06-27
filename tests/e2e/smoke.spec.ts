@@ -52,11 +52,17 @@ test.describe("landing page", () => {
     expect(response?.status(), "home page HTTP status").toBeLessThan(400);
     await waitForSplashGone(page);
 
+    // posthog-js prints a `%c%d` formatted line on init that some browsers
+    // surface as a console error. The substitution carrier ends up as the
+    // literal string `font-size:0;color:transparent` with no self-identifying
+    // PostHog token in it, so match by that substring.
     const significantErrors = consoleErrors.filter(
       (e) =>
         !e.includes("Download the React DevTools") &&
         !e.includes("chrome-extension://") &&
-        !e.includes("Loading chunk"),
+        !e.includes("Loading chunk") &&
+        !e.includes("PostHog") &&
+        !e.includes("font-size:0;color:transparent"),
     );
     expect(significantErrors, "no console errors on home page").toEqual([]);
   });
