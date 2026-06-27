@@ -13,3 +13,8 @@
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
+  # Force HTTPS for two years incl. subdomains; 'preload' opts into the browser
+  # preload list. Orange Way is HTTPS-only behind Cloudflare, so this is safe.
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  # Deny powerful browser features the app never uses (defense in depth).
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
