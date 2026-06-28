@@ -5,15 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <!--
-      Content-Security-Policy (Report-Only rollout).
-      Shipped via <meta> so the policy travels with the static HTML even on
-      hosts that can't set response headers. The authoritative copy (with
-      report-uri + frame-ancestors) is the HTTP header in public/_headers,
-      which Cloudflare Pages serves; keep the two in sync.
+      Content-Security-Policy is delivered as an HTTP response header from
+      public/_headers (served by Cloudflare Pages), not from a <meta> tag.
+      The Report-Only variant is not valid via <meta> (browsers ignore it and
+      log a console warning), and only the header can carry report-uri and
+      frame-ancestors. See public/_headers for the authoritative policy.
 
-      Report-Only first: this logs violations to GlitchTip without blocking
-      anything, so we can confirm we caught every host (Supabase, PostHog EU,
-      GlitchTip at pulse.orangeway.app, Cloudflare Turnstile, Chatwoot at
+      Report-Only first: it logs violations to GlitchTip (pulse.orangeway.app)
+      without blocking anything, so we can confirm every legitimate host
+      (Supabase, PostHog EU, GlitchTip, Cloudflare Turnstile, Chatwoot at
       support.orangeway.app) before flipping to enforcing. Flip criterion:
       zero legitimate violations across the observation window.
 
@@ -21,12 +21,8 @@
       script is the Chatwoot bootstrap below, allow-listed by its sha256.
       JSON-LD blocks use type="application/ld+json" (non-executable) and are
       not governed by script-src. 'wasm-unsafe-eval' is required by hash-wasm
-      for the Argon2id vault-unlock WASM (runs on the main thread, no worker).
+      for the Argon2id vault unlock WASM.
     -->
-    <meta
-      http-equiv="Content-Security-Policy-Report-Only"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-r4AVBYwsGmCAKbOHMNtiv4cA1b/wnZveBhmkrbVktEo=' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'"
-    />
 
     <!-- Defaults overridden per-route by TanStack Router's head() + HeadContent.
          Pre-rendered marketing routes (scripts/prerender-plugin.ts) rewrite
