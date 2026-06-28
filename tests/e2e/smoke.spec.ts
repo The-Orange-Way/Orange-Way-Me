@@ -1,4 +1,5 @@
 import { test, expect, type ConsoleMessage } from "@playwright/test";
+import { isFilteredConsoleMessage } from "./console-filter";
 
 /**
  * Smoke tests — catches CF Pages deployment regressions.
@@ -52,12 +53,7 @@ test.describe("landing page", () => {
     expect(response?.status(), "home page HTTP status").toBeLessThan(400);
     await waitForSplashGone(page);
 
-    const significantErrors = consoleErrors.filter(
-      (e) =>
-        !e.includes("Download the React DevTools") &&
-        !e.includes("chrome-extension://") &&
-        !e.includes("Loading chunk"),
-    );
+    const significantErrors = consoleErrors.filter((e) => !isFilteredConsoleMessage(e));
     expect(significantErrors, "no console errors on home page").toEqual([]);
   });
 
