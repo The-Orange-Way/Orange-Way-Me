@@ -5,7 +5,7 @@ import {
   jsonLd,
   breadcrumb,
 } from "@/components/marketing/MarketingShell";
-import { ShieldCheck, EyeOff, KeyRound, Users } from "lucide-react";
+import { ShieldCheck, EyeOff, KeyRound, Users, Link2 } from "lucide-react";
 
 export const Route = createFileRoute("/security")({
   head: () => ({
@@ -63,6 +63,17 @@ function SecurityPage() {
           <p className="mt-3">
             That's the point of the design. We treat our own servers as untrusted, on purpose, so
             that one bad day on our side doesn't become a permanent leak of your life.
+          </p>
+        </Story>
+
+        <Story icon={<Link2 className="h-5 w-5" />} title="Connecting your bank and your Bitcoin">
+          <p>Your Bitcoin is sealed in your browser, so Orange Way's servers never see it.</p>
+          <p className="mt-3">
+            Your bank connection works a little differently: the feed comes in through Quiltt, and
+            our connector (Orange Rails) briefly handles it in the clear to lock each transaction to
+            a key only you hold, derived from your password. Once sealed, not even the connector
+            that locked it can reopen it. Orange Way stores only the sealed version. Either way, you
+            hold the only key.
           </p>
         </Story>
 
