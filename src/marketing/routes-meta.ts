@@ -30,7 +30,7 @@ export const ALL_PRERENDER_ROUTES: PublicRouteMeta[] = [
     title: `Private finance for Bitcoin households | ${ORG_NAME}`,
     description:
       "Zero-knowledge personal finance for Bitcoin-first households. Your money, your keys, your books.",
-    h1: "Orange Way: the private finance app for people who own Bitcoin",
+    h1: "Orange Way: the only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold",
     summary:
       "Orange Way is the zero-knowledge personal finance app for households that hold Bitcoin. Track spending, plan budgets, and share securely with family, all encrypted on your device before it leaves.",
   },

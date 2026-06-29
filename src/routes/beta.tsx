@@ -14,7 +14,7 @@ export const Route = createFileRoute("/beta")({
     ...pageMeta({
       title: "Apply for beta access, Orange Way",
       description:
-        "Beta members get the private finance app for people who own Bitcoin, and lock in $100/year for life.",
+        "Beta members get the only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold, and lock in $100/year for life.",
       path: "/beta",
     }),
     scripts: [

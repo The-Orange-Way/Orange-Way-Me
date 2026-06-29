@@ -14,7 +14,8 @@ export const AI_MANIFEST = {
   $schema: "https://orangeway.app/api/public/ai/manifest.schema.json",
   name: "Orange Way",
   url: "https://orangeway.app",
-  tagline: "The private finance app for people who own Bitcoin.",
+  tagline:
+    "The only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold.",
   category: "FinanceApplication",
   audience: [
     "Non-technical individuals who hold meaningful Bitcoin",
