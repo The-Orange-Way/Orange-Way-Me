@@ -162,7 +162,14 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
       });
       setStep("discovering");
 
-      const accounts = await discoverQuilttAccounts(complete.quilttConnectionId);
+      // The active-discovery poll fallback (see openBankPopup) already
+      // diffed against the user's pre-existing accounts and hands back
+      // only the newly-linked one(s) here. Re-calling discoverQuilttAccounts
+      // with an empty connection id in that case would re-enumerate EVERY
+      // connection this user has, including ones from before this popup
+      // opened, and wrongly present those for review too.
+      const accounts =
+        complete.discoveredAccounts ?? (await discoverQuilttAccounts(complete.quilttConnectionId));
       if (accounts.length === 0) {
         throw new Error("Your bank connected, but no accounts came through. Try again.");
       }
