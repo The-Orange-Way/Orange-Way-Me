@@ -126,6 +126,19 @@ export function useDemoSeed() {
         const accountIdByName = new Map<string, string>();
         const createdAccountIds: string[] = [];
 
+        // Demo transactions are backdated up to ~3 months to look realistic
+        // (see DemoTxn.daysAgo in demo-families.ts). accounts.opened_at
+        // defaults to now() on insert, and a DB trigger rejects any
+        // transaction dated before its account's opened_at (see migration
+        // 20260530000000_accounts_opened_at_invariant.sql). Without this,
+        // seeding a family fails on the first backdated transaction. Back
+        // the account's opened_at up to one day before its oldest demo
+        // transaction so the whole seed lands cleanly.
+        const oldestDaysAgoForAccount = (accountName: string) =>
+          family.transactions
+            .filter((t) => t.account === accountName)
+            .reduce((max, t) => Math.max(max, t.daysAgo), 0);
+
         for (let i = 0; i < family.accounts.length; i++) {
           const acc = family.accounts[i];
           const enc: AccountDraft = {
@@ -136,11 +149,14 @@ export function useDemoSeed() {
             balance: acc.balance,
             metadata: { demo_seed: true, demo_family: family.id },
           };
+          const openedAt = new Date();
+          openedAt.setDate(openedAt.getDate() - (oldestDaysAgoForAccount(acc.name) + 1));
           const { data, error } = await accountsTable()
             .insert({
               user_id: user.id,
               connector_type: "manual",
               is_active: true,
+              opened_at: openedAt.toISOString().slice(0, 10),
               enc_name: await encryptText(acc.name),
               enc_type: await encryptText(acc.type),
               enc_currency: await encryptText(acc.currency),
