@@ -11,7 +11,7 @@ export const Route = createFileRoute("/privacy")({
     ...pageMeta({
       title: "Privacy Policy, Orange Way",
       description:
-        "Orange Way is end to end encrypted. We cannot read your financial data. This page explains exactly what we collect, what we don't, and why.",
+        "Orange Way encrypts your financial data on your device, so we cannot read it. This page explains exactly what we collect, what we don't, and the one bank-feed exception.",
       path: "/privacy",
     }),
     scripts: [
@@ -32,7 +32,7 @@ function PrivacyPage() {
       <article className="mx-auto max-w-3xl px-6 py-16">
         <h1 className="text-4xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Version: 2026.06.26b.{" "}
+          Version: 2026.07.02.{" "}
           <Link to="/privacy-changelog" className="underline">
             See changes to this policy.
           </Link>
@@ -42,7 +42,9 @@ function PrivacyPage() {
         <p className="mt-2 text-muted-foreground">
           Account names, balances, transactions (amount, merchant, category, notes), budgets, goals,
           rules, tags, splits, transfers. All of this is encrypted on your device before it touches
-          our servers.
+          our servers. Bank-synced transactions are the one exception on their way in: they arrive
+          through the bank feed pathway described under Sub-processors, and are sealed before we
+          store them.
         </p>
 
         <h2 className="mt-8 text-xl font-semibold">What we do collect</h2>
@@ -64,8 +66,15 @@ function PrivacyPage() {
         <h2 className="mt-8 text-xl font-semibold">Sub-processors</h2>
         <p className="mt-2 text-muted-foreground">
           A handful of third parties touch parts of Orange Way. Each one only sees what is listed
-          below. Because your financial data is encrypted on your device, none of these companies
-          can read your accounts, balances, transactions, budgets, or goals.
+          below. Your manually entered and Bitcoin data is encrypted on your device, so none of
+          these companies can read those accounts, balances, transactions, budgets, or goals. Bank
+          feeds are the one exception: Quiltt processes your bank feed in the clear under its own
+          privacy policy (see its row below), and our Orange Rails connector handles it in the clear
+          only for the moment it takes to seal it, exactly as described on our{" "}
+          <Link to="/security" className="underline">
+            security page
+          </Link>
+          .
         </p>
 
         <h3 className="mt-6 text-lg font-semibold">Supabase</h3>
@@ -131,6 +140,27 @@ function PrivacyPage() {
           DPA: GlitchTip is operated by us, not a third-party vendor.
         </p>
 
+        <h3 className="mt-6 text-lg font-semibold">Quiltt</h3>
+        <p className="mt-2 text-muted-foreground">
+          Provides the bank connection feed, only if you choose to link a bank account. Quiltt is
+          headquartered in the United States. Sees: your bank account and transaction data in the
+          clear, to deliver the feed, as bank aggregators do, retained under its own privacy policy.
+          Your bank credentials are entered into Quiltt's connector or your bank's own sign-in and
+          are never sent to Orange Way. Our Orange Rails connector then handles the feed briefly in
+          the clear to seal each transaction to a key only you hold, and Orange Way stores only the
+          sealed version. Retention on our side: we keep nothing unsealed. If you never link a bank,
+          Quiltt never sees anything about you.{" "}
+          <a
+            href="https://www.quiltt.io/policies/privacy-policy"
+            className="underline"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Quiltt privacy policy
+          </a>
+          .
+        </p>
+
         <h3 className="mt-6 text-lg font-semibold">PostHog</h3>
         <p className="mt-2 text-muted-foreground">
           Marketing-site analytics. Enabled on <code>orangeway.app</code>. Disabled by default on
@@ -177,6 +207,13 @@ function PrivacyPage() {
             <strong>PostHog (US).</strong> SCCs. Quebec Law 25 §17 implication: anonymous
             event-level analytics; no profile, no cross-site identifier. Disabled entirely on
             self-hosted builds.
+          </li>
+          <li>
+            <strong>Quiltt (US).</strong> Applies only if you link a bank account. Quebec Law 25 §17
+            implication: bank account and transaction data is processed in the United States to
+            deliver the feed, under Quiltt's privacy policy and our agreement with them. Transfer
+            safeguard: our assessment of the applicable mechanism (SCCs or equivalent in the Quiltt
+            agreement) is in progress; contact us for its current status.
           </li>
           <li>
             <strong>GlitchTip (operated by us).</strong> No third-country transfer: data lands on

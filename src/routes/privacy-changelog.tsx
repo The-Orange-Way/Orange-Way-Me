@@ -44,6 +44,29 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.07.02</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Added Quiltt as an explicit sub-processor row (bank connection feed, applies only if
+                you link a bank account), matching the disclosure on the security page. Quiltt was
+                already named on the security page; this closes the gap in the sub-processor list.
+                Not a new data pathway.
+              </li>
+              <li>
+                Qualified the sub-processor intro: device-side encryption covers manually entered
+                and Bitcoin data; the bank feed pathway is handled in the clear for the moment it
+                takes to seal it, as the security page describes.
+              </li>
+              <li>Added Quiltt to the Cross-border data transfers list (US).</li>
+              <li>
+                Mechanism note: published as a corrective disclosure of an existing pathway,
+                effective immediately. The 30-day pre-change notice applies to adding or replacing a
+                sub-processor, which this is not.
+              </li>
+            </ul>
+          </div>
+
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.06.26b</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>

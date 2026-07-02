@@ -71,9 +71,10 @@ function SecurityPage() {
           <p className="mt-3">
             Your bank connection works a little differently: the feed comes in through Quiltt, and
             our connector (Orange Rails) briefly handles it in the clear to lock each transaction to
-            a key only you hold, derived from your password. Once sealed, not even the connector
-            that locked it can reopen it. Orange Way stores only the sealed version. Either way, you
-            hold the only key.
+            a key only you hold, derived from your password. The connector does not keep that key:
+            it is handed over only while a sync runs, and between syncs it cannot read anything it
+            sealed. Orange Way stores only the sealed version. Either way, you hold the only lasting
+            key.
           </p>
         </Story>
 
