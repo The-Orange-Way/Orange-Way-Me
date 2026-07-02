@@ -173,7 +173,6 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
       if (accounts.length === 0) {
         throw new Error("Your bank connected, but no accounts came through. Try again.");
       }
-      const today = new Date().toISOString().slice(0, 10);
       setPending(
         accounts.map((a) => ({
           source: a,
@@ -187,7 +186,6 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
           saved: false,
         })),
       );
-      void today;
       setStep("review");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -258,7 +256,7 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
             user_id: user.id,
             connector_type: "orange_rails",
             provider_slug: "quiltt",
-            opened_at: openedAt.toISOString(),
+            opened_at: openedAt.toISOString().slice(0, 10),
             enc_name,
             enc_type,
             enc_currency,
