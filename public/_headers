@@ -2,14 +2,19 @@
 #
 # Content-Security-Policy is shipped Report-Only first: it logs violations to
 # GlitchTip (report-uri) without blocking anything, so we can confirm the host
-# allow-list is complete before flipping to enforcing. Keep this in sync with
-# the <meta http-equiv> copy in index.html. frame-ancestors and report-uri live
-# here only (browsers ignore both when delivered via <meta>).
+# allow-list is complete before flipping to enforcing. This header is the only
+# CSP copy (the <meta http-equiv> variant was removed in #71: browsers ignore
+# Report-Only via <meta>).
+#
+# static.cloudflareinsights.com (script-src) + cloudflareinsights.com
+# (connect-src) cover Cloudflare Web Analytics: the beacon script is injected
+# at the edge by Cloudflare (it is not in index.html) and beacons via fetch.
+# It accounted for the top CSP report volume by far before this allowlist.
 #
 # Flip criterion: zero legitimate violations across the observation window,
 # then rename the header to Content-Security-Policy (enforcing).
 /*
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-r4AVBYwsGmCAKbOHMNtiv4cA1b/wnZveBhmkrbVktEo=' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; report-uri https://pulse.orangeway.app/api/1/security/?sentry_key=557469b0d58a45a3b7626e1329b014ee
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-r4AVBYwsGmCAKbOHMNtiv4cA1b/wnZveBhmkrbVktEo=' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app https://cloudflareinsights.com; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; report-uri https://pulse.orangeway.app/api/1/security/?sentry_key=557469b0d58a45a3b7626e1329b014ee
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

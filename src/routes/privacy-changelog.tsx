@@ -44,6 +44,19 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.07.02b</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Disclosed Cloudflare Web Analytics in the Cloudflare sub-processor row and the
+                cross-border list: cookie-less page-view beacon (page URL, referrer, browser type),
+                no profile, no cross-site identifier, aggregate retention. Recorded after the fact
+                under the emergency clause: the beacon was already live before this disclosure, and
+                the gap surfaced during a security-header review.
+              </li>
+            </ul>
+          </div>
+
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.07.02</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>
