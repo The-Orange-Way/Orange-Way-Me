@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { getRouter } from "./router";
 import { initSentry } from "./lib/observability/sentry";
+import { installChunkReloadHandler } from "./lib/chunk-reload";
 import "./styles.css";
 
 // Wire Sentry before React mounts so the very first render errors are
@@ -9,6 +10,10 @@ import "./styles.css";
 // without a DSN stay quiet. Async because the SDK is dynamic-imported on
 // first init; capture() calls before init resolves are queued internally.
 void initSentry();
+
+// Stale-deploy chunk recovery: one hard reload when a lazy chunk 404s after
+// a deploy renamed the hashed files. Rationale + loop guard in the module.
+installChunkReloadHandler();
 
 const router = getRouter();
 
