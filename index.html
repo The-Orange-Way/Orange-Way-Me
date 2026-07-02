@@ -13,8 +13,9 @@
 
       Report-Only first: it logs violations to GlitchTip (pulse.orangeway.app)
       without blocking anything, so we can confirm every legitimate host
-      (Supabase, PostHog EU, GlitchTip, Cloudflare Turnstile, Chatwoot at
-      support.orangeway.app) before flipping to enforcing. Flip criterion:
+      (Supabase, PostHog EU, GlitchTip, Cloudflare Turnstile, Cloudflare Web
+      Analytics, Chatwoot at support.orangeway.app) before flipping to
+      enforcing. Flip criterion:
       zero legitimate violations across the observation window.
 
       script-src is strict (no 'unsafe-inline'): the only inline executable

@@ -32,7 +32,7 @@ function PrivacyPage() {
       <article className="mx-auto max-w-3xl px-6 py-16">
         <h1 className="text-4xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Version: 2026.07.02.{" "}
+          Version: 2026.07.02b.{" "}
           <Link to="/privacy-changelog" className="underline">
             See changes to this policy.
           </Link>
@@ -99,8 +99,11 @@ function PrivacyPage() {
           Hosts the website and runs the Turnstile challenge that appears on sign in, sign up, and
           password reset. Cloudflare is headquartered in the United States. Sees: standard request
           metadata (IP, user agent, timestamp) and the Turnstile challenge response. Cloudflare
-          Turnstile does not use tracking cookies and does not build a profile of you. Retention:
-          edge logs are typically deleted within 7 days.{" "}
+          Turnstile does not use tracking cookies and does not build a profile of you. Cloudflare
+          also provides our page-view analytics (Cloudflare Web Analytics): its beacon reports the
+          page URL, referrer, and browser type to Cloudflare. It is cookie-less, stores nothing on
+          your device, and builds no profile or cross-site identifier. Retention: edge logs are
+          typically deleted within 7 days; Web Analytics data is aggregate.{" "}
           <a
             href="https://www.cloudflare.com/cloudflare-customer-dpa/"
             className="underline"
@@ -196,7 +199,8 @@ function PrivacyPage() {
             <strong>Cloudflare (US).</strong> SCCs plus EU-US Data Privacy Framework
             self-certification. Captcha vendor in use on Orange Way is Cloudflare Turnstile. Quebec
             Law 25 §17 implication: edge logs are short-lived (≤ 7 days) and do not contain customer
-            business data.
+            financial data; Web Analytics beacon data (page URL, referrer, browser type; cookie-less
+            and aggregate) is processed in the United States under the same safeguards.
           </li>
           <li>
             <strong>Resend (US).</strong> SCCs. Quebec Law 25 §17 implication: only the message
