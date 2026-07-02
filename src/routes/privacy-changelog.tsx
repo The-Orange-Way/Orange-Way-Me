@@ -44,6 +44,23 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.07.02b</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Corrected the PostHog cross-border entry: our PostHog project runs on PostHog's EU
+                Cloud, so analytics events are ingested and stored in the European Union, not
+                transferred to the United States as the previous entry implied. The app has always
+                been configured for the EU endpoint; the policy text was wrong, not the data flow.
+              </li>
+              <li>
+                Mechanism note: corrective disclosure of an existing (and better-than-described)
+                data flow, effective immediately. The 30-day pre-change notice applies to changing
+                the data flow itself, which this does not.
+              </li>
+            </ul>
+          </div>
+
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.07.02</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>
