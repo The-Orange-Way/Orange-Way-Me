@@ -27,6 +27,14 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Playwright authenticated storage state (real session cookies + the
+# unlocked-vault localStorage marker). Never commit. The auth.setup.ts
+# spec writes this file fresh per run from env vars.
+tests/e2e/.auth/
+tests/e2e/screenshots/
+playwright-report/
+test-results/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
