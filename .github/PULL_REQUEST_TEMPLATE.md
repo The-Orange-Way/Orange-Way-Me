@@ -44,7 +44,7 @@ as a CI gate. Run it locally first to skip the CI round-trip:
 - [ ] No internal infrastructure references (private hostnames, internal wikis)
 - [ ] No internal milestone tags (D-numbers, SEC-N, CQ-N, DB-N, PERF-N) outside the documented load-bearing exemptions
 - [ ] No references to brands other than Orange Way, Orange Rails, or Bitcoin ZKA
-- [ ] No `[reserved-brand]` / `[reserved-brand]` / `[reserved-brand]` / `[reserved-brand]` strings outside the documented crypto/storage exemptions in `src/lib/vault.ts` and the localStorage banner files
+- [ ] No reserved-term strings (maintainers: see the reserved-term list; contributors: see `.reserved-terms.example`) outside the documented crypto/storage exemptions in `src/lib/vault.ts` and the localStorage banner files
 - [ ] No PR refs to deleted PRs (`PR #N`, `V2 PR`, `V3 PR`)
 - [ ] No em-dashes, en-dashes, or spaced hyphens used as sentence breaks in user-facing copy
 - [ ] Crypto load-bearing constants (`VAULT_VERIFIER_PLAINTEXT`, KDF salts) untouched

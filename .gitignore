@@ -57,3 +57,4 @@ supabase/.temp/
 tests/e2e/screenshots/
 test-results/
 playwright-report/
+.reserved-terms
