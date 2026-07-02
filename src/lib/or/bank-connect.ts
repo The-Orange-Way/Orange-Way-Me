@@ -43,6 +43,17 @@ export interface BankLinkComplete {
   quilttConnectionId: string;
   orConnectionId?: string;
   orSubaccountId?: string;
+  /**
+   * Set only when this resolved via the active-discovery poll (see
+   * openBankPopup below), never via postMessage. Callers MUST use this
+   * list directly instead of re-calling discoverQuilttAccounts("") when
+   * it's present: the poll already diffed against the user's
+   * pre-existing accounts, so this is the newly-linked account(s) only.
+   * A second enumerate-all call at this point would return the user's
+   * OLD accounts too, which is exactly the bug this field exists to
+   * avoid (see PR discussion for the multi-bank-account failure mode).
+   */
+  discoveredAccounts?: QuilttDiscoveredAccount[];
 }
 
 export interface QuilttDiscoveredAccount {
@@ -116,10 +127,37 @@ export function buildBankPopupUrl(args: {
   return `${OR_CONNECT_BASE}?${qs.toString()}#${fragParams.toString()}`;
 }
 
+/** Discovery poll cadence and hard stop, see openBankPopup doc comment. */
+const DISCOVERY_POLL_INTERVAL_MS = 3000;
+const DISCOVERY_POLL_MAX_ATTEMPTS = 200; // ~10 minutes at the interval above
+
 /**
  * Step 3: open the popup, listen for OR_QUILTT_LINK_COMPLETE. Resolves
  * with the Quiltt connection id when the user finishes; rejects on
  * cancel/popup-close.
+ *
+ * Also runs an active-discovery poll alongside the postMessage listener.
+ * Some bank OAuth redirects (Finicity/MX) send the popup cross-origin,
+ * which severs window.opener, so OR_QUILTT_LINK_COMPLETE never arrives
+ * even though the link succeeded server-side and the user is stuck
+ * watching a popup that will never resolve. Every few seconds we ask OR
+ * to enumerate every connection this platform user has (empty
+ * quilttConnectionId), and compare that list against a snapshot taken
+ * right when the popup opened. As soon as an account appears that
+ * WASN'T in the snapshot, that's the new link, so we treat it as
+ * complete, close the popup, and resolve.
+ *
+ * The snapshot diff matters: a user connecting a SECOND bank already has
+ * accounts from their first one. Without diffing against a snapshot,
+ * the very first poll tick would see those pre-existing accounts, wrongly
+ * conclude the new bank is linked, and close the popup before the actual
+ * new link finishes. The resolved BankLinkComplete carries only the
+ * newly-appeared accounts in discoveredAccounts so the caller doesn't
+ * have to (and can't accidentally) re-enumerate and pick up the old ones.
+ *
+ * This is additive: the postMessage and popup-close paths below are
+ * unchanged, this is a third way to settle the same promise. Capped at
+ * DISCOVERY_POLL_MAX_ATTEMPTS so an abandoned popup doesn't poll forever.
  */
 export function openBankPopup(url: string): Promise<BankLinkComplete> {
   const popup = window.open(url, "or-quiltt-connect", "width=720,height=900,popup=yes");
@@ -131,6 +169,21 @@ export function openBankPopup(url: string): Promise<BankLinkComplete> {
 
   return new Promise<BankLinkComplete>((resolve, reject) => {
     let settled = false;
+    let pollInFlight = false;
+    let pollAttempts = 0;
+    // null until the pre-existing-accounts snapshot loads. The poll below
+    // refuses to compare against a snapshot it doesn't have yet, so a
+    // slow or failed snapshot fetch can only delay the fallback, never
+    // cause a false positive against an empty baseline.
+    let baselineAccountIds: Set<string> | null = null;
+
+    void discoverQuilttAccounts("")
+      .then((accounts) => {
+        baselineAccountIds = new Set(accounts.map((a) => a.id));
+      })
+      .catch(() => {
+        // Leave baselineAccountIds null and retry on the next poll tick.
+      });
 
     function handle(event: MessageEvent) {
       if (event.origin !== expectedOrigin) return;
@@ -146,16 +199,53 @@ export function openBankPopup(url: string): Promise<BankLinkComplete> {
       }
     }
 
-    const poll = window.setInterval(() => {
+    const closeWatch = window.setInterval(() => {
       if (popupRef.closed && !settled) {
         cleanup();
         reject(new Error("Popup closed before completion"));
       }
     }, 500);
 
+    const discoveryPoll = window.setInterval(() => {
+      // Skip this tick if we've already settled, the popup is gone, the
+      // snapshot isn't loaded yet, or a previous tick's request is still
+      // in flight (owm-or-discover-quiltt retries server-side and can
+      // take a few seconds to return).
+      if (settled || pollInFlight || popupRef.closed || baselineAccountIds === null) return;
+      pollAttempts += 1;
+      if (pollAttempts > DISCOVERY_POLL_MAX_ATTEMPTS) {
+        window.clearInterval(discoveryPoll);
+        return;
+      }
+      const baseline = baselineAccountIds;
+      pollInFlight = true;
+      void discoverQuilttAccounts("")
+        .then((accounts) => {
+          if (settled) return;
+          const newlyLinked = accounts.filter((a) => !baseline.has(a.id));
+          if (newlyLinked.length === 0) return;
+          settled = true;
+          cleanup();
+          resolve({
+            type: "OR_QUILTT_LINK_COMPLETE",
+            quilttConnectionId: "",
+            discoveredAccounts: newlyLinked,
+          });
+        })
+        .catch(() => {
+          // Transient (no accounts yet, or a network blip), the
+          // postMessage or popup-close path can still settle this promise,
+          // and the next tick will try discovery again.
+        })
+        .finally(() => {
+          pollInFlight = false;
+        });
+    }, DISCOVERY_POLL_INTERVAL_MS);
+
     function cleanup() {
       window.removeEventListener("message", handle);
-      window.clearInterval(poll);
+      window.clearInterval(closeWatch);
+      window.clearInterval(discoveryPoll);
       try {
         popupRef.close();
       } catch {
@@ -171,6 +261,11 @@ export function openBankPopup(url: string): Promise<BankLinkComplete> {
  * Step 4: post-link account discovery. Quiltt's GraphQL pipeline takes a
  * few seconds to populate accounts after the popup closes successfully;
  * the edge function retries 0/1.5/3/5s so the caller gets the real list.
+ *
+ * quilttConnectionId may be "" to mean "enumerate every connection for
+ * this platform user" instead of one specific connection. Used by the
+ * active-discovery poll in openBankPopup above, which doesn't have a
+ * connection id yet (that's exactly what it's trying to discover).
  */
 export async function discoverQuilttAccounts(
   quilttConnectionId: string,
