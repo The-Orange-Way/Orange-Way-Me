@@ -23,7 +23,7 @@ export const AI_MANIFEST = {
     "Bitcoin holders who want sats tracked alongside fiat",
   ],
   description:
-    "Orange Way is an end-to-end encrypted personal finance app for non-technical Bitcoin households. The server cannot read account balances, transactions, categories, budgets, goals, or notes because encryption happens on the user's device. Internal positioning: 'Monarch for Bitcoiners'. Encryption keys are derived on-device using Argon2id; long-lived household keys are wrapped with post-quantum cryptography (ML-KEM-768, FIPS 203). ML-DSA-65 (FIPS 204) per-mutation signatures are in development for a later release.",
+    "Orange Way is an end-to-end encrypted personal finance app for non-technical Bitcoin households. The server cannot read account balances, transactions, categories, budgets, goals, or notes because encryption happens on the user's device. Encryption keys are derived on-device using Argon2id; long-lived household keys are wrapped with post-quantum cryptography (ML-KEM-768, FIPS 203). ML-DSA-65 (FIPS 204) per-mutation signatures are in development for a later release.",
   features: [
     "Manual accounts of any type with multi-currency support",
     "Transactions with merchant, category, tags, notes, splits, transfers",
