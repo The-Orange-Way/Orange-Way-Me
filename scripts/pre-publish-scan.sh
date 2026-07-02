@@ -43,6 +43,9 @@ EXCLUDE_DIRS=(
 
 # Lock files + binary assets: skip wholesale.
 EXCLUDE_FILES=(
+  # The gitignored reserved-term list itself (never committed, but grep -r
+  # would still read it from the working tree and flag its own contents).
+  --exclude=.reserved-terms
   --exclude=bun.lock
   --exclude=bun.lockb
   --exclude=package-lock.json
@@ -104,6 +107,32 @@ EXEMPT_OWM_FUNCTION_URLS=(
 
 # Tailwind utility classes mb-N (margin-bottom) word-boundary-match MB.
 # Same for ml-N, mt-N etc. We filter those out below.
+
+# ----------------------------------------------------------------------
+# Reserved-term list (sourced OUT of this committed file)
+# ----------------------------------------------------------------------
+#
+# The public tree must not carry internal-only naming: earlier project or
+# experiment codenames, non-public hostnames, personal names, or private
+# contact strings. The list of such reserved terms is NOT hardcoded here,
+# because committing the list would publish the very strings it exists to
+# keep out of the public tree. It is provided at runtime as a regex
+# alternation, from either source, in this order:
+#
+#   1. The OW_RESERVED_TERMS environment variable (CI sources this from a
+#      repository secret: see the leak-check and post-merge identity-scan
+#      workflows).
+#   2. A gitignored .reserved-terms file (one regex fragment per line;
+#      blank lines and #-comments ignored). See .reserved-terms.example.
+#
+# If neither is configured the reserved-term scan is SKIPPED with a notice
+# (the structural checks below still run). Outside contributors therefore
+# get a working scanner with zero exposure to the internal list.
+
+RESERVED_TERMS="${OW_RESERVED_TERMS:-}"
+if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
+  RESERVED_TERMS="$(grep -vE '^[[:space:]]*(#|$)' .reserved-terms | paste -sd'|' -)"
+fi
 
 EXIT_CODE=0
 
@@ -188,94 +217,34 @@ printf "\n\033[1m▎ Pre-publish leak scan\033[0m\n"
 printf "  repo: %s\n\n" "$REPO_ROOT"
 
 # ----------------------------------------------------------------------
-# Category 1 — Legacy brand / private codebase references
+# Category 1: Reserved terms (internal list, sourced at runtime)
 # ----------------------------------------------------------------------
 
-printf "\033[1m1. Brand + product references\033[0m\n"
+printf "\033[1m1. Reserved terms\033[0m\n"
 
-scan "BitBooks brand (all variants)" \
-     "\\b(BitBooks|Bitbooks)\\b|\\bbitbooks\\b" \
-     "" \
-     ""
+if [[ -n "$RESERVED_TERMS" ]]; then
+  scan "Reserved terms (internal list)" \
+       "$RESERVED_TERMS" \
+       "" \
+       ""
+else
+  printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
+fi
 
-scan "Cala / Galoy ledger brand" \
-     "\\b(Cala|Galoy|GaloyMoney)\\b" \
-     "" \
-     ""
+# ----------------------------------------------------------------------
+# Category 2: Public-safe structural checks
+# ----------------------------------------------------------------------
 
-scan "Lovable builder platform" \
-     "\\bLovable\\b|lovable\\.app" \
-     "" \
-     ""
-
-scan "Standalone V2/V3 product references" \
-     "V[23] BitBooks|V3 Vault|BitBooks Vault|BitBooks family|BitBooks Personal|BitBooksSupport" \
-     "" \
-     ""
+printf "\n\033[1m2. Structural naming checks\033[0m\n"
 
 scan "Internal codename: MB / OWM as acronym" \
      "\\(MB\\)|MB —| in MB\\b|MB's|\\bOWM\\b" \
      "" \
      "$EXEMPT_OWM_RE"
 
-scan "Other personal-project brands" \
-     "\\b(TESSA|COLE|ADUB|ADDLY)\\b|Petit Chou|petitchou" \
-     "" \
-     ""
-
 # ----------------------------------------------------------------------
-# Category 2 — Personal names + PII
+# Category 3: Internal milestone tags + dead PR refs
 # ----------------------------------------------------------------------
-
-printf "\n\033[1m2. Personal names + PII\033[0m\n"
-
-# Allow "Tim May" in README (cypherpunk historical figure) — exempt that.
-scan "Personal first names" \
-     "\\b(Miguel|Daenon|Roark|Brandon|Ashar|tsaekoo|Abuelo)\\b" \
-     "" \
-     ""
-
-scan "External contact names" \
-     "Charles Taylor|Ruben Izmailyan" \
-     "" \
-     ""
-
-scan "Personal-domain emails" \
-     "@(bitbooks\\.com|abascal\\.ca|tryfaster\\.ca)" \
-     "" \
-     ""
-
-# ----------------------------------------------------------------------
-# Category 3 — Internal infrastructure leaks
-# ----------------------------------------------------------------------
-
-printf "\n\033[1m3. Internal infrastructure\033[0m\n"
-
-scan "Internal hostnames" \
-     "\\b(jarvis-hosted|bb-support|Jarvis-hosted)\\b|kiwi@jarvis|ubuntu@100\\." \
-     "" \
-     ""
-
-scan "Internal wiki URLs" \
-     "wiki\\.(abascal\\.ca|bitbooks\\.com)" \
-     "" \
-     ""
-
-scan "Windows-style internal paths" \
-     "C:\\\\CLAUDE|C:\\\\Users\\\\micro" \
-     "" \
-     ""
-
-scan "Home-path leaks" \
-     "/home/(kiwi|cactus|claude)/" \
-     "" \
-     ""
-
-# ----------------------------------------------------------------------
-# Category 4 — Internal milestone tags + dead PR references
-# ----------------------------------------------------------------------
-
-printf "\n\033[1m4. Internal milestone tags + dead PR refs\033[0m\n"
 
 # D-number milestone tags. Match the specific milestone form
 # ("D12:" / "D12)" / "(D12)" / "D12 —" / "D12 .") to avoid false-positives

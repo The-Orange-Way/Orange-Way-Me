@@ -76,33 +76,45 @@ if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
   fi
 fi
 
-# ---- Check 3: private-host / private-wiki URL leaks ----
-# Pattern must stay in lockstep with .github/workflows/post-merge-identity-scan.yml's
-# PATTERN value. The post-merge workflow is the canonical enforcement (it runs
-# even when the pre-push hook was bypassed or never installed); any drift means
-# the local scan reports clean for a string the server-side scan would flag.
-# When adding or removing a term here, change it there too.
-PRIVATE_PATTERN='tail[a-z0-9]+\.ts\.net|\.tailnet|\.local\b|wiki\.abascal|wiki\.bitbooks|bb-support|jarvis\.local|100\.(91|94)\.[0-9]+\.[0-9]+|@bitbooks\.com|@abascal\.ca|pop-os'
+# ---- Check 3: reserved-term leaks ----
+# The reserved-term list is NOT hardcoded here: committing the list would
+# publish the very strings it exists to keep out of the public tree. It is
+# sourced at runtime from the OW_RESERVED_TERMS environment variable or a
+# gitignored .reserved-terms file (one regex fragment per line; see
+# .reserved-terms.example). The post-merge identity-scan workflow sources
+# the same list from the repository secret, so local and server-side
+# enforcement share one source of truth and cannot drift.
+PRIVATE_PATTERN="${OW_RESERVED_TERMS:-}"
+if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
+  PRIVATE_PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/.reserved-terms" | paste -sd'|' -)"
+fi
 
-# Scan commits being pushed: messages + diff
-for sha in "${LOCAL_SHAS[@]}"; do
-  # If pushing a brand-new branch, walk back to origin/dev (or origin/main) for the diff base.
-  BASE=$(git merge-base "$sha" origin/dev 2>/dev/null || git merge-base "$sha" origin/main 2>/dev/null || git rev-list --max-parents=0 "$sha" | head -1)
-  RANGE="$BASE..$sha"
-  # Commit messages
-  if git log --format='%H%n%s%n%b' "$RANGE" 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-    red "✗ Private-host URL leak in commit messages:"
-    git log --format='%H%n%s%n%b' "$RANGE" | grep -nEi --color=always "$PRIVATE_PATTERN"
-    FAIL=1
-  fi
-  # Diff content — exclude the gate itself (whose regex literally contains the patterns)
-  if git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' ':!.github/workflows/post-merge-identity-scan.yml' 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-    red "✗ Private-host URL leak in diff content:"
-    git diff "$RANGE" -- ':!scripts/pre-push-gate.sh' ':!scripts/install-hooks.sh' ':!.github/workflows/post-merge-identity-scan.yml' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
-    FAIL=1
-  fi
-done
-[ "$FAIL" = "0" ] && green "✓ No private-host URLs in commits being pushed."
+if [ -z "$PRIVATE_PATTERN" ]; then
+  yellow "– Reserved-term scan skipped (no OW_RESERVED_TERMS / .reserved-terms)."
+  yellow "  The server-side post-merge identity scan still enforces the list."
+else
+  # Scan commits being pushed: messages + diff
+  for sha in "${LOCAL_SHAS[@]}"; do
+    # If pushing a brand-new branch, walk back to origin/dev (or origin/main) for the diff base.
+    BASE=$(git merge-base "$sha" origin/dev 2>/dev/null || git merge-base "$sha" origin/main 2>/dev/null || git rev-list --max-parents=0 "$sha" | head -1)
+    RANGE="$BASE..$sha"
+    # Commit messages
+    if git log --format='%H%n%s%n%b' "$RANGE" 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
+      red "✗ Reserved-term leak in commit messages:"
+      git log --format='%H%n%s%n%b' "$RANGE" | grep -nEi --color=always "$PRIVATE_PATTERN"
+      FAIL=1
+    fi
+    # Diff content: ADDED lines only. Deletions are how leaks get removed;
+    # blocking a push because its diff deletes a reserved term would make
+    # cleanups impossible.
+    if git diff "$RANGE" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
+      red "✗ Reserved-term leak in added diff lines:"
+      git diff "$RANGE" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
+      FAIL=1
+    fi
+  done
+  [ "$FAIL" = "0" ] && green "✓ No reserved terms in commits being pushed."
+fi
 
 # ---- Check 4: gitleaks on the prepared commits (if installed) ----
 if command -v gitleaks >/dev/null; then
