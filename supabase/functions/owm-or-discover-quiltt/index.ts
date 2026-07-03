@@ -18,6 +18,20 @@
  * POST (auth required):
  *   { quilttConnectionId: string }
  *
+ * quilttConnectionId may be an empty string. OR's or-quiltt-accounts
+ * treats an empty connection id as "enumerate every connection under
+ * this platform user" rather than one specific connection. This is the
+ * fallback path used by the client's active-discovery poll (see
+ * openBankPopup in src/lib/or/bank-connect.ts): in production, some
+ * bank OAuth redirects (Finicity/MX) send the popup cross-origin and
+ * sever window.opener, so the OR_QUILTT_LINK_COMPLETE postMessage never
+ * reaches us even though the link succeeded server-side. Polling with
+ * an empty id lets us discover those accounts without waiting for a
+ * postMessage that will never arrive. The client diffs the enumerate-all
+ * result against a pre-popup snapshot so a returning user's OLDER
+ * accounts never get mistaken for the one just linked, see the
+ * openBankPopup doc comment for that snapshot-diff logic.
+ *
  * Response 200:
  *   { accounts: [{ id, name, institution_name, kind, mask, currency, state }] }
  */
@@ -112,9 +126,14 @@ Deno.serve(async (req: Request) => {
     if (raw === null) return jsonResponse({ error: "Request body too large" }, 413, cors);
 
     const body = JSON.parse(raw || "{}") as { quilttConnectionId?: string };
-    if (!body.quilttConnectionId || typeof body.quilttConnectionId !== "string") {
-      return jsonResponse({ error: "quilttConnectionId required" }, 400, cors);
+    if (body.quilttConnectionId !== undefined && typeof body.quilttConnectionId !== "string") {
+      return jsonResponse({ error: "quilttConnectionId must be a string" }, 400, cors);
     }
+    // "" is valid and means "enumerate every connection for this user"
+    // (active-discovery poll fallback). Missing field defaults to the
+    // same behavior rather than erroring, since both mean the caller
+    // doesn't have a specific connection id yet.
+    const quilttConnectionId = body.quilttConnectionId ?? "";
 
     // Retry until we get accounts back or run out of attempts
     let lastStatus = 0;
@@ -123,7 +142,7 @@ Deno.serve(async (req: Request) => {
       const delay = RETRY_DELAYS_MS[i];
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
 
-      const result = await fetchAccounts(user.id, body.quilttConnectionId);
+      const result = await fetchAccounts(user.id, quilttConnectionId);
       lastStatus = result.status;
       lastError = result.error;
 
