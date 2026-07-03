@@ -41,7 +41,10 @@ export function shouldReloadForStaleChunk(
     if (now - last < RELOAD_COOLDOWN_MS) return false;
     storage.setItem(CHUNK_RELOAD_KEY, String(now));
     return true;
-  } catch {
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error("[chunk-reload] sessionStorage unavailable — reload guard disabled", err);
+    }
     return false;
   }
 }
@@ -60,7 +63,15 @@ export function installChunkReloadHandler(
   target: PreloadErrorTarget = window,
 ): void {
   target.addEventListener("vite:preloadError", (event) => {
-    if (!shouldReloadForStaleChunk()) return; // reloaded recently: let the error surface
+    if (!shouldReloadForStaleChunk()) {
+      if (import.meta.env.DEV) {
+        console.error(
+          "[chunk-reload] cooldown active: vite:preloadError will surface to error boundary",
+          event,
+        );
+      }
+      return;
+    }
     event.preventDefault(); // we own recovery; don't also throw to the error boundary
     reload();
   });
