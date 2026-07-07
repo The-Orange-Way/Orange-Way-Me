@@ -63,7 +63,10 @@ export function JoinPage({ code }: { code: string }) {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { error, isNew } = await signUp(email, password, captchaToken);
+    // Pass the code as user metadata so the Before-User-Created auth hook can
+    // authorize this signup server-side (it reads user_metadata.invite_code
+    // and checks it against the table). Redemption still happens below.
+    const { error, isNew } = await signUp(email, password, captchaToken, { invite_code: code });
     if (error) {
       setBusy(false);
       toastError(error);
