@@ -20,6 +20,7 @@ import { Route as PrivacyChangelogRouteImport } from './routes/privacy-changelog
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as LandingClassicRouteImport } from './routes/landing-classic'
+import { Route as JoinRouteImport } from './routes/join'
 import { Route as HouseholdsRouteImport } from './routes/households'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as FeaturesRouteImport } from './routes/features'
@@ -107,6 +108,11 @@ const PricingRoute = PricingRouteImport.update({
 const LandingClassicRoute = LandingClassicRouteImport.update({
   id: '/landing-classic',
   path: '/landing-classic',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinRoute = JoinRouteImport.update({
+  id: '/join',
+  path: '/join',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HouseholdsRoute = HouseholdsRouteImport.update({
@@ -296,6 +302,7 @@ export interface FileRoutesByFullPath {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -342,6 +349,7 @@ export interface FileRoutesByTo {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -388,6 +396,7 @@ export interface FileRoutesById {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -436,6 +445,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -482,6 +492,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -527,6 +538,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -574,6 +586,7 @@ export interface RootRouteChildren {
   FeaturesRoute: typeof FeaturesRoute
   GoalsRoute: typeof GoalsRouteWithChildren
   HouseholdsRoute: typeof HouseholdsRoute
+  JoinRoute: typeof JoinRoute
   LandingClassicRoute: typeof LandingClassicRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -665,6 +678,13 @@ declare module '@tanstack/react-router' {
       path: '/landing-classic'
       fullPath: '/landing-classic'
       preLoaderRoute: typeof LandingClassicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join': {
+      id: '/join'
+      path: '/join'
+      fullPath: '/join'
+      preLoaderRoute: typeof JoinRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/households': {
@@ -985,6 +1005,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeaturesRoute: FeaturesRoute,
   GoalsRoute: GoalsRouteWithChildren,
   HouseholdsRoute: HouseholdsRoute,
+  JoinRoute: JoinRoute,
   LandingClassicRoute: LandingClassicRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
