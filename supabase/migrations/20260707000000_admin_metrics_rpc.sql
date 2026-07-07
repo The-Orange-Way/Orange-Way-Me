@@ -13,7 +13,10 @@
 -- DEFINER body, so the admin check identifies the real caller.
 --
 -- SECURITY DEFINER so it can count auth.users (which authenticated callers
--- cannot read directly). search_path is pinned to public.
+-- cannot read directly). search_path is pinned to the empty string and every
+-- table and function reference is schema-qualified, so a caller cannot
+-- redirect the function into a different schema. Built-in functions resolve
+-- via pg_catalog, which is always implicitly first in the search path.
 --
 -- Builds on the existing app_role enum, user_roles table, and has_role()
 -- function (migration 20260428211238). No new tables, no data changes,
@@ -24,7 +27,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
 DECLARE
   result jsonb;
