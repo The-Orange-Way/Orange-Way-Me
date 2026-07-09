@@ -104,3 +104,31 @@ COMMENT ON FUNCTION public.is_invite_code_valid(text) IS
     'Non-consuming bool check that a private-beta invite code is currently redeemable.';
 COMMENT ON FUNCTION public.redeem_invite_code(text) IS
     'Atomically consume one use of an invite code (single UPDATE guard, no race). Returns true iff consumed.';
+
+-- ---------------------------------------------------------------------------
+-- REVERSAL PATH (operator runbook, not executed by the migration runner)
+--
+-- This block is intentionally commented out. The Supabase CLI applies every
+-- .sql file under supabase/migrations in name order, so a live down file next
+-- to this one would drop the table on the next apply. To reverse, an operator
+-- copies the statements below and runs them by hand against one database.
+--
+-- Order: functions first (they depend on the table), then the index, then the
+-- table. Every statement is IF EXISTS, so a partially applied migration
+-- reverses cleanly and a repeated reversal is a no-op.
+--
+--   DROP FUNCTION IF EXISTS public.redeem_invite_code(text);
+--   DROP FUNCTION IF EXISTS public.is_invite_code_valid(text);
+--   DROP INDEX    IF EXISTS public.invite_codes_code_lower_uidx;
+--   DROP TABLE    IF EXISTS public.invite_codes;
+--
+-- What reversal undoes: the signup gate and the code store, completely. The
+-- table holds no user data, only operator-issued codes, so nothing of a
+-- family's is lost.
+--
+-- What reversal CANNOT undo: an account that a code already admitted. Those
+-- rows live in auth.users, are outside this migration's blast radius, and
+-- must be removed separately if that is the intent. Dropping the table also
+-- destroys the record of which codes were spent, so export invite_codes
+-- before reversing if that history matters.
+-- ---------------------------------------------------------------------------
