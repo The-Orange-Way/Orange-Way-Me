@@ -35,6 +35,7 @@ import { Route as BitcoinRouteImport } from './routes/bitcoin'
 import { Route as BetaRouteImport } from './routes/beta'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AiRouteImport } from './routes/ai'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
@@ -184,6 +185,11 @@ const AiRoute = AiRouteImport.update({
   path: '/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountsRoute = AccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
@@ -281,6 +287,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -327,6 +334,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -421,6 +430,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -467,6 +477,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -512,6 +523,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -559,6 +571,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   AccountsRoute: typeof AccountsRouteWithChildren
+  AdminRoute: typeof AdminRoute
   AiRoute: typeof AiRoute
   AuthRoute: typeof AuthRoute
   BetaRoute: typeof BetaRoute
@@ -772,6 +785,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/accounts': {
       id: '/accounts'
       path: '/accounts'
@@ -970,6 +990,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   AccountsRoute: AccountsRouteWithChildren,
+  AdminRoute: AdminRoute,
   AiRoute: AiRoute,
   AuthRoute: AuthRoute,
   BetaRoute: BetaRoute,
