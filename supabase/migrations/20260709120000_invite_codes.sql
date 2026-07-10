@@ -14,6 +14,15 @@
 -- RLS denies all anon/authenticated access to the table itself. The only
 -- surfaces a caller touches are the two SECURITY DEFINER functions, each
 -- with search_path pinned to '' and every reference schema-qualified.
+--
+-- Retry safety: every statement below is guarded (IF NOT EXISTS, CREATE OR
+-- REPLACE, idempotent GRANT/REVOKE). Running this migration twice is a
+-- no-op, never a double-apply and never a wedge. A reversal path is written
+-- at the foot of this file.
+--
+-- Lock profile: a brand new table only. No DDL against a populated table,
+-- no index built on live rows, so no blocking lock is taken on anything a
+-- running app touches.
 
 CREATE TABLE IF NOT EXISTS public.invite_codes (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,29 +115,21 @@ COMMENT ON FUNCTION public.redeem_invite_code(text) IS
     'Atomically consume one use of an invite code (single UPDATE guard, no race). Returns true iff consumed.';
 
 -- ---------------------------------------------------------------------------
--- REVERSAL PATH (operator runbook, not executed by the migration runner)
+-- DOWN PATH (reversal)
 --
--- This block is intentionally commented out. The Supabase CLI applies every
--- .sql file under supabase/migrations in name order, so a live down file next
--- to this one would drop the table on the next apply. To reverse, an operator
--- copies the statements below and runs them by hand against one database.
+-- Run these statements, in this order, to undo everything this migration
+-- created. Each is guarded, so a partial apply reverses cleanly and a second
+-- run is a no-op. Dropping the table drops its index and its RLS state with
+-- it. Nothing else in the schema depends on these objects, so no cascade is
+-- needed beyond the table itself.
 --
--- Order: functions first (they depend on the table), then the index, then the
--- table. Every statement is IF EXISTS, so a partially applied migration
--- reverses cleanly and a repeated reversal is a no-op.
+-- Data loss note: dropping public.invite_codes destroys the codes and their
+-- use counts. Any code already redeemed stays redeemed, because redemption
+-- creates the user account and that account lives in auth.users, not here.
+-- Reversal therefore cannot un-admit anyone; it only removes the gate.
 --
 --   DROP FUNCTION IF EXISTS public.redeem_invite_code(text);
 --   DROP FUNCTION IF EXISTS public.is_invite_code_valid(text);
---   DROP INDEX    IF EXISTS public.invite_codes_code_lower_uidx;
 --   DROP TABLE    IF EXISTS public.invite_codes;
 --
--- What reversal undoes: the signup gate and the code store, completely. The
--- table holds no user data, only operator-issued codes, so nothing of a
--- family's is lost.
---
--- What reversal CANNOT undo: an account that a code already admitted. Those
--- rows live in auth.users, are outside this migration's blast radius, and
--- must be removed separately if that is the intent. Dropping the table also
--- destroys the record of which codes were spent, so export invite_codes
--- before reversing if that history matters.
 -- ---------------------------------------------------------------------------
