@@ -9,7 +9,7 @@ import {
 export const Route = createFileRoute("/terms")({
   head: () => ({
     ...pageMeta({
-      title: "Terms of Service — Orange Way",
+      title: "Terms of Service | Orange Way",
       description:
         "The terms governing your use of Orange Way. Plain language version: be a good citizen, don't abuse the service, and we'll do our part.",
       path: "/terms",
@@ -43,7 +43,7 @@ function TermsPage() {
         <h2 className="mt-8 text-xl font-semibold">Accounts</h2>
         <p className="mt-2 text-muted-foreground">
           You're responsible for keeping your vault password and recovery code safe. We cannot
-          recover them for you — that's the point.
+          recover them for you. That is the point.
         </p>
 
         <h2 className="mt-8 text-xl font-semibold">Beta status</h2>
