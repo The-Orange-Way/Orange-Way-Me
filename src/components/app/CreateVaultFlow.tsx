@@ -78,7 +78,7 @@ export function CreateVaultFlow() {
 
   const lengthOk = pw.length >= MIN_VAULT_PASSWORD_LENGTH;
   // Diceware passphrases (all-lowercase, separated by spaces) score poorly
-  // under the heuristic scorer above even though ≥6 EFF words give 77+ bits
+  // under the heuristic scorer above even though >=6 EFF words give 77+ bits
   // of entropy — well above any practical brute-force budget. Trust the
   // generator's entropy estimate as a parallel signal.
   const isHighEntropyGenerated = generatedHint !== null && generatedHint >= 60;
@@ -239,7 +239,7 @@ export function CreateVaultFlow() {
               </span>
             </label>
             <Button type="submit" className="w-full" disabled={!canSubmit}>
-              {busy ? "Creating…" : "Create vault"}
+              {busy ? "Creating..." : "Create vault"}
             </Button>
           </form>
         </CardContent>
@@ -388,6 +388,14 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
   );
 }
 
+/**
+ * Enforced 3-of-12 recovery code verification.
+ *
+ * Three words are chosen at random using crypto.getRandomValues (no
+ * modulo bias for n=12 which fits evenly in uint32). The user must
+ * type all three correctly before they can continue — there is no
+ * skip path. This replaces the previous 2-word + skip-button flow.
+ */
 function RecoveryVerify({
   code,
   onDone,
@@ -404,24 +412,44 @@ function RecoveryVerify({
   onBack: () => void;
 }) {
   const words = useMemo(() => code.trim().split(/\s+/), [code]);
-  // Pick two distinct random indices once
-  const [indices] = useState(() => {
-    const a = Math.floor(Math.random() * words.length);
-    let b = Math.floor(Math.random() * words.length);
-    while (b === a) b = Math.floor(Math.random() * words.length);
-    return [a, b].sort((x, y) => x - y);
+
+  // Pick three distinct random indices using crypto.getRandomValues.
+  // n=12 fits evenly into uint32 (4294967296 / 12 = 357913941 remainder 4,
+  // so rejection probability is 4/2^32 < 0.0000002%). One rejection pass
+  // is negligible and avoids any modulo bias.
+  const [indices] = useState<[number, number, number]>(() => {
+    const n = words.length; // always 12
+    const picks = new Set<number>();
+    while (picks.size < 3) {
+      const buf = new Uint32Array(4);
+      crypto.getRandomValues(buf);
+      for (const r of buf) {
+        const max = Math.floor(0x100000000 / n) * n;
+        if (r < max) {
+          picks.add(r % n);
+          if (picks.size === 3) break;
+        }
+      }
+    }
+    const sorted = [...picks].sort((a, b) => a - b) as [number, number, number];
+    return sorted;
   });
-  const [w1, setW1] = useState("");
-  const [w2, setW2] = useState("");
+
+  const [inputs, setInputs] = useState(["", "", ""]);
   const [error, setError] = useState<string | null>(null);
+
+  const setInput = (i: number, val: string) => {
+    const next = [...inputs];
+    next[i] = val;
+    setInputs(next);
+    setError(null);
+  };
 
   const onVerify = (e: React.FormEvent) => {
     e.preventDefault();
-    const ok =
-      w1.trim().toLowerCase() === words[indices[0]] &&
-      w2.trim().toLowerCase() === words[indices[1]];
-    if (!ok) {
-      setError("One or both words don't match. Check your saved recovery code.");
+    const allMatch = indices.every((idx, i) => inputs[i].trim().toLowerCase() === words[idx]);
+    if (!allMatch) {
+      setError("One or more words don't match. Check your saved recovery code.");
       return;
     }
     toast.success("Recovery code confirmed. Welcome.");
@@ -432,58 +460,36 @@ function RecoveryVerify({
     <Card className="shadow-card">
       <CardHeader className="pb-4">
         <CardTitle className="text-lg">Confirm your recovery code</CardTitle>
-        <CardDescription>Type two words from your code so we know you saved it.</CardDescription>
+        <CardDescription>
+          Type these three words from your code to confirm you saved it.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onVerify} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="vw1">Word #{indices[0] + 1}</Label>
-            <Input
-              id="vw1"
-              autoFocus
-              autoComplete="off"
-              value={w1}
-              onChange={(e) => {
-                setW1(e.target.value);
-                setError(null);
-              }}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="vw2">Word #{indices[1] + 1}</Label>
-            <Input
-              id="vw2"
-              autoComplete="off"
-              value={w2}
-              onChange={(e) => {
-                setW2(e.target.value);
-                setError(null);
-              }}
-              required
-            />
-          </div>
+          {indices.map((wordIndex, i) => (
+            <div key={wordIndex} className="space-y-2">
+              <Label htmlFor={`vw${i}`}>Word #{wordIndex + 1}</Label>
+              <Input
+                id={`vw${i}`}
+                autoFocus={i === 0}
+                autoComplete="off"
+                value={inputs[i]}
+                onChange={(e) => setInput(i, e.target.value)}
+                required
+              />
+            </div>
+          ))}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full">
             Confirm and continue
           </Button>
-          <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="pt-1">
             <button
               type="button"
               onClick={onBack}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              ← Back to recovery code
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                toast.success("Welcome to Orange Way.");
-                onDone();
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              Skip verification
+              Back to recovery code
             </button>
           </div>
         </form>

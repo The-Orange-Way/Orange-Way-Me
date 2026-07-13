@@ -44,6 +44,7 @@ import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as WalletsIdRouteImport } from './routes/wallets.$id'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as SettingsRulesRouteImport } from './routes/settings.rules'
+import { Route as SettingsResetVaultRouteImport } from './routes/settings.reset-vault'
 import { Route as SettingsProfileRouteImport } from './routes/settings.profile'
 import { Route as SettingsPreferencesRouteImport } from './routes/settings.preferences'
 import { Route as SettingsImportExportRouteImport } from './routes/settings.import-export'
@@ -231,6 +232,11 @@ const SettingsRulesRoute = SettingsRulesRouteImport.update({
   path: '/rules',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsResetVaultRoute = SettingsResetVaultRouteImport.update({
+  id: '/reset-vault',
+  path: '/reset-vault',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsProfileRoute = SettingsProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -331,6 +337,7 @@ export interface FileRoutesByFullPath {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -378,6 +385,7 @@ export interface FileRoutesByTo {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -427,6 +435,7 @@ export interface FileRoutesById {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -477,6 +486,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -524,6 +534,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -572,6 +583,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -861,6 +873,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRulesRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/reset-vault': {
+      id: '/settings/reset-vault'
+      path: '/reset-vault'
+      fullPath: '/settings/reset-vault'
+      preLoaderRoute: typeof SettingsResetVaultRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/profile': {
       id: '/settings/profile'
       path: '/profile'
@@ -972,6 +991,7 @@ interface SettingsRouteChildren {
   SettingsImportExportRoute: typeof SettingsImportExportRoute
   SettingsPreferencesRoute: typeof SettingsPreferencesRoute
   SettingsProfileRoute: typeof SettingsProfileRoute
+  SettingsResetVaultRoute: typeof SettingsResetVaultRoute
   SettingsRulesRoute: typeof SettingsRulesRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -986,6 +1006,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsImportExportRoute: SettingsImportExportRoute,
   SettingsPreferencesRoute: SettingsPreferencesRoute,
   SettingsProfileRoute: SettingsProfileRoute,
+  SettingsResetVaultRoute: SettingsResetVaultRoute,
   SettingsRulesRoute: SettingsRulesRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
   SettingsIndexRoute: SettingsIndexRoute,
