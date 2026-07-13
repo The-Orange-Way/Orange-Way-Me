@@ -447,9 +447,7 @@ function RecoveryVerify({
 
   const onVerify = (e: React.FormEvent) => {
     e.preventDefault();
-    const allMatch = indices.every(
-      (idx, i) => inputs[i].trim().toLowerCase() === words[idx],
-    );
+    const allMatch = indices.every((idx, i) => inputs[i].trim().toLowerCase() === words[idx]);
     if (!allMatch) {
       setError("One or more words don't match. Check your saved recovery code.");
       return;

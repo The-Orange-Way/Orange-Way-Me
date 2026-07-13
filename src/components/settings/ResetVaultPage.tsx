@@ -21,13 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,23 +47,17 @@ export function ResetVaultPage() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = supabase as any;
-      const { error } = await db
-        .from("vault_metadata")
-        .delete()
-        .eq("user_id", user.id);
+      const { error } = await db.from("vault_metadata").delete().eq("user_id", user.id);
       if (error) throw error;
 
       // Wipe in-memory MEK so the rest of this session cannot encrypt.
       lock();
-      toast.success(
-        "Vault reset. Create a new vault password to continue.",
-      );
+      toast.success("Vault reset. Create a new vault password to continue.");
       // Hard reload so VaultContext re-runs its vault check and
       // AppGate shows CreateVaultFlow (setHasVault is not exposed).
       window.location.href = "/";
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Could not reset vault.";
+      const msg = err instanceof Error ? err.message : "Could not reset vault.";
       toast.error(msg);
       setBusy(false);
     }
@@ -84,12 +72,9 @@ export function ResetVaultPage() {
             Settings
           </Link>
         </Button>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-          Reset vault
-        </h1>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Reset vault</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Remove your vault and all saved connections. Your transaction history
-          stays.
+          Remove your vault and all saved connections. Your transaction history stays.
         </p>
       </div>
 
@@ -98,13 +83,10 @@ export function ResetVaultPage() {
         <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <div className="space-y-1">
-            <p className="font-medium text-destructive">
-              This cannot be undone.
-            </p>
+            <p className="font-medium text-destructive">This cannot be undone.</p>
             <p className="text-muted-foreground">
-              This removes all your wallet and bank connections and their saved
-              credentials. You will need to reconnect each one. Your transaction
-              history stays.
+              This removes all your wallet and bank connections and their saved credentials. You
+              will need to reconnect each one. Your transaction history stays.
             </p>
           </div>
         </div>
@@ -113,12 +95,10 @@ export function ResetVaultPage() {
         {isUnlocked ? (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">
-                Step 1: download a backup first
-              </CardTitle>
+              <CardTitle className="text-base">Step 1: download a backup first</CardTitle>
               <CardDescription>
-                Your vault is unlocked so you can export your data now. We
-                recommend it before resetting.
+                Your vault is unlocked so you can export your data now. We recommend it before
+                resetting.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -144,34 +124,24 @@ export function ResetVaultPage() {
         ) : (
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">
-                Your vault is locked
-              </CardTitle>
+              <CardTitle className="text-base">Your vault is locked</CardTitle>
               <CardDescription>
-                Without your vault password or recovery code you cannot export
-                your encrypted data. Resetting will erase your connections and
-                credentials permanently. Your transaction history will remain.
+                Without your vault password or recovery code you cannot export your encrypted data.
+                Resetting will erase your connections and credentials permanently. Your transaction
+                history will remain.
               </CardDescription>
             </CardHeader>
           </Card>
         )}
 
         {/* Confirmation input */}
-        <Card
-          className={
-            isUnlocked && !exportedFirst
-              ? "pointer-events-none opacity-40"
-              : ""
-          }
-        >
+        <Card className={isUnlocked && !exportedFirst ? "pointer-events-none opacity-40" : ""}>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">
               {isUnlocked ? "Step 2: confirm and reset" : "Confirm and reset"}
             </CardTitle>
             <CardDescription>
-              Type{" "}
-              <span className="font-mono font-semibold">reset my vault</span>{" "}
-              to continue.
+              Type <span className="font-mono font-semibold">reset my vault</span> to continue.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
