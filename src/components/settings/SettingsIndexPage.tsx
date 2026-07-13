@@ -7,6 +7,7 @@ import {
   Folder,
   KeyRound,
   Palette,
+  RotateCcw,
   ScrollText,
   Shield,
   User,
@@ -82,6 +83,12 @@ const TILES: Tile[] = [
     description: "CSV import, encrypted backup, restore",
     icon: Download,
     to: "/settings/import-export",
+  },
+  {
+    title: "Reset vault",
+    description: "Remove all connections and credentials, keep history",
+    icon: RotateCcw,
+    to: "/settings/reset-vault",
   },
   {
     title: "About",
