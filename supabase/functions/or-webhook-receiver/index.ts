@@ -1,12 +1,12 @@
 /**
- * or-webhook-receiver — receives sync.completed events from OrangeRails.
+ * or-webhook-receiver -- receives sync.completed events from OrangeRails.
  *
  * Wire format (OR's v2 signature scheme, dispatched by
  * `or-webhook-dispatch`):
  *   POST  application/json
  *   Headers:
- *     X-OR-Signature      : v1 legacy — hex(HMAC-SHA-256(secret, body))
- *     X-OR-Signature-V2   : v2 — `t=<unix>,v1=<hex>` where the HMAC
+ *     X-OR-Signature      : v1 legacy -- hex(HMAC-SHA-256(secret, body))
+ *     X-OR-Signature-V2   : v2 -- `t=<unix>,v1=<hex>` where the HMAC
  *                           signs `<ts>.<body>` (Stripe-style; prevents
  *                           replay)
  *     X-OR-Event-Id       : UUID stable across retries (dedupe key)
@@ -19,7 +19,7 @@
  * verification failure. We never hand-roll HMAC here.
  *
  * Auth model: this endpoint is PUBLIC (no Supabase JWT) because OR
- * cannot mint user JWTs. Authentication is the HMAC signature alone —
+ * cannot mint user JWTs. Authentication is the HMAC signature alone --
  * the shared secret `OR_WEBHOOK_SECRET` is set on both sides at
  * registration time and verified constant-time by the SDK on every
  * request.
@@ -27,19 +27,25 @@
  * On verified events we:
  *   1. Resolve user_id from subaccount_id (one subaccount per Orange Way
  *      user, mapped by ow-or-proxy/or-provision when the user first
- *      connected). Note: Orange Way is per-user, not per-org — compare
+ *      connected). Note: Orange Way is per-user, not per-org -- compare
  *      V3 which resolves to org_id.
- *   2. Insert a row into public.sync_events. The Connections page
+ *   2. Upsert a row into public.connections to ensure the FK parent exists.
+ *      OR's hosted widget creates connections on OR's side; we mirror
+ *      (id, user_id) here so the FK on sync_events is satisfied before the
+ *      child insert. Idempotent: a no-op when the row already exists.
+ *   3. Insert a row into public.sync_events. The Connections page
  *      subscribes via Supabase realtime so the UI refreshes without
  *      polling.
  *
  * What we do NOT do:
- *   - Mirror OR's connections list locally. OR remains source of truth.
+ *   - Mirror OR's connections list locally. OR remains source of truth;
+ *     the connections row here is the minimal FK anchor only.
  *   - Trigger any client-visible side effect beyond the row insert.
- *   - Dedupe on event.id yet. The header is captured for forward-compat;
- *     a unique constraint on sync_events keyed by or_event_id is now
- *     in place (migration 20260524000000), and the receiver upserts
- *     for the UI (realtime resubscribes coalesce duplicates client-side).
+ *   - Dedupe globally across connections. The scoped unique constraint
+ *     (or_connection_id, or_event_id) on sync_events collapses duplicate
+ *     deliveries per-connection into a single row. Event IDs are
+ *     connection-scoped by OR so global dedup would block legitimate
+ *     retries on a different connection.
  *
  * Registration runbook (one-time, per environment):
  *   1. Generate a fresh shared secret:
@@ -52,7 +58,7 @@
  *           SET webhook_url    = 'https://mggalsdproqwmtwwtinm.supabase.co/functions/v1/or-webhook-receiver',
  *               webhook_secret = '<SECRET>'
  *         WHERE slug = 'orangeway';
- *   4. Smoke: trigger any or-sync from Orange Way → check sync_events
+ *   4. Smoke: trigger any or-sync from Orange Way -> check sync_events
  *      table receives a row within ~30s (or-webhook-dispatch backoff).
  */
 
@@ -99,7 +105,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!OR_WEBHOOK_SECRET) {
-    // Misconfigured environment — 500 so OR retries until we notice.
+    // Misconfigured environment -- 500 so OR retries until we notice.
     return jsonResponse({ error: "OR_WEBHOOK_SECRET not configured" }, 500);
   }
 
@@ -116,7 +122,7 @@ Deno.serve(async (req: Request) => {
   // verification failure mode (missing sig, bad sig, replay, malformed
   // body, unsupported event type) maps to the same client response:
   // 401. The SDK's `event.id` comes from `X-OR-Event-Id` for dedupe
-  // (forward-compat — see file header).
+  // (forward-compat -- see file header).
   let event;
   try {
     event = await constructEvent({
@@ -135,12 +141,12 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Invalid signature" }, 401);
     }
     // Anything non-SignatureVerificationError is a bug in the SDK or
-    // an unexpected runtime failure — surface as 500 so OR retries.
+    // an unexpected runtime failure -- surface as 500 so OR retries.
     console.error("[or-webhook-receiver] unexpected SDK error:", err);
     return jsonResponse({ error: "Verification error" }, 500);
   }
 
-  // Discriminated union on event.type — adding sync.failed etc. later
+  // Discriminated union on event.type -- adding sync.failed etc. later
   // will surface as a TS error here, forcing a deliberate handler.
   switch (event.type) {
     case "sync.completed": {
@@ -151,16 +157,34 @@ Deno.serve(async (req: Request) => {
         // the delivery successful and stop retrying (vs 5xx which would
         // burn retry budget for a permanent mapping gap).
         console.warn(
-          `[or-webhook-receiver] unknown subaccount_id ${event.data.subaccount_id} — no user match`,
+          `[or-webhook-receiver] unknown subaccount_id ${event.data.subaccount_id} -- no user match`,
         );
         return jsonResponse({ status: "accepted_no_user" }, 202);
       }
 
+      // Ensure the FK parent row exists in connections before inserting
+      // the child sync_events row. OR's hosted widget creates connections
+      // on OR's side only; we mirror (id, user_id) here so the FK is
+      // satisfied. Idempotent: ignoreDuplicates makes subsequent
+      // deliveries for the same connection a no-op. This also means there
+      // is no ordering hazard: the parent is guaranteed to exist in the
+      // same request before the child insert below.
+      const { error: connErr } = await service.from("connections").upsert(
+        { id: event.data.connection_id, user_id: userId },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+      if (connErr) {
+        console.error("[or-webhook-receiver] connections upsert failed:", connErr.message);
+        // 500 so OR retries with backoff.
+        return jsonResponse({ error: "Persist failed" }, 500);
+      }
+
       // Idempotent insert: or_event_id is stable across OR retries
-      // (event.id from the @orangerails/webhooks SDK). The unique index
-      // ux_sync_events_or_event_id collapses duplicate deliveries into
-      // a single row. We use upsert with ignoreDuplicates=true so the
-      // second delivery returns 200 without an error path.
+      // (event.id from the @orangerails/webhooks SDK). The unique
+      // constraint (or_connection_id, or_event_id) collapses duplicate
+      // deliveries for the same connection into a single row. We use
+      // upsert with ignoreDuplicates=true so the second delivery returns
+      // 200 without an error path.
       const { error: insertErr } = await service.from("sync_events").upsert(
         {
           user_id: userId,
@@ -169,7 +193,7 @@ Deno.serve(async (req: Request) => {
           or_ts: event.data.ts,
           or_event_id: event.id,
         },
-        { onConflict: "or_event_id", ignoreDuplicates: true },
+        { onConflict: "or_connection_id,or_event_id", ignoreDuplicates: true },
       );
 
       if (insertErr) {
