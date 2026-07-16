@@ -46,10 +46,10 @@
  *        SECRET=$(openssl rand -hex 32)
  *   2. Set as Supabase edge function secret on Orange Way:
  *        supabase secrets set OR_WEBHOOK_SECRET=$SECRET \
- *          --project-ref mggalsdproqwmtwwtinm
+ *          --project-ref <your-project-ref>
  *   3. Register receiver URL + secret on OR PROD's `platforms` row:
  *        UPDATE platforms
- *           SET webhook_url    = 'https://mggalsdproqwmtwwtinm.supabase.co/functions/v1/or-webhook-receiver',
+ *           SET webhook_url    = 'https://<your-project-ref>.supabase.co/functions/v1/or-webhook-receiver',
  *               webhook_secret = '<SECRET>'
  *         WHERE slug = 'orangeway';
  *   4. Smoke: trigger any or-sync from Orange Way → check sync_events
