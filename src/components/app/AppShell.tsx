@@ -11,7 +11,6 @@ import {
   LogOut,
   Sun,
   Moon,
-  Bitcoin,
   Menu,
   Zap,
   Home,
@@ -81,9 +80,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
-            <Bitcoin className="h-4 w-4" />
-          </div>
+          <img
+            src="/icon-192.png"
+            alt="Orange Way"
+            className="h-8 w-8 shrink-0 rounded-lg"
+          />
           {!collapsed && <span className="text-sm font-semibold tracking-tight">Orange Way</span>}
         </div>
         <nav className="flex-1 space-y-1 p-2">
@@ -131,9 +132,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center gap-2 px-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
-                <Bitcoin className="h-4 w-4" />
-              </div>
+              <img
+                src="/icon-192.png"
+                alt="Orange Way"
+                className="h-8 w-8 rounded-lg"
+              />
               <span className="text-sm font-semibold">Orange Way</span>
             </div>
             <nav className="mt-2 space-y-1">
