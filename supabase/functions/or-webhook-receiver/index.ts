@@ -42,14 +42,20 @@
  *     for the UI (realtime resubscribes coalesce duplicates client-side).
  *
  * Registration runbook (one-time, per environment):
+ *   <PROJECT_REF> below is a placeholder, deliberately and permanently.
+ *   Each environment is a separate Supabase project, so no single
+ *   concrete ref is correct here, and project refs are database
+ *   identifiers that this repo does not carry. Take the real value for
+ *   the environment you are configuring from the maintainer-only
+ *   runbook before you run these steps.
  *   1. Generate a fresh shared secret:
  *        SECRET=$(openssl rand -hex 32)
  *   2. Set as Supabase edge function secret on Orange Way:
  *        supabase secrets set OR_WEBHOOK_SECRET=$SECRET \
- *          --project-ref mggalsdproqwmtwwtinm
+ *          --project-ref <PROJECT_REF>
  *   3. Register receiver URL + secret on OR PROD's `platforms` row:
  *        UPDATE platforms
- *           SET webhook_url    = 'https://mggalsdproqwmtwwtinm.supabase.co/functions/v1/or-webhook-receiver',
+ *           SET webhook_url    = 'https://<PROJECT_REF>.supabase.co/functions/v1/or-webhook-receiver',
  *               webhook_secret = '<SECRET>'
  *         WHERE slug = 'orangeway';
  *   4. Smoke: trigger any or-sync from Orange Way → check sync_events
