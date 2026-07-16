@@ -69,16 +69,28 @@ const service = createClient(SUPABASE_URL, SERVICE_KEY, {
 });
 
 /**
+ * Outcome of a subaccount to user lookup.
+ *
+ * The two failure shapes are deliberately kept apart, because they must
+ * produce opposite responses to OR's dispatcher:
+ *   - ok: false          the lookup itself failed. We do not know whether
+ *                        a mapping exists. Caller answers 5xx so OR retries.
+ *   - ok: true, userId: null
+ *                        the lookup succeeded and there is no mapping.
+ *                        Caller answers 202 so OR stops retrying.
+ * Collapsing both into a bare null is what previously caused a transient
+ * database error to be reported to OR as a successful delivery, which
+ * discarded the event permanently.
+ */
+type UserLookup = { ok: false } | { ok: true; userId: string | null };
+
+/**
  * Resolve user_id from OR's subaccount_id. The mapping is owned by
  * ow-or-proxy: when a user first calls or-provision, the returned
  * subaccount_id is cached on user_profiles.or_subaccount_id (and in the
  * browser's localStorage). We read the server-side row here.
- *
- * If we can't resolve, the receiver returns 202 (accepted but skipped)
- * so OR's dispatcher considers the delivery successful and won't retry
- * forever on a permanent mapping gap.
  */
-async function resolveUserId(subaccountId: string): Promise<string | null> {
+async function resolveUserId(subaccountId: string): Promise<UserLookup> {
   const { data, error } = await service
     .from("user_profiles")
     .select("user_id")
@@ -86,9 +98,9 @@ async function resolveUserId(subaccountId: string): Promise<string | null> {
     .maybeSingle();
   if (error) {
     console.error("[or-webhook-receiver] user lookup error:", error.message);
-    return null;
+    return { ok: false };
   }
-  return (data?.user_id as string | undefined) ?? null;
+  return { ok: true, userId: (data?.user_id as string | undefined) ?? null };
 }
 
 Deno.serve(async (req: Request) => {
@@ -144,8 +156,19 @@ Deno.serve(async (req: Request) => {
   // will surface as a TS error here, forcing a deliberate handler.
   switch (event.type) {
     case "sync.completed": {
-      const userId = await resolveUserId(event.data.subaccount_id);
-      if (!userId) {
+      const lookup = await resolveUserId(event.data.subaccount_id);
+
+      if (!lookup.ok) {
+        // The lookup failed, so we cannot tell a missing mapping from a
+        // database that is briefly unavailable. 500 hands the event back
+        // to OR's dispatcher, which retries with backoff. Answering 202
+        // here would tell OR the delivery succeeded and drop the event
+        // for good. The upsert below is idempotent on or_event_id, so a
+        // retry after a partial failure cannot double-apply.
+        return jsonResponse({ error: "User lookup failed" }, 500);
+      }
+
+      if (!lookup.userId) {
         // We received a valid signed event for an unknown subaccount.
         // 202 = accepted but no action; tells OR's dispatcher to consider
         // the delivery successful and stop retrying (vs 5xx which would
@@ -163,7 +186,7 @@ Deno.serve(async (req: Request) => {
       // second delivery returns 200 without an error path.
       const { error: insertErr } = await service.from("sync_events").upsert(
         {
-          user_id: userId,
+          user_id: lookup.userId,
           or_connection_id: event.data.connection_id,
           synced_count: event.data.synced_count,
           or_ts: event.data.ts,
