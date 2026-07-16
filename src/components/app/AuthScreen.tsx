@@ -111,7 +111,7 @@ export function AuthScreen() {
       toastError(error);
       resetCaptcha();
     } else {
-      toast.success("Check your email for a reset link.");
+      toast.success("If an account exists for that email, we just sent a link.");
     }
   };
 
