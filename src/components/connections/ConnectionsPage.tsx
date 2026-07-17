@@ -217,7 +217,6 @@ export function ConnectionsPage() {
   const [subaccountId, setSubaccountId] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [provisioning, setProvisioning] = useState(false);
   const [securing, setSecuring] = useState(false);
   const [securingError, setSecuringError] = useState<string | null>(null);
   const [opkRegistered, setOpkRegistered] = useState(false);
@@ -251,7 +250,6 @@ export function ConnectionsPage() {
     if (!user || subaccountId || !isUnlocked) return;
     let cancelled = false;
     (async () => {
-      setProvisioning(true);
       try {
         const res = (await callProxy("or-provision", {})) as { subaccount_id: string };
         if (cancelled) return;
@@ -264,8 +262,6 @@ export function ConnectionsPage() {
             humanizeError(err, "We couldn't finish setting up your connections. Try again."),
           );
         }
-      } finally {
-        if (!cancelled) setProvisioning(false);
       }
     })();
     return () => {
@@ -891,16 +887,14 @@ export function ConnectionsPage() {
         )}
       </div>
 
-      {/* Two-phase loader on the empty state:
-            phase 1 — provisioning the OR subaccount  → 'Connecting…'
-            phase 2 — registering the OPK public key  → 'Securing your data…'
-          The copy now matches what's actually happening at each step. */}
-      {(provisioning || securing) && connections.length === 0 && (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          {provisioning ? "Connecting…" : "Securing your data…"}
-        </div>
-      )}
+      {/* No setup spinner here on purpose. It used to show 'Connecting…' or
+          'Securing your data…' on the empty state, and it could contradict
+          itself: the provision effect only cleared its flag when the run was
+          not cancelled, so a run cancelled mid-flight left the spinner up
+          forever while the failure banner below said the opposite. The two
+          connect buttons already disable while `securing`, and any failure
+          surfaces in that banner, so the spinner carried no signal of its
+          own. Setup is a background concern; it does not need its own box. */}
 
       {/* OPK registration failed — surface loudly. Without a registered OPK
           public key on OR, every incoming bank transaction would seal under
