@@ -21,8 +21,12 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+// See the note in ./widget.ts: this must be a host that serves the
+// widget directly, or the strict origin compare in openBankPopup drops
+// the completion message. Set per environment in deploy.yml.
 const OR_CONNECT_BASE =
-  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ?? "https://orangerails.com/connect";
+  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ??
+  "https://connect.orangerails.com/connect";
 
 export interface BankConnectQuickConnectResponse {
   orPlatformUserId: string;

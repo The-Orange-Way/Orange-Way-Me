@@ -26,8 +26,15 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+// Must be a host that serves the widget directly. The apex
+// orangerails.com/connect does not: it redirects to
+// connect.orangerails.com, so the widget posts its completion message
+// from an origin that never matches `expectedOrigin` below, and the
+// strict compare drops it with no error. Set per environment in
+// .github/workflows/deploy.yml; this default is the local-dev value.
 const OR_CONNECT_BASE =
-  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ?? "https://orangerails.com/connect";
+  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ??
+  "https://connect.orangerails.com/connect";
 
 /** Source wallets returned by the widget after the user picks them. */
 export interface OrLinkSourceWallet {

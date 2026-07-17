@@ -31,7 +31,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
-vi.stubEnv("VITE_OR_CONNECT_URL", "https://orangerails.com/connect");
+vi.stubEnv("VITE_OR_CONNECT_URL", "https://connect.orangerails.com/connect");
 
 interface MockPopup {
   closed: boolean;
@@ -81,7 +81,10 @@ function installWindowShim(): { popup: MockPopup; openedUrls: string[]; restore:
   };
 }
 
-function postMessage(data: Record<string, unknown>, origin = "https://orangerails.com"): void {
+function postMessage(
+  data: Record<string, unknown>,
+  origin = "https://connect.orangerails.com",
+): void {
   const win = (globalThis as { window: EventTarget }).window;
   win.dispatchEvent(Object.assign(new Event("message"), { data, origin }) as unknown as Event);
 }
@@ -111,7 +114,7 @@ describe("openBankPopup", () => {
     invokeMock.mockResolvedValueOnce(accountsResponse([])); // baseline snapshot
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     postMessage({ type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" });
     const result = await pending;
@@ -131,7 +134,7 @@ describe("openBankPopup", () => {
       .mockResolvedValueOnce(accountsResponse(["acc-old", "acc-new"])); // tick @9s: new bank landed
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(3000);
@@ -154,7 +157,7 @@ describe("openBankPopup", () => {
       .mockResolvedValueOnce(accountsResponse(["acc-1"])); // tick @6s: linked
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     // No postMessage ever fires in this test, simulating the OAuth
     // redirect severing window.opener.
@@ -179,7 +182,7 @@ describe("openBankPopup", () => {
       .mockResolvedValueOnce(accountsResponse(["acc-1"])); // tick @6s: succeeds
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     await vi.advanceTimersByTimeAsync(3000); // errors, swallowed
     await vi.advanceTimersByTimeAsync(3000); // succeeds
@@ -193,7 +196,7 @@ describe("openBankPopup", () => {
     invokeMock.mockResolvedValue(accountsResponse([]));
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     // Attach the rejection assertion BEFORE advancing timers so the
     // rejection has a handler the instant it fires, avoiding a spurious
@@ -216,7 +219,7 @@ describe("openBankPopup", () => {
       .mockResolvedValueOnce(accountsResponse(["acc-1"])); // tick @3s
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
     postMessage(
       { type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "evil" },
@@ -232,7 +235,7 @@ describe("openBankPopup", () => {
     invokeMock.mockResolvedValue(accountsResponse([])); // baseline + every tick: nothing, forever
 
     const { openBankPopup } = await import("../bank-connect");
-    const pending = openBankPopup("https://orangerails.com/connect/quiltt#x=1");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
     // Swallow the eventual rejection assertion race: attach a no-op catch
     // so advancing past the cap doesn't produce an unhandled rejection
     // before we get to assert on it below.
