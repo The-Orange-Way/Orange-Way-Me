@@ -65,6 +65,7 @@ import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./B
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
 import { humanizeError, toastError } from "@/lib/friendly-error";
+import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
@@ -101,23 +102,6 @@ interface ConnectionRow {
   decrypted_label?: string | null;
   decrypted_last_error?: string | null;
   decrypted_wallets?: DecryptedWalletForBadges[];
-}
-
-/**
- * Error class for failures from the ow-or-proxy edge function. Carries the
- * upstream HTTP status and (when available) the JSON body so callers can
- * branch on specific status codes — registerOpk's 409 rotation-guard
- * retry, for example. Vanilla `Error` would drop both.
- */
-export class CallProxyError extends Error {
-  status: number;
-  body: unknown;
-  constructor(message: string, status: number, body: unknown) {
-    super(message);
-    this.name = "CallProxyError";
-    this.status = status;
-    this.body = body;
-  }
 }
 
 async function callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -214,7 +198,13 @@ export function ConnectionsPage() {
     return m;
   }, [connAccountMapRows, accountById]);
 
+  const userId = user?.id ?? null;
+
   const [subaccountId, setSubaccountId] = useState<string | null>(null);
+  // Caps the stale-subaccount recovery in refreshList at one attempt per mount.
+  // If OR rejects even a freshly provisioned id, clearing and re-provisioning
+  // again would loop against OR for as long as the page stays open.
+  const recoveredStaleSubaccountRef = useRef(false);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -305,6 +295,10 @@ export function ConnectionsPage() {
   const refreshList = useCallback(async () => {
     if (!subaccountId || !isUnlocked) return;
     setLoading(true);
+    // Set when the catch below hands off to the provision effect, so the
+    // finally leaves the spinner up for the re-provision instead of flashing
+    // the "No connections yet" empty state mid-recovery.
+    let recovering = false;
     try {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
@@ -360,12 +354,24 @@ export function ConnectionsPage() {
       );
       setConnections(decoded);
     } catch (err) {
+      // An id OR does not recognise is recoverable, so fix it rather than
+      // report it. Dropping subaccountId re-runs the provision effect, which
+      // issues one against the OR this build actually talks to and re-runs this
+      // list when it lands. The OPK effect re-runs on the new id for free.
+      if (isSubaccountNotFound(err) && userId && !recoveredStaleSubaccountRef.current) {
+        recoveredStaleSubaccountRef.current = true;
+        console.warn("[Connections] cached subaccount is unknown to OR, re-provisioning");
+        localStorage.removeItem(SUBACCOUNT_LS_PREFIX + userId);
+        setSubaccountId(null);
+        recovering = true;
+        return;
+      }
       console.error("[Connections] list failed", err);
       toastError(err, "We couldn't load your connections.");
     } finally {
-      setLoading(false);
+      if (!recovering) setLoading(false);
     }
-  }, [subaccountId, isUnlocked, decryptOrCipher]);
+  }, [subaccountId, isUnlocked, decryptOrCipher, userId]);
 
   useEffect(() => {
     void refreshList();
