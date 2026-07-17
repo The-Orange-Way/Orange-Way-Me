@@ -32,8 +32,12 @@ import { supabase } from "@/integrations/supabase/client";
 // from an origin that never matches `expectedOrigin` below, and the
 // strict compare drops it with no error. Set per environment in
 // .github/workflows/deploy.yml; this default is the local-dev value.
+//
+// `||` and not `??` on purpose. A workflow that sets this var to an
+// empty string produces `""` here, which is not nullish, so `??` would
+// keep it and `new URL("")` would throw. Treat empty as unset.
 const OR_CONNECT_BASE =
-  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ??
+  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ||
   "https://connect.orangerails.com/connect";
 
 /** Source wallets returned by the widget after the user picks them. */
