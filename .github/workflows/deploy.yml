@@ -48,7 +48,7 @@ jobs:
           VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
           VITE_ORBI_SUPABASE_URL: ${{ vars.VITE_ORBI_SUPABASE_URL }}
           VITE_ORBI_SUPABASE_ANON_KEY: ${{ vars.VITE_ORBI_SUPABASE_ANON_KEY }}
-          # Observability — VITE_* is baked into the bundle at build time, so
+          # Observability -- VITE_* is baked into the bundle at build time, so
           # the DSN MUST be passed here (Cloudflare Pages env vars wouldn't
           # take effect on a Wrangler-uploaded build). The wrapper at
           # src/lib/observability/sentry.ts is a no-op when DSN is unset.
@@ -77,15 +77,21 @@ jobs:
           # submits without a token. Supabase Auth must also be
           # configured to skip captcha verification in that case.
           VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || vars.TURNSTILE_SITE_KEY_DEV }}
-          # Release identifier — paired with the source map upload step below
+          # Release identifier -- paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
           VITE_SENTRY_RELEASE: ${{ github.sha }}
+          # Per-environment OrangeRails Connect widget URL. Baked in at
+          # build time so the dev site opens the dev widget (which posts
+          # from a stable origin and does not redirect) and prod uses the
+          # prod widget via the fallback in src/lib/or/widget.ts.
+          # Leaving this empty on prod preserves the existing behaviour.
+          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'dev' && 'https://dev.orangerails.com/connect' || '' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when DSN is unset (open-source contributors building dist locally
         # don't need to upload anywhere). The run block below also skips when
-        # the auth token isn't configured — checking secrets.* in an `if:`
+        # the auth token isn't configured -- checking secrets.* in an `if:`
         # expression is what made the whole workflow fail validation in 0s on
         # previous attempts, so we keep the gate purely on vars.* here.
         if: ${{ vars.VITE_SENTRY_DSN != '' }}
@@ -103,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${SENTRY_AUTH_TOKEN}" ]; then
-            echo "GLITCHTIP_API_TOKEN not set in repo/env secrets — skipping source-map upload."
+            echo "GLITCHTIP_API_TOKEN not set in repo/env secrets -- skipping source-map upload."
             exit 0
           fi
           # Install sentry-cli to a temp dir so we don't touch /usr (no sudo needed).
@@ -140,7 +146,7 @@ jobs:
             echo "project=ow-dev" >> "$GITHUB_OUTPUT"
             echo "verify_url=https://orangeway.dev" >> "$GITHUB_OUTPUT"
           else
-            echo "Unknown branch ${{ github.ref_name }} — skipping deploy"
+            echo "Unknown branch ${{ github.ref_name }} -- skipping deploy"
             exit 0
           fi
 
@@ -163,7 +169,7 @@ jobs:
             exit 0
           fi
           curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
-          echo "✓ ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
+          echo "checkmark ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
 
       # E2E smoke against the freshly-deployed environment. Chromium
       # only on every push so deploys stay fast; the Firefox / WebKit
