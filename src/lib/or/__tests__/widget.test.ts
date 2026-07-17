@@ -33,7 +33,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 // Vite-style env replacement: stub `import.meta.env` keys the widget reads.
 vi.stubEnv("VITE_SUPABASE_URL", "https://ow.local");
 vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "pub-key");
-vi.stubEnv("VITE_OR_CONNECT_URL", "https://orangerails.com/connect");
+vi.stubEnv("VITE_OR_CONNECT_URL", "https://connect.orangerails.com/connect");
 
 const ORG_ID = "user-uuid-1234";
 const CRED_KEY = "Y3JlZF9rZXlfYjY0X29wYXF1ZQ==";
@@ -93,7 +93,7 @@ function postSuccess(payload: Record<string, unknown>): void {
   win.dispatchEvent(
     Object.assign(new Event("message"), {
       data: { type: "or-link-success", ...payload },
-      origin: "https://orangerails.com",
+      origin: "https://connect.orangerails.com",
     }) as unknown as Event,
   );
 }
@@ -103,7 +103,7 @@ function postCancel(): void {
   win.dispatchEvent(
     Object.assign(new Event("message"), {
       data: { type: "or-link-cancel" },
-      origin: "https://orangerails.com",
+      origin: "https://connect.orangerails.com",
     }) as unknown as Event,
   );
 }
@@ -152,7 +152,7 @@ describe("openOrConnect", () => {
     // Popup got the constructed URL.
     expect(shim.openedUrls).toHaveLength(1);
     const url = new URL(shim.openedUrls[0]);
-    expect(url.origin).toBe("https://orangerails.com");
+    expect(url.origin).toBe("https://connect.orangerails.com");
     expect(url.searchParams.get("platform")).toBe("orangeway");
     expect(url.searchParams.get("app_user_id")).toBe(ORG_ID);
     expect(url.searchParams.has("provider")).toBe(false); // omitted → OR picker

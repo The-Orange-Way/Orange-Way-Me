@@ -81,12 +81,22 @@ jobs:
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
           VITE_SENTRY_RELEASE: ${{ github.sha }}
-          # Per-environment OrangeRails Connect widget URL. Baked in at
-          # build time so the dev site opens the dev widget (which posts
-          # from a stable origin and does not redirect) and prod uses the
-          # prod widget via the fallback in src/lib/or/widget.ts.
-          # Leaving this empty on prod preserves the existing behaviour.
-          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'dev' && 'https://dev.orangerails.com/connect' || '' }}
+          # Per-environment Orange Rails Connect widget URL, baked in at
+          # build time.
+          #
+          # BOTH values must name a host that serves the widget directly.
+          # The apex orangerails.com/connect does NOT: it redirects to
+          # connect.orangerails.com, so the widget posts its completion
+          # message from an origin that never equals
+          # `new URL(OR_CONNECT_BASE).origin` in src/lib/or/widget.ts.
+          # That compare is strict and drops the message with no error.
+          #
+          # Prod must be set explicitly and must NOT be left empty. An
+          # empty string is not nullish, so the `??` fallback in
+          # widget.ts does not fire: the base becomes "" and
+          # `new URL("")` throws. Verified by building both shapes and
+          # reading the emitted bundle.
+          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'prod' && 'https://connect.orangerails.com/connect' || 'https://dev.orangerails.com/connect' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when DSN is unset (open-source contributors building dist locally
