@@ -48,6 +48,23 @@ jobs:
           VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
           VITE_ORBI_SUPABASE_URL: ${{ vars.VITE_ORBI_SUPABASE_URL }}
           VITE_ORBI_SUPABASE_ANON_KEY: ${{ vars.VITE_ORBI_SUPABASE_ANON_KEY }}
+          # Base URL of the Orange Rails hosted connect widget, read by
+          # src/lib/or/widget.ts and src/lib/or/bank-connect.ts. This MUST be
+          # passed here: VITE_* values are inlined into the bundle by Vite at
+          # build time, so setting it in the Cloudflare Pages env panel would
+          # have no effect on a wrangler-uploaded build (same reason as
+          # VITE_SENTRY_DSN below).
+          #
+          # When unset, both files fall back to the hardcoded OR production
+          # URL, which pointed the dev site at OR production and wrote real
+          # rows to OR's production database on every connect click.
+          #
+          # Branch-derived rather than a repo variable, matching
+          # VITE_DEV_SIGNUP_OPEN below: a missing or mistyped repo var would
+          # silently resolve to the empty string and fall back to the
+          # production host, which is indistinguishable from success in the
+          # app until it has already written to production.
+          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'prod' && 'https://connect.orangerails.com/connect' || 'https://orangerails.dev/connect' }}
           # Observability — VITE_* is baked into the bundle at build time, so
           # the DSN MUST be passed here (Cloudflare Pages env vars wouldn't
           # take effect on a Wrangler-uploaded build). The wrapper at
