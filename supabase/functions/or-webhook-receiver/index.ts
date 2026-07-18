@@ -41,19 +41,12 @@
  *     in place (migration 20260524000000), and the receiver upserts
  *     for the UI (realtime resubscribes coalesce duplicates client-side).
  *
- * Registration runbook (one-time, per environment):
- *   1. Generate a fresh shared secret:
- *        SECRET=$(openssl rand -hex 32)
- *   2. Set as Supabase edge function secret on Orange Way:
- *        supabase secrets set OR_WEBHOOK_SECRET=$SECRET \
- *          --project-ref mggalsdproqwmtwwtinm
- *   3. Register receiver URL + secret on OR PROD's `platforms` row:
- *        UPDATE platforms
- *           SET webhook_url    = 'https://mggalsdproqwmtwwtinm.supabase.co/functions/v1/or-webhook-receiver',
- *               webhook_secret = '<SECRET>'
- *         WHERE slug = 'orangeway';
- *   4. Smoke: trigger any or-sync from Orange Way → check sync_events
- *      table receives a row within ~30s (or-webhook-dispatch backoff).
+ * Registration (one-time, per environment): generating the shared secret,
+ * setting OR_WEBHOOK_SECRET on this project, and registering this
+ * receiver's URL with OrangeRails is a maintainer-only procedure kept
+ * outside this repo. It is deliberately not reproduced here: it names
+ * per-environment identifiers and handles a secret, neither of which
+ * belongs in a public tree.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

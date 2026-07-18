@@ -23,7 +23,7 @@
  *
  * The hosted OR /connect widget (opened by openOrConnect on the
  * client) now owns connection creation, credential entry, wallet
- * discovery, and source-wallet picking — so the create/discover/
+ * discovery, and source-wallet picking -- so the create/discover/
  * source-wallets-set endpoints are no longer proxied here.
  *
  * For or-provision: external_user_id is set to the authenticated user.id.
@@ -41,20 +41,24 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Canonical Orange Rails API gateway. The Cloudflare Worker at
-// api.orangerails.com proxies /functions/v1/or-* to the live OR
-// project and survives any future OR backend migration without
-// requiring Orange Way to redeploy.
+// Canonical Orange Rails API gateways.
 //
-// OR_URL_ALLOWLIST: any value the OR_SUPABASE_URL env var is permitted
-// to take. An operator who tries to point this function at an
-// unrecognized host (e.g., via a compromised secret store) cannot
-// redirect proxy traffic to an attacker-controlled endpoint. New
-// allowed values land in code review, not as an env-only change.
+// OR_URL_ALLOWLIST: the complete set of hosts OR_SUPABASE_URL may take.
+// An operator who tries to point this function at an unrecognized host
+// (e.g., via a compromised secret store) cannot redirect proxy traffic
+// to an attacker-controlled endpoint. New allowed values require a
+// code-review pass, not just an env-var edit.
+//
+// Entries:
+//   api.orangerails.com  -- OR production API gateway
+//   api.orangerails.dev  -- OR development API gateway
+//
+// Note: dev.orangerails.com is OR's dev CDN/frontend origin and returns
+// 405 on all function paths; it is NOT an API host and must not appear
+// here. staging.orangerails.com has no DNS.
 const OR_URL_ALLOWLIST = new Set<string>([
   "https://api.orangerails.com",
-  "https://staging.orangerails.com",
-  "https://dev.orangerails.com",
+  "https://api.orangerails.dev",
 ]);
 const OR_SUPABASE_URL_RAW = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
 const OR_SUPABASE_URL = OR_URL_ALLOWLIST.has(OR_SUPABASE_URL_RAW) ? OR_SUPABASE_URL_RAW : null;
@@ -74,7 +78,7 @@ const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
 const RATE_LIMIT_PER_HOUR = 60;
 
 // Service-role client used only for the user_profiles.or_subaccount_id
-// upsert below — so the or-webhook-receiver can resolve inbound
+// upsert below -- so the or-webhook-receiver can resolve inbound
 // sync.completed events back to a user without going through a user JWT.
 const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -86,7 +90,7 @@ const ALLOWED_ENDPOINTS = new Set([
   "or-connection-delete",
   "or-sync",
   "or-transactions-list",
-  // Hosted Link widget — OW mints a short-lived widget_token, then opens
+  // Hosted Link widget -- OW mints a short-lived widget_token, then opens
   // OR's /connect route. Platform-level (no subaccount), but the
   // returned token binds to app_user_id (= user.id).
   "or-link-mint-token",
@@ -96,12 +100,12 @@ const ALLOWED_ENDPOINTS = new Set([
 ]);
 
 /**
- * x-region: us-east-1 — pin OR's edge function execution to Virginia so
+ * x-region: us-east-1 -- pin OR's edge function execution to Virginia so
  * any Quiltt-touching path (or-sync via the Quiltt source adapter,
  * or-link-mint-token, future Quiltt endpoints) executes from a US IP.
  * Quiltt's upstream providers (Finicity, MX) 403 non-US traffic.
  *
- * Safe to apply to every endpoint — non-Quiltt endpoints are unaffected
+ * Safe to apply to every endpoint -- non-Quiltt endpoints are unaffected
  * by where the function runs.
  */
 const OR_REGION_HEADER = "us-east-1";
@@ -151,7 +155,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // ── Authenticate caller via Supabase JWT ─────────────────────────
+    // -- Authenticate caller via Supabase JWT ---------------------------------
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401, cors);
 
@@ -164,7 +168,7 @@ Deno.serve(async (req: Request) => {
     } = await userClient.auth.getUser();
     if (authErr || !user) return jsonResponse({ error: "Unauthorized" }, 401, cors);
 
-    // ── Per-user-per-hour rate limit ─────────────────────────────────
+    // -- Per-user-per-hour rate limit -----------------------------------------
     // Increments a counter in public.ow_or_proxy_rate_limit via the
     // increment_ow_or_proxy_rate RPC (SECURITY DEFINER, returns the
     // updated count). If the count exceeds RATE_LIMIT_PER_HOUR the
@@ -191,7 +195,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Parse body ───────────────────────────────────────────────────
+    // -- Parse body -----------------------------------------------------------
     const raw = await readBoundedText(req);
     if (raw === null) return jsonResponse({ error: "Request body too large" }, 413, cors);
 
@@ -209,12 +213,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── Build the OR request body ────────────────────────────────────
+    // -- Build the OR request body --------------------------------------------
     let orBody: Record<string, unknown>;
 
     if (endpoint === "or-provision") {
       // Provision uses user.id as external_user_id (one subaccount per user
-      // — vault is per-user, no orgs concept).
+      // -- vault is per-user, no orgs concept).
       orBody = { external_user_id: user.id };
     } else if (endpoint === "or-link-mint-token") {
       // Mint widget session token. app_user_id = user.id (mirrors the
@@ -264,9 +268,9 @@ Deno.serve(async (req: Request) => {
     const orRes = await callOr(endpoint, orBody);
     const orJson = await orRes.json().catch(() => ({ error: "OR returned non-JSON response" }));
 
-    // Persist the user → subaccount mapping on successful or-provision so
+    // Persist the user -> subaccount mapping on successful or-provision so
     // the or-webhook-receiver can resolve inbound sync.completed events
-    // back to a user without going through a user JWT. Idempotent — the
+    // back to a user without going through a user JWT. Idempotent -- the
     // subaccount_id is stable per user and OR returns it on every call.
     if (endpoint === "or-provision" && orRes.ok && typeof orJson?.subaccount_id === "string") {
       try {

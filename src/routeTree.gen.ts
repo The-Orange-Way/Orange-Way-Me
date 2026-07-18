@@ -20,6 +20,7 @@ import { Route as PrivacyChangelogRouteImport } from './routes/privacy-changelog
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as LandingClassicRouteImport } from './routes/landing-classic'
+import { Route as JoinRouteImport } from './routes/join'
 import { Route as HouseholdsRouteImport } from './routes/households'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as FeaturesRouteImport } from './routes/features'
@@ -35,6 +36,7 @@ import { Route as BitcoinRouteImport } from './routes/bitcoin'
 import { Route as BetaRouteImport } from './routes/beta'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AiRouteImport } from './routes/ai'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
@@ -42,6 +44,7 @@ import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as WalletsIdRouteImport } from './routes/wallets.$id'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as SettingsRulesRouteImport } from './routes/settings.rules'
+import { Route as SettingsResetVaultRouteImport } from './routes/settings.reset-vault'
 import { Route as SettingsProfileRouteImport } from './routes/settings.profile'
 import { Route as SettingsPreferencesRouteImport } from './routes/settings.preferences'
 import { Route as SettingsImportExportRouteImport } from './routes/settings.import-export'
@@ -107,6 +110,11 @@ const PricingRoute = PricingRouteImport.update({
 const LandingClassicRoute = LandingClassicRouteImport.update({
   id: '/landing-classic',
   path: '/landing-classic',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinRoute = JoinRouteImport.update({
+  id: '/join',
+  path: '/join',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HouseholdsRoute = HouseholdsRouteImport.update({
@@ -184,6 +192,11 @@ const AiRoute = AiRouteImport.update({
   path: '/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountsRoute = AccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
@@ -217,6 +230,11 @@ const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
 const SettingsRulesRoute = SettingsRulesRouteImport.update({
   id: '/rules',
   path: '/rules',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsResetVaultRoute = SettingsResetVaultRouteImport.update({
+  id: '/reset-vault',
+  path: '/reset-vault',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsProfileRoute = SettingsProfileRouteImport.update({
@@ -281,6 +299,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -296,6 +315,7 @@ export interface FileRoutesByFullPath {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -317,6 +337,7 @@ export interface FileRoutesByFullPath {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -327,6 +348,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -342,6 +364,7 @@ export interface FileRoutesByTo {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -362,6 +385,7 @@ export interface FileRoutesByTo {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -373,6 +397,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
+  '/admin': typeof AdminRoute
   '/ai': typeof AiRoute
   '/auth': typeof AuthRoute
   '/beta': typeof BetaRoute
@@ -388,6 +413,7 @@ export interface FileRoutesById {
   '/features': typeof FeaturesRoute
   '/goals': typeof GoalsRouteWithChildren
   '/households': typeof HouseholdsRoute
+  '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -409,6 +435,7 @@ export interface FileRoutesById {
   '/settings/import-export': typeof SettingsImportExportRoute
   '/settings/preferences': typeof SettingsPreferencesRoute
   '/settings/profile': typeof SettingsProfileRoute
+  '/settings/reset-vault': typeof SettingsResetVaultRoute
   '/settings/rules': typeof SettingsRulesRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/wallets/$id': typeof WalletsIdRoute
@@ -421,6 +448,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -436,6 +464,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -457,6 +486,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -467,6 +497,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -482,6 +513,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -502,6 +534,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -512,6 +545,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/accounts'
+    | '/admin'
     | '/ai'
     | '/auth'
     | '/beta'
@@ -527,6 +561,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/goals'
     | '/households'
+    | '/join'
     | '/landing-classic'
     | '/pricing'
     | '/privacy'
@@ -548,6 +583,7 @@ export interface FileRouteTypes {
     | '/settings/import-export'
     | '/settings/preferences'
     | '/settings/profile'
+    | '/settings/reset-vault'
     | '/settings/rules'
     | '/settings/security'
     | '/wallets/$id'
@@ -559,6 +595,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   AccountsRoute: typeof AccountsRouteWithChildren
+  AdminRoute: typeof AdminRoute
   AiRoute: typeof AiRoute
   AuthRoute: typeof AuthRoute
   BetaRoute: typeof BetaRoute
@@ -574,6 +611,7 @@ export interface RootRouteChildren {
   FeaturesRoute: typeof FeaturesRoute
   GoalsRoute: typeof GoalsRouteWithChildren
   HouseholdsRoute: typeof HouseholdsRoute
+  JoinRoute: typeof JoinRoute
   LandingClassicRoute: typeof LandingClassicRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -665,6 +703,13 @@ declare module '@tanstack/react-router' {
       path: '/landing-classic'
       fullPath: '/landing-classic'
       preLoaderRoute: typeof LandingClassicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join': {
+      id: '/join'
+      path: '/join'
+      fullPath: '/join'
+      preLoaderRoute: typeof JoinRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/households': {
@@ -772,6 +817,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/accounts': {
       id: '/accounts'
       path: '/accounts'
@@ -819,6 +871,13 @@ declare module '@tanstack/react-router' {
       path: '/rules'
       fullPath: '/settings/rules'
       preLoaderRoute: typeof SettingsRulesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/reset-vault': {
+      id: '/settings/reset-vault'
+      path: '/reset-vault'
+      fullPath: '/settings/reset-vault'
+      preLoaderRoute: typeof SettingsResetVaultRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/profile': {
@@ -932,6 +991,7 @@ interface SettingsRouteChildren {
   SettingsImportExportRoute: typeof SettingsImportExportRoute
   SettingsPreferencesRoute: typeof SettingsPreferencesRoute
   SettingsProfileRoute: typeof SettingsProfileRoute
+  SettingsResetVaultRoute: typeof SettingsResetVaultRoute
   SettingsRulesRoute: typeof SettingsRulesRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -946,6 +1006,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsImportExportRoute: SettingsImportExportRoute,
   SettingsPreferencesRoute: SettingsPreferencesRoute,
   SettingsProfileRoute: SettingsProfileRoute,
+  SettingsResetVaultRoute: SettingsResetVaultRoute,
   SettingsRulesRoute: SettingsRulesRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
   SettingsIndexRoute: SettingsIndexRoute,
@@ -970,6 +1031,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   AccountsRoute: AccountsRouteWithChildren,
+  AdminRoute: AdminRoute,
   AiRoute: AiRoute,
   AuthRoute: AuthRoute,
   BetaRoute: BetaRoute,
@@ -985,6 +1047,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeaturesRoute: FeaturesRoute,
   GoalsRoute: GoalsRouteWithChildren,
   HouseholdsRoute: HouseholdsRoute,
+  JoinRoute: JoinRoute,
   LandingClassicRoute: LandingClassicRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,

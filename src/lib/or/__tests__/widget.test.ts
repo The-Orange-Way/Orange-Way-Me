@@ -33,7 +33,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 // Vite-style env replacement: stub `import.meta.env` keys the widget reads.
 vi.stubEnv("VITE_SUPABASE_URL", "https://ow.local");
 vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "pub-key");
-vi.stubEnv("VITE_OR_CONNECT_URL", "https://orangerails.com/connect");
+vi.stubEnv("VITE_OR_CONNECT_URL", "https://connect.orangerails.com/connect");
 
 const ORG_ID = "user-uuid-1234";
 const CRED_KEY = "Y3JlZF9rZXlfYjY0X29wYXF1ZQ==";
@@ -93,7 +93,7 @@ function postSuccess(payload: Record<string, unknown>): void {
   win.dispatchEvent(
     Object.assign(new Event("message"), {
       data: { type: "or-link-success", ...payload },
-      origin: "https://orangerails.com",
+      origin: "https://connect.orangerails.com",
     }) as unknown as Event,
   );
 }
@@ -103,7 +103,7 @@ function postCancel(): void {
   win.dispatchEvent(
     Object.assign(new Event("message"), {
       data: { type: "or-link-cancel" },
-      origin: "https://orangerails.com",
+      origin: "https://connect.orangerails.com",
     }) as unknown as Event,
   );
 }
@@ -149,11 +149,12 @@ describe("openOrConnect", () => {
       org_id: ORG_ID,
     });
 
-    // Popup got the constructed URL.
+    // Popup got the constructed URL. No VITE_OR_PLATFORM_SLUG is stubbed
+    // here, so this pins the fallback rather than a deployed value.
     expect(shim.openedUrls).toHaveLength(1);
     const url = new URL(shim.openedUrls[0]);
-    expect(url.origin).toBe("https://orangerails.com");
-    expect(url.searchParams.get("platform")).toBe("orangeway");
+    expect(url.origin).toBe("https://connect.orangerails.com");
+    expect(url.searchParams.get("platform")).toBe("orangeway-me");
     expect(url.searchParams.get("app_user_id")).toBe(ORG_ID);
     expect(url.searchParams.has("provider")).toBe(false); // omitted → OR picker
 
@@ -240,5 +241,34 @@ describe("openOrConnect", () => {
     // Promise still pending. Mark popup closed; poll loop will reject.
     shim.popup.closed = true;
     await expect(pending).rejects.toThrow(/closed before completion/i);
+  });
+
+  // Kept last: it stubs an env var the other cases read as unset.
+  it("names the platform from VITE_OR_PLATFORM_SLUG when the build sets one", async () => {
+    // Every deployed build gets its slug from .github/workflows/deploy.yml,
+    // so the override is the path that has to be right. The slug must name
+    // the same OR platform the environment's API key authenticates as: the
+    // token is minted with the key and then claimed by this slug, and a
+    // mismatch fails the claim as a 401 on the token.
+    vi.stubEnv("VITE_OR_PLATFORM_SLUG", "orangeway-me-dev");
+    vi.resetModules();
+    const { openOrConnect } = await import("../widget");
+
+    const pending = openOrConnect({
+      orgId: ORG_ID,
+      credKeyB64: CRED_KEY,
+      txnKeyB64: TXN_KEY,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const url = new URL(shim.openedUrls[0]);
+    expect(url.searchParams.get("platform")).toBe("orangeway-me-dev");
+
+    postSuccess({ connection_id: "c", subaccount_id: "s", source_wallets: [] });
+    await pending;
+
+    // widget.ts treats "" as unset (`||`, not `??`), so this hands the
+    // fallback back to any case that runs after this one. unstubAllEnvs
+    // would also drop the module-level stubs the other cases need.
+    vi.stubEnv("VITE_OR_PLATFORM_SLUG", "");
   });
 });
