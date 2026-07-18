@@ -40,6 +40,10 @@ cd "$REPO_ROOT"
 # what the remote already holds for that ref (all-zeros for a brand-new ref),
 # which is the exact base of "what this push adds" for an incremental update.
 ZERO_SHA="0000000000000000000000000000000000000000"
+# git's canonical empty tree. Diffing a commit against it yields the commit's
+# entire content as additions, which lets the reserved-term scan include an
+# orphan root commit that a base..sha range would exclude.
+EMPTY_TREE="$(git hash-object -t tree /dev/null)"
 LOCAL_SHAS=()
 REMOTE_SHAS=()
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -128,23 +132,30 @@ else
   for i in "${!LOCAL_SHAS[@]}"; do
     sha="${LOCAL_SHAS[$i]}"
     base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
-    # Orphan / initial commit: no shared history, so fall back to the root as
-    # the diff base. git diff needs two endpoints, unlike gitleaks below which
-    # can take the bare sha, so this check keeps its own root handling.
-    [ -z "$base" ] && base="$(git rev-list --max-parents=0 "$sha" | head -1)"
-    RANGE="$base..$sha"
+    if [ -n "$base" ]; then
+      LOG_RANGE="$base..$sha"
+      DIFF_ARGS=("$base..$sha")
+    else
+      # Orphan / initial commit: no shared history, so scan the whole thing,
+      # root included. git log takes the bare sha (every reachable commit);
+      # git diff needs two endpoints, so diff against the empty tree. A
+      # base..sha range would exclude the root and let a reserved term in the
+      # very first commit escape, the same way it did for gitleaks before.
+      LOG_RANGE="$sha"
+      DIFF_ARGS=("$EMPTY_TREE" "$sha")
+    fi
     # Commit messages
-    if git log --format='%H%n%s%n%b' "$RANGE" 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
+    if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
       red "✗ Reserved-term leak in commit messages:"
-      git log --format='%H%n%s%n%b' "$RANGE" | grep -nEi --color=always "$PRIVATE_PATTERN"
+      git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -nEi --color=always "$PRIVATE_PATTERN"
       FAIL=1
     fi
     # Diff content: ADDED lines only. Deletions are how leaks get removed;
     # blocking a push because its diff deletes a reserved term would make
     # cleanups impossible.
-    if git diff "$RANGE" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
+    if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
       red "✗ Reserved-term leak in added diff lines:"
-      git diff "$RANGE" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
+      git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
       FAIL=1
     fi
   done
