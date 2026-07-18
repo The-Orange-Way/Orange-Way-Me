@@ -81,6 +81,40 @@ jobs:
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
           VITE_SENTRY_RELEASE: ${{ github.sha }}
+          # Per-environment Orange Rails Connect widget URL, baked in at
+          # build time.
+          #
+          # BOTH values must name a host that serves the widget directly.
+          # The apex orangerails.com/connect does NOT: it redirects to
+          # connect.orangerails.com, so the widget posts its completion
+          # message from an origin that never equals
+          # `new URL(OR_CONNECT_BASE).origin` in src/lib/or/widget.ts.
+          # That compare is strict and drops the message with no error.
+          #
+          # Prod must be set explicitly and must NOT be left empty. An
+          # empty string is not nullish, so the `??` fallback in
+          # widget.ts does not fire: the base becomes "" and
+          # `new URL("")` throws. Verified by building both shapes and
+          # reading the emitted bundle.
+          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'prod' && 'https://connect.orangerails.com/connect' || 'https://dev.orangerails.com/connect' }}
+          # Per-environment Orange Rails platform slug, baked in at build
+          # time. OR is a separate deployment per environment, so the two
+          # environments authenticate as two different platform rows and
+          # the slug has to follow.
+          #
+          # It MUST name the same platform this environment's
+          # OR_PLATFORM_API_KEY authenticates as. The widget token is
+          # minted through ow-or-proxy, which sends the key, so OR records
+          # the session under the KEY's platform; the browser then claims
+          # that session by this SLUG with no key. Name two different
+          # platforms and the claim never matches its own session row, and
+          # the flow dies at discovery with a 401 that blames the widget
+          # token instead.
+          #
+          # BOTH arms are explicit on purpose. An empty arm is not unset:
+          # widget.ts treats "" as unset and takes its `||` fallback, which
+          # would name the prod platform from a dev build.
+          VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when DSN is unset (open-source contributors building dist locally
