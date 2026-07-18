@@ -3,6 +3,13 @@ project_id = "bogmoovbjpvcvdqrmjgt"
 # ============================================================
 # Edge function per-function settings
 # ============================================================
+#
+# Any function NOT listed here gets verify_jwt = true by default, and
+# the gateway will 401 the request before the function body runs. Every
+# function that authenticates its caller by some means other than a
+# Supabase user JWT (a cron secret, an HMAC signature) must therefore
+# declare verify_jwt = false explicitly, with a comment saying what the
+# real authentication is.
 
 # sweep-expired-household-roles is called by an external cron job
 # every minute with a shared `x-cron-secret` header. It is NOT called
@@ -10,4 +17,13 @@ project_id = "bogmoovbjpvcvdqrmjgt"
 # the function itself checks the cron secret. Without this override,
 # the gateway 401s before the function runs.
 [functions.sweep-expired-household-roles]
+verify_jwt = false
+
+# or-webhook-receiver is called server-to-server by OrangeRails, which
+# cannot mint a Supabase user JWT. Authentication is the HMAC signature
+# on the request body (X-OR-Signature-V2, timestamped and replay-bounded),
+# verified constant-time against the shared OR_WEBHOOK_SECRET before any
+# work is done; an unverified request gets a 401 from the function
+# itself. Without this override the gateway rejects every delivery.
+[functions.or-webhook-receiver]
 verify_jwt = false
