@@ -1,12 +1,22 @@
 /**
  * Shared Orange Rails gateway resolution.
  *
- * OR_SUPABASE_URL decides which host receives X-Platform-API-Key. Two edge
- * functions read that same variable (ow-or-proxy and owm-or-quick-connect),
- * so the set of hosts it may name is decided here, in code, once, and shared
- * by both. If each function keeps its own copy the copies drift, and the one
- * that drifts is the one that forwards the platform key somewhere we did not
- * intend.
+ * OR_SUPABASE_URL decides which host receives X-Platform-API-Key. Every edge
+ * function that reads that variable resolves it here, so the set of hosts it
+ * may name is decided in code, once, and shared by all of them. If each
+ * function keeps its own copy the copies drift, and the one that drifts is
+ * the one that forwards the platform key somewhere we did not intend.
+ *
+ * The readers, all of which must route through this module:
+ *
+ *   ow-or-proxy
+ *   owm-or-quick-connect
+ *   owm-or-discover-quiltt
+ *
+ * Adding a reader means adding it to that list. If you are writing a fourth
+ * one, it resolves through getOrGatewayFromEnv before it builds any request
+ * carrying the platform key. There is no correct reason to read
+ * OR_SUPABASE_URL directly.
  *
  * Keep this file dependency-free (no Supabase SDK imports) so it type-checks
  * under Node-based vitest as well as the Deno edge runtime. Same rule as
@@ -30,14 +40,14 @@ declare const Deno: { env: { get(key: string): string | undefined } } | undefine
  *
  * Adding a host is a reviewed code change, never an env-var edit. That is the
  * whole point: an operator who can write the secret store still cannot point
- * either function at a host this list does not name.
+ * any of these functions at a host this list does not name.
  */
 export const OR_URL_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   "https://api.orangerails.com",
   "https://api.orangerails.dev",
 ]);
 
-/** Where both functions point when OR_SUPABASE_URL is unset. */
+/** Where every reader points when OR_SUPABASE_URL is unset. */
 export const OR_GATEWAY_DEFAULT = "https://api.orangerails.com";
 
 /** Client-facing text when the configured host is not allowed. */
