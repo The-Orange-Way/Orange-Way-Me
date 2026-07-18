@@ -26,8 +26,41 @@
 
 import { supabase } from "@/integrations/supabase/client";
 
+// Must be a host that serves the widget directly. The apex
+// orangerails.com/connect does not: it redirects to
+// connect.orangerails.com, so the widget posts its completion message
+// from an origin that never matches `expectedOrigin` below, and the
+// strict compare drops it with no error. Set per environment in
+// .github/workflows/deploy.yml; this default is the local-dev value.
+//
+// `||` and not `??` on purpose. A workflow that sets this var to an
+// empty string produces `""` here, which is not nullish, so `??` would
+// keep it and `new URL("")` would throw. Treat empty as unset.
 const OR_CONNECT_BASE =
-  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ?? "https://orangerails.com/connect";
+  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ||
+  "https://connect.orangerails.com/connect";
+
+// The platform slug OR resolves this app by. It MUST name the same
+// platform row that this environment's OR_PLATFORM_API_KEY
+// authenticates as.
+//
+// Why they can drift: mintWidgetToken() below goes through
+// ow-or-proxy, which sends the API key, so OR records the pending
+// session under the platform the KEY maps to. The browser then claims
+// that session by sending this slug and no key, and OR filters the
+// lookup by the platform the SLUG maps to. Name two different
+// platforms and the claim never matches its own session row. The
+// failure surfaces as a 401 "Invalid widget token", which reads like
+// an expired or replayed token and is neither.
+//
+// OR is a separate deployment per environment, so this differs per
+// environment. Set it in .github/workflows/deploy.yml with both arms
+// explicit: an empty arm is not unset, it takes the fallback below and
+// quietly names the wrong platform again.
+//
+// `||` and not `??`, same reasoning as OR_CONNECT_BASE above.
+const OR_PLATFORM_SLUG =
+  (import.meta.env.VITE_OR_PLATFORM_SLUG as string | undefined) || "orangeway-me";
 
 /** Source wallets returned by the widget after the user picks them. */
 export interface OrLinkSourceWallet {
@@ -56,7 +89,7 @@ export async function openOrConnect(args: {
 }): Promise<OrLinkSuccess> {
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
-    platform: "orangeway",
+    platform: OR_PLATFORM_SLUG,
     appUserId: args.orgId,
     provider: args.provider,
     returnTo: window.location.origin,
