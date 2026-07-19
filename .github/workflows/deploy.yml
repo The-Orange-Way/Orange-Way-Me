@@ -12,6 +12,13 @@ concurrency:
   # one, which is a silent stale-content failure. Cancellation is safe because
   # both pushes share the same branch -- the surviving run's commit is always a
   # superset of the cancelled one's content. Do not flip this to false.
+  #
+  # That safety depends on this job publishing ONE atomic artifact: a Pages
+  # deploy replaces the whole site in a single step. A pipeline that also ships
+  # Supabase edge functions has the opposite answer, because those apply per
+  # function and incrementally, so cancelling mid run can leave some functions
+  # updated and others not. If you find a deploy workflow set to false, check
+  # what it ships before assuming one of the two is wrong.
   cancel-in-progress: true
 
 jobs:
