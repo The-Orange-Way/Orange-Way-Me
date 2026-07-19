@@ -10,6 +10,12 @@
  * update this file makes the new screen silent rather than tracked.
  */
 
+// PRIVACY DECISION, NOT ROUTING CONFIG. This set is the code-side encoding
+// of the privacy policy's claim that analytics runs on the public marketing
+// site only. Adding a path here widens what we collect from real users, so
+// a change to this list needs a privacy review, not just a code review.
+// Matching is exact after trailing-slash normalisation, deliberately not a
+// prefix match: "/security" is marketing, "/settings/security" is not.
 const MARKETING_PATHS = new Set([
   "/",
   "/about",
