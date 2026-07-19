@@ -17,8 +17,11 @@ concurrency:
   # deploy replaces the whole site in a single step. A pipeline that also ships
   # Supabase edge functions has the opposite answer, because those apply per
   # function and incrementally, so cancelling mid run can leave some functions
-  # updated and others not. If you find a deploy workflow set to false, check
-  # what it ships before assuming one of the two is wrong.
+  # updated and others not. If you find a sibling deploy workflow set to false,
+  # it is almost certainly one that ships edge functions incrementally, where a
+  # cancelled mid run leaves a partial deploy: that is a real reason, not drift,
+  # and the two settings must NOT be harmonised. Check what a workflow ships
+  # before assuming either is wrong.
   cancel-in-progress: true
 
 jobs:
