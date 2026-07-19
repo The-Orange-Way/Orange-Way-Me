@@ -116,10 +116,19 @@ function RootComponent() {
       });
       posthog.register({ app: "orangeway", brand: "orange-way" });
       analyticsStarted.current = true;
-    } else if (posthog.has_opted_out_capturing()) {
-      // Back on marketing after a trip into the app. captureEventName false
-      // suppresses the default $opt_in event, which would otherwise report
-      // the app-to-marketing transition we just declined to record.
+    }
+
+    // Opt-out state is persisted by posthog to localStorage under its own
+    // key, independent of persistence: "memory". So a user who signed in
+    // during an earlier visit loads a later marketing page already opted
+    // out, and every capture below would be a silent no-op. This runs
+    // after init rather than as an else branch so it covers both the fresh
+    // load and the in-session return from the app. captureEventName false
+    // suppresses the default $opt_in event, which would otherwise report
+    // the transition we just declined to record. The route gate above has
+    // already established this is a marketing path, so opting back in
+    // cannot widen what we collect.
+    if (posthog.has_opted_out_capturing()) {
       posthog.opt_in_capturing({ captureEventName: false });
     }
 
