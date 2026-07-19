@@ -7,6 +7,11 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
+  # true is intentional for Cloudflare Pages. Two concurrent Wrangler uploads
+  # can finish out of order: an older build can land on the edge after a newer
+  # one, which is a silent stale-content failure. Cancellation is safe because
+  # both pushes share the same branch -- the surviving run's commit is always a
+  # superset of the cancelled one's content. Do not flip this to false.
   cancel-in-progress: true
 
 jobs:
