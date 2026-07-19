@@ -71,6 +71,10 @@ export interface OrImportResult {
   /** Rows that hit a non-fatal error during encryption or insert.
    *  Always logged via the supplied logger; never thrown. */
   errored: number;
+  /** Subset of `errored` where the failure originated inside buildRow
+   *  (almost always an encryptText throw). Isolates crypto failures
+   *  from insert-level errors so the log can pinpoint the root cause. */
+  decryptFailures: number;
   /** Total number of OR transactions the caller handed us. */
   total: number;
   /** The unique source-wallet ids whose rows ended up in `unmapped`.
@@ -283,6 +287,7 @@ export async function importOrTransactions(
     unmapped: 0,
     untagged: 0,
     errored: 0,
+    decryptFailures: 0,
     total: txs.length,
     unmappedWalletIds: [],
     netByAccount: {},
@@ -337,16 +342,35 @@ export async function importOrTransactions(
           amountByKey.set(amountKey(accountId, tx.id), Number(buildSignedAmount(tx)) || 0);
         } else {
           result.errored += 1;
-          deps.onError?.(tx.id, new Error("Invalid timestamp on OR transaction"));
+          // warn carries no values: warn/error breadcrumbs are kept by
+          // beforeBreadcrumb and flushed to the error tracker. Values
+          // (tx id, timestamp) go to console.log which is dropped before
+          // the breadcrumb buffer and never leaves the browser.
+          console.warn("[orImportBridge] null row (bad date) for 1 tx");
+          console.log("[orImportBridge] null row detail", { id: tx.id, timestamp: tx.timestamp });
+          deps.onError?.(tx.id, new Error(`Invalid date on OR transaction: "${tx.timestamp}"`));
         }
       } catch (err) {
         result.errored += 1;
+        result.decryptFailures += 1;
+        // Same split: valueless error at warn/error level, full object at log level.
+        console.error("[orImportBridge] buildRow threw for 1 tx");
+        console.log("[orImportBridge] buildRow threw detail", err);
         deps.onError?.(tx.id, err);
       }
     }
   }
 
-  if (rows.length === 0) return result;
+  if (rows.length === 0) {
+    console.log("[orImportBridge] run summary (0 rows built)", {
+      total: result.total,
+      unmapped: result.unmapped,
+      untagged: result.untagged,
+      errored: result.errored,
+      decryptFailures: result.decryptFailures,
+    });
+    return result;
+  }
 
   const CHUNK = 100;
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -367,6 +391,11 @@ export async function importOrTransactions(
       // A whole-chunk failure is non-fatal — tally each row as
       // errored, log once, and continue with the next chunk so a
       // single bad chunk doesn't lose every row.
+      // Supabase error objects can carry partial row data in their
+      // message/details fields, so keep the valueless signal at
+      // error level and the object itself at log level.
+      console.error("[orImportBridge] upsert chunk failed");
+      console.log("[orImportBridge] upsert chunk failed detail", error);
       for (const r of chunk) {
         const tid = (r as { external_id?: string }).external_id ?? "(unknown)";
         deps.onError?.(tid, error);
@@ -395,6 +424,14 @@ export async function importOrTransactions(
     }
   }
 
+  console.log("[orImportBridge] run summary", {
+    total: result.total,
+    imported: result.imported,
+    unmapped: result.unmapped,
+    untagged: result.untagged,
+    errored: result.errored,
+    decryptFailures: result.decryptFailures,
+  });
   return result;
 }
 
@@ -423,7 +460,9 @@ export async function fetchImportedExternalIds(
     // Treat a lookup failure as "nothing imported" — the badge
     // simply won't appear. Surfacing a spinner for badges would
     // be more disruptive than the silent omission.
-    console.warn("[orImportBridge] fetchImportedExternalIds failed", error);
+    // Supabase error object at log level only (see warn/error breadcrumb note above).
+    console.warn("[orImportBridge] fetchImportedExternalIds failed");
+    console.log("[orImportBridge] fetchImportedExternalIds failed detail", error);
     return new Set();
   }
   const set = new Set<string>();
