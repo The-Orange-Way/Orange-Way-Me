@@ -342,15 +342,17 @@ export async function importOrTransactions(
           amountByKey.set(amountKey(accountId, tx.id), Number(buildSignedAmount(tx)) || 0);
         } else {
           result.errored += 1;
-          console.warn(
-            `[orImportBridge] null row: tx ${tx.id} bad date "${tx.timestamp}"`,
-          );
+          // Fact only at warn level — tx id/timestamp stay out of the breadcrumb buffer.
+          console.warn(`[orImportBridge] null row (bad date) for 1 tx`);
+          console.log(`[orImportBridge] null row detail`, { id: tx.id, timestamp: tx.timestamp });
           deps.onError?.(tx.id, new Error(`Invalid date on OR transaction: "${tx.timestamp}"`));
         }
       } catch (err) {
         result.errored += 1;
         result.decryptFailures += 1;
-        console.error(`[orImportBridge] buildRow threw: tx ${tx.id}:`, err);
+        // Fact only at error level — tx id and exception stay out of the breadcrumb buffer.
+        console.error(`[orImportBridge] buildRow threw`);
+        console.log(`[orImportBridge] buildRow threw detail: tx`, tx.id, err);
         deps.onError?.(tx.id, err);
       }
     }
