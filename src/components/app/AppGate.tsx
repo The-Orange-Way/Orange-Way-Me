@@ -10,7 +10,13 @@ import { AppShell } from "./AppShell";
 function LoadingScreen({ slow }: { slow: boolean }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background px-4 text-center">
-      <img src="/icon-192.png" alt="Orange Way" className="h-12 w-12 rounded-2xl" />
+      <img
+        src="/icon-192.png"
+        alt=""
+        width={48}
+        height={48}
+        className="h-12 w-12 rounded-2xl"
+      />
       <div className="space-y-1.5">
         <p className="text-sm font-medium text-foreground">Opening Orange Way…</p>
         <p className="text-xs text-muted-foreground">
