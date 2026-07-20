@@ -1,7 +1,7 @@
 name: Post-merge identity + leak scan
 
-# Scans every commit that just landed on a protected branch for private-
-# host strings in:
+# Scans every commit that just landed on a protected branch for
+# reserved-term strings in:
 #   - commit message body (Co-authored-by trailers, body text)
 #   - author name + email
 #   - committer name + email
@@ -9,15 +9,14 @@ name: Post-merge identity + leak scan
 # This catches the class of leak the pre-push gate cannot see: GitHub
 # auto-adds Co-authored-by trailers to squash / rebase merge commits at
 # merge time, and the trailer email comes from each contributor's local
-# git config. If a contributor's user.email contains a Tailscale tail-net
-# hostname or any other internal-only string, the merge commit silently
-# carries that string into public history.
+# git config. If a contributor's user.email contains an internal-only
+# string, the merge commit silently carries that string into public
+# history.
 #
-# We learned this the hard way on 2026-06-19, when ~91 commits had to be
-# rewritten because a local git config carried `.ts.net` in user.email.
 # The pre-push gate at scripts/pre-push-gate.sh blocks the same class of
 # leak at push time on the contributor's laptop, but only if the gate is
-# installed. This workflow is the server-side belt to that suspenders.
+# installed. This workflow is the server-side belt to that suspenders,
+# so it must never report a green it did not earn.
 
 on:
   push:
@@ -57,18 +56,38 @@ jobs:
           # secret; scripts/pre-push-gate.sh and pre-publish-scan.sh source
           # the same list locally (env var or gitignored .reserved-terms),
           # so local and server-side enforcement cannot drift.
-          PATTERN: ${{ secrets.OW_RESERVED_TERMS }}
+          RAW_PATTERN: ${{ secrets.OW_RESERVED_TERMS }}
           RANGE: ${{ steps.range.outputs.range }}
         run: |
-          set -euo pipefail
-          if [ -z "$PATTERN" ]; then
+          set -uo pipefail
+          if [ -z "$RAW_PATTERN" ]; then
             echo "::error::OW_RESERVED_TERMS repository secret is not set; the identity scan cannot run."
             exit 1
           fi
+
+          # Canonicalize exactly as scripts/pre-publish-scan.sh does: drop
+          # blank lines and #-comment lines, join the rest into one regex
+          # alternation. Without this a comment line in the secret would be
+          # compiled into the regex as a live fragment, and a blank line
+          # would become an empty alternative that matches every input.
+          # A single-line "a|b|c" secret passes through unchanged.
+          PATTERN="$(printf '%s\n' "$RAW_PATTERN" \
+            | grep -vE '^[[:space:]]*(#|$)' \
+            | paste -sd'|' - \
+            | sed -e 's/^|*//' -e 's/|*$//')"
+
+          if [ -z "$PATTERN" ]; then
+            echo "::error::OW_RESERVED_TERMS is set but contains no usable terms after dropping comments and blank lines."
+            exit 1
+          fi
+          # Count only. The terms themselves are never printed to a public log.
+          TERM_COUNT=$(printf '%s' "$PATTERN" | tr '|' '\n' | grep -c .)
+          echo "Reserved-term list loaded: $TERM_COUNT term(s)."
+
           echo "Scanning range: $RANGE"
           MATCHES=0
           while IFS= read -r line; do
-            if echo "$line" | grep -nEi "$PATTERN" >/dev/null; then
+            if printf '%s' "$line" | grep -qEi "$PATTERN"; then
               echo "::error::Reserved-term pattern found in just-pushed commit metadata (redacted; see OW_RESERVED_TERMS)."
               MATCHES=$((MATCHES + 1))
             fi
@@ -85,8 +104,11 @@ jobs:
           OW_RESERVED_TERMS: ${{ secrets.OW_RESERVED_TERMS }}
         run: |
           set -euo pipefail
-          if [ -x scripts/pre-publish-scan.sh ]; then
-            bash scripts/pre-publish-scan.sh
-          else
-            echo "scripts/pre-publish-scan.sh missing; skipping tree scan."
+          # Fail closed: an unrunnable scanner is a broken guard, not a
+          # clean tree. If this step cannot execute the scanner it must go
+          # red, never report a green it did not earn.
+          if [ ! -x scripts/pre-publish-scan.sh ]; then
+            echo "::error::scripts/pre-publish-scan.sh is missing or not executable; the tree scan cannot run."
+            exit 1
           fi
+          bash scripts/pre-publish-scan.sh
