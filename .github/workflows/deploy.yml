@@ -59,7 +59,13 @@ jobs:
           # the DSN MUST be passed here (Cloudflare Pages env vars wouldn't
           # take effect on a Wrangler-uploaded build). The wrapper at
           # src/lib/observability/sentry.ts is a no-op when DSN is unset.
-          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          #
+          # Per-env DSN so dev and prod errors land in separate projects and
+          # alert rules can fire on prod only. Same branch-derived shape as
+          # VITE_TURNSTILE_SITE_KEY below. Until VITE_SENTRY_DSN_DEV is set
+          # the dev arm is empty and the wrapper no-ops, which matches the
+          # behaviour dev has today.
+          VITE_SENTRY_DSN: ${{ github.ref_name == 'prod' && vars.VITE_SENTRY_DSN_PROD || vars.VITE_SENTRY_DSN_DEV }}
           # Tags the env in Sentry so dev/prod errors don't pile up together.
           # import.meta.env.MODE/DEV is "production"/false during `vite build`
           # of either branch, so we derive it from the workflow ref instead.
@@ -124,12 +130,14 @@ jobs:
           VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
 
       - name: Upload source maps to GlitchTip
-        # Skip when DSN is unset (open-source contributors building dist locally
-        # don't need to upload anywhere). The run block below also skips when
-        # the auth token isn't configured -- checking secrets.* in an `if:`
-        # expression is what made the whole workflow fail validation in 0s on
-        # previous attempts, so we keep the gate purely on vars.* here.
-        if: ${{ vars.VITE_SENTRY_DSN != '' }}
+        # Skip when the DSN for THIS branch is unset (open-source contributors
+        # building dist locally don't need to upload anywhere, and a dev build
+        # before VITE_SENTRY_DSN_DEV exists has nowhere to send maps). The run
+        # block below also skips when the auth token isn't configured --
+        # checking secrets.* in an `if:` expression is what made the whole
+        # workflow fail validation in 0s on previous attempts, so we keep the
+        # gate purely on vars.* here.
+        if: ${{ (github.ref_name == 'prod' && vars.VITE_SENTRY_DSN_PROD != '') || (github.ref_name != 'prod' && vars.VITE_SENTRY_DSN_DEV != '') }}
         env:
           # GlitchTip is Sentry-protocol-compatible; sentry-cli talks to it
           # natively when SENTRY_URL points at the self-hosted instance.
