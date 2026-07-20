@@ -80,9 +80,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
+          {/* Keeps a real alt: the text label beside it disappears when the
+              sidebar collapses, so this image is then the only brand name
+              a screen reader has left to read. */}
           <img
             src="/icon-192.png"
             alt="Orange Way"
+            width={32}
+            height={32}
             className="h-8 w-8 shrink-0 rounded-lg"
           />
           {!collapsed && <span className="text-sm font-semibold tracking-tight">Orange Way</span>}
@@ -132,9 +137,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center gap-2 px-3">
+              {/* Decorative: the visible label next to it already says the
+                  name, and it never hides in the drawer. */}
               <img
                 src="/icon-192.png"
-                alt="Orange Way"
+                alt=""
+                width={32}
+                height={32}
                 className="h-8 w-8 rounded-lg"
               />
               <span className="text-sm font-semibold">Orange Way</span>
