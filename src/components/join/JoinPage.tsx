@@ -29,7 +29,8 @@ import type { TurnstileInstance } from "@marsidev/react-turnstile";
  * it survives the email-confirmation link opening in a new tab. The SIGNED_IN
  * handler in AuthContext reads the key and calls redeem_invite_code as the
  * authenticated user. This ensures the RPC always fires in an authenticated
- * context, which is required once PR #127 revokes the anon EXECUTE grant.
+ * context, which is required once the anon EXECUTE grant on redeem_invite_code
+ * is revoked.
  */
 type Phase = "checking" | "invalid" | "form" | "done";
 
