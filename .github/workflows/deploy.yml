@@ -9,6 +9,13 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for the automatic GITHUB_TOKEN. The deploy authenticates to
+# Cloudflare and GlitchTip with their own tokens from secrets, and writes no
+# GitHub state of its own, so read access to the checkout is the whole
+# requirement. Matches the sibling Books repo's deploy workflow.
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     name: Build and deploy
