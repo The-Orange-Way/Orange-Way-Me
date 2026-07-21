@@ -24,6 +24,12 @@ import type { TurnstileInstance } from "@marsidev/react-turnstile";
  * allowlisted email OR a valid code at user creation. Until it lands, the two
  * client RPCs here are the pre-check and a best-effort redemption, the same
  * posture the allowlist path already runs.
+ *
+ * Redemption sequence: the code is written to localStorage before signUp() so
+ * it survives the email-confirmation link opening in a new tab. The SIGNED_IN
+ * handler in AuthContext reads the key and calls redeem_invite_code as the
+ * authenticated user. This ensures the RPC always fires in an authenticated
+ * context, which is required once PR #127 revokes the anon EXECUTE grant.
  */
 type Phase = "checking" | "invalid" | "form" | "done";
 
@@ -63,21 +69,30 @@ export function JoinPage({ code }: { code: string }) {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
+
+    // Stash the code before signUp() so it survives the email-confirmation
+    // link opening in a new tab. AuthContext's SIGNED_IN handler picks it up
+    // and calls redeem_invite_code once a real session exists.
+    try {
+      localStorage.setItem("ow_pending_invite_code", code);
+    } catch {
+      /* localStorage blocked: redemption falls back to auth hook enforcement */
+    }
+
     const { error, isNew } = await signUp(email, password, captchaToken);
     if (error) {
+      // Clear the stashed code so a retry starts clean.
+      try {
+        localStorage.removeItem("ow_pending_invite_code");
+      } catch {
+        /* non-fatal */
+      }
       setBusy(false);
       toastError(error);
       resetCaptcha();
       return;
     }
-    // Consume one use of the code after the account is created. The redeem RPC
-    // is atomic (single UPDATE ... WHERE uses < max_uses), so concurrent
-    // redemptions cannot exceed the cap. A best-effort failure here (for
-    // example the code was exhausted in a race after this page loaded) does
-    // not undo the account; the auth hook is the authoritative enforcement.
-    // @ts-expect-error supabase types are generated against the deployed schema; this PR's
-    // migration adds the RPC and types regenerate on the next `supabase gen types` pass.
-    await supabase.rpc("redeem_invite_code", { p_code: code });
+
     setBusy(false);
     setPhase("done");
     if (isNew) {
