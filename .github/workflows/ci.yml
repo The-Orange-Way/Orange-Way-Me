@@ -10,6 +10,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for the automatic GITHUB_TOKEN. This job only reads the
+# checkout: it opens no PR, writes no status, publishes no package. Stating
+# the minimum here means a compromised step or transitive dependency cannot
+# borrow write scope the repository default might otherwise grant.
+permissions:
+  contents: read
+
 jobs:
   lint-and-build:
     name: Lint + build
