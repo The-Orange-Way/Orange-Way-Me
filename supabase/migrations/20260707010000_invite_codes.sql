@@ -15,3 +15,5 @@
 -- Current source of truth for the invite code surface:
 --   20260709120000_invite_codes.sql                          (table + functions)
 --   20260720000000_restrict_redeem_invite_code_to_authenticated.sql  (grant)
+--
+-- End of file. Nothing below this line, deliberately.
