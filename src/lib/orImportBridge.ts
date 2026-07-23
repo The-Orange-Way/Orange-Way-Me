@@ -58,6 +58,18 @@ export interface OrImportTransaction {
   source_wallet_id: string | null;
 }
 
+/**
+ * One account whose opening date was moved back so older imported
+ * transactions could land. Both dates are plain YYYY-MM-DD.
+ */
+export interface OpenedAtRepair {
+  accountId: string;
+  /** The opening date the account carried before the import. */
+  from: string;
+  /** The opening date it was moved back to. */
+  to: string;
+}
+
 /** Plain-language outcome summary for the post-sync toast. */
 export interface OrImportResult {
   /** Number of rows whose insert succeeded (or were skipped because
@@ -90,6 +102,21 @@ export interface OrImportResult {
    * re-syncs. Zero entries are omitted.
    */
   netByAccount: Record<string, number>;
+  /**
+   * Accounts whose opening date this run moved back so the batch could
+   * land. Empty on a normal incremental sync; non-empty on the first
+   * import of a wallet that has real history. Surfaced so the UI can
+   * tell the user their opening date changed rather than changing it
+   * behind their back.
+   */
+  openedAtRepairs: OpenedAtRepair[];
+  /**
+   * Subset of `errored` where the database rejected the chunk because
+   * the rows predate their account's opening date. Counted separately
+   * so the caller can name the cause instead of showing a generic
+   * "import failed".
+   */
+  blockedByOpeningDate: number;
 }
 
 /**
@@ -133,6 +160,13 @@ export interface OrImportDeps {
 }
 
 const EXTERNAL_SOURCE = "orangerails";
+
+/**
+ * The invariant in migration 20260530000000 raises with this phrase.
+ * Matching on it lets us name the real cause in the result instead of
+ * folding it into the generic error tally.
+ */
+const OPENED_AT_REJECTION = /before account opened_at/i;
 
 /**
  * Convert a single OR transaction's amount to the signed string
@@ -209,6 +243,88 @@ function isoToDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Take the YYYY-MM-DD head of a timestamp column. Returns null when the
+ * value is not a date we recognise, so a surprise shape can never be
+ * compared as if it were a date.
+ */
+function toDateOnly(value: unknown): string | null {
+  if (typeof value !== "string" || value.length < 10) return null;
+  const head = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : null;
+}
+
+/**
+ * Shift a YYYY-MM-DD date back one day. Returns the input unchanged when
+ * it does not parse, so a bad value can never widen an opening date to
+ * something arbitrary. The one-day margin matches the demo-seed helper
+ * and keeps the comparison safe when the column's timezone renders the
+ * boundary day differently from the transaction date.
+ */
+function dateMinusOneDay(date: string): string {
+  const t = Date.parse(`${date}T00:00:00Z`);
+  if (Number.isNaN(t)) return date;
+  return new Date(t - 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Move each account's opening date back when the batch we are about to
+ * write contains something older than it.
+ *
+ * Why this exists: `accounts.opened_at` is stamped `now()` the moment the
+ * row is created, and migration 20260530000000 rejects any transaction
+ * dated before it. Imported history is nearly always older than the
+ * account row, so without this a first sync of a real wallet has every
+ * row rejected.
+ *
+ * Widening backwards is always safe. The invariant only rejects
+ * transactions that predate the opening date, so an earlier date cannot
+ * invalidate a row that already exists, and the parallel trigger in the
+ * same migration only guards moving an opening date forward.
+ *
+ * Exported so the connections UI can offer the same repair as an explicit
+ * action on an account that is already stuck.
+ */
+export async function widenAccountOpeningDates(
+  earliestByAccount: Map<string, string>,
+  deps: Pick<OrImportDeps, "supabase" | "buildSignatureFields">,
+): Promise<{ repaired: OpenedAtRepair[]; failed: string[] }> {
+  const repaired: OpenedAtRepair[] = [];
+  const failed: string[] = [];
+  const accountIds = Array.from(earliestByAccount.keys());
+  if (accountIds.length === 0) return { repaired, failed };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const accountsTable = () => (deps.supabase as any).from("accounts");
+  const { data, error } = await accountsTable().select("id, opened_at").in("id", accountIds);
+  if (error) throw error;
+
+  for (const row of (data ?? []) as Array<{ id: string; opened_at: string | null }>) {
+    const earliest = earliestByAccount.get(row.id);
+    const current = toDateOnly(row.opened_at);
+    // Nothing to do when the account already opens early enough, or when
+    // the column holds something we cannot read as a date.
+    if (!earliest || !current || earliest >= current) continue;
+
+    const target = dateMinusOneDay(earliest);
+    const patch = {
+      opened_at: target,
+      ...(deps.buildSignatureFields?.() ?? {}),
+    };
+    const { error: upErr } = await accountsTable().update(patch).eq("id", row.id);
+    if (upErr) {
+      failed.push(row.id);
+      // Valueless signal at error level, the object at log level, matching
+      // the breadcrumb split used everywhere else in this module.
+      console.error("[orImportBridge] could not widen an account opening date");
+      console.log("[orImportBridge] widen opening date detail", upErr);
+      continue;
+    }
+    repaired.push({ accountId: row.id, from: current, to: target });
+  }
+  return { repaired, failed };
 }
 
 /**
@@ -291,6 +407,8 @@ export async function importOrTransactions(
     total: txs.length,
     unmappedWalletIds: [],
     netByAccount: {},
+    openedAtRepairs: [],
+    blockedByOpeningDate: 0,
   };
 
   // Track plaintext signed amount keyed by "accountId::externalId" so we can
@@ -372,6 +490,32 @@ export async function importOrTransactions(
     return result;
   }
 
+  // Make room for the batch before writing it. Every destination account
+  // whose opening date is later than its oldest row in this batch gets
+  // moved back, otherwise the invariant rejects the whole chunk.
+  const earliestByAccount = new Map<string, string>();
+  for (const row of rows) {
+    const accountId = row.account_id as string;
+    const date = row.date as string;
+    if (!accountId || !date) continue;
+    const current = earliestByAccount.get(accountId);
+    if (current === undefined || date < current) earliestByAccount.set(accountId, date);
+  }
+  try {
+    const { repaired } = await widenAccountOpeningDates(earliestByAccount, deps);
+    result.openedAtRepairs = repaired;
+    if (repaired.length > 0) {
+      console.warn("[orImportBridge] widened opening dates so older rows could land");
+      console.log("[orImportBridge] widened opening dates detail", repaired);
+    }
+  } catch (err) {
+    // Non-fatal by design: if we cannot read or write the opening dates we
+    // still attempt the import, so this degrades to the previous behaviour
+    // instead of blocking a sync that might have nothing old in it.
+    console.error("[orImportBridge] opening-date reconcile skipped");
+    console.log("[orImportBridge] opening-date reconcile detail", err);
+  }
+
   const CHUNK = 100;
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK);
@@ -394,7 +538,15 @@ export async function importOrTransactions(
       // Supabase error objects can carry partial row data in their
       // message/details fields, so keep the valueless signal at
       // error level and the object itself at log level.
-      console.error("[orImportBridge] upsert chunk failed");
+      const message = String((error as { message?: unknown }).message ?? "");
+      if (OPENED_AT_REJECTION.test(message)) {
+        // Named separately so the caller can say "these are older than the
+        // account's opening date" rather than "import failed".
+        result.blockedByOpeningDate += chunk.length;
+        console.error("[orImportBridge] chunk rejected: rows predate the account opening date");
+      } else {
+        console.error("[orImportBridge] upsert chunk failed");
+      }
       console.log("[orImportBridge] upsert chunk failed detail", error);
       for (const r of chunk) {
         const tid = (r as { external_id?: string }).external_id ?? "(unknown)";
@@ -431,6 +583,8 @@ export async function importOrTransactions(
     untagged: result.untagged,
     errored: result.errored,
     decryptFailures: result.decryptFailures,
+    openedAtRepairs: result.openedAtRepairs.length,
+    blockedByOpeningDate: result.blockedByOpeningDate,
   });
   return result;
 }
