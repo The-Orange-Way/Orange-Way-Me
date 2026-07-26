@@ -1,3 +1,5 @@
+const __ratchetProof: number = 'this is a string, not a number';
+void __ratchetProof;
 /**
  * ow-or-proxy: the Orange Way to OrangeRails proxy.
  *
