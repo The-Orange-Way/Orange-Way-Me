@@ -682,7 +682,9 @@ export function ConnectionsPage() {
     ],
   );
 
-  async function importSyncedTransactionsForConnection(conn: ConnectionRow): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
+  async function importSyncedTransactionsForConnection(
+    conn: ConnectionRow,
+  ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
     const listRes = (await callProxy("or-transactions-list", {
       subaccount_id: subaccountId,
