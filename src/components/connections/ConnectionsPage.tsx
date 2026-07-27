@@ -689,7 +689,7 @@ export function ConnectionsPage() {
       limit: 500,
     })) as { transactions: EncryptedTxRow[] };
     const forThisConn = (listRes.transactions ?? []).filter((t) => t.connection_id === conn.id);
-    if (forThisConn.length === 0) return;
+    if (forThisConn.length === 0) return { unmapped: 0, unmappedWalletIds: [] };
 
     const decoded: OrImportTransaction[] = [];
     let decryptFailures = 0;
