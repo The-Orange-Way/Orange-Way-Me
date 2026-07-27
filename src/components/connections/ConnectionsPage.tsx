@@ -514,7 +514,10 @@ export function ConnectionsPage() {
 
       if (user && res.synced > 0) {
         try {
-          await importSyncedTransactionsForConnection(conn);
+          const importResult = await importSyncedTransactionsForConnection(conn);
+          if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
+            handleEditMapping(conn);
+          }
         } catch (importErr) {
           console.error("[Connections] OR import bridge failed", importErr);
           toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
@@ -679,8 +682,8 @@ export function ConnectionsPage() {
     ],
   );
 
-  async function importSyncedTransactionsForConnection(conn: ConnectionRow): Promise<void> {
-    if (!user || !subaccountId) return;
+  async function importSyncedTransactionsForConnection(conn: ConnectionRow): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
+    if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
     const listRes = (await callProxy("or-transactions-list", {
       subaccount_id: subaccountId,
       limit: 500,
@@ -730,7 +733,7 @@ export function ConnectionsPage() {
 
     const skipped = result.unmapped + result.untagged + decryptFailures;
     if (result.imported === 0 && skipped === 0 && result.errored === 0) {
-      return;
+      return { unmapped: 0, unmappedWalletIds: [] };
     }
     const parts: string[] = [];
     if (result.imported > 0) parts.push(`${result.imported} imported`);
@@ -749,12 +752,11 @@ export function ConnectionsPage() {
     if (result.errored > 0 || decryptFailures > 0) {
       toast.warning(`Wallet ledger: ${summary}.`);
     } else if (result.unmapped > 0 || result.untagged > 0) {
-      toast.info(
-        `Wallet ledger: ${summary}.${result.unmapped > 0 ? " Click 'Edit mapping' to map the missing wallets." : ""}`,
-      );
+      toast.info(`Wallet ledger: ${summary}.`);
     } else {
       toast.success(`Wallet ledger: ${summary}.`);
     }
+    return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
   }
 
   function handleDelete(conn: ConnectionRow) {
