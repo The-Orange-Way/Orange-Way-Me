@@ -86,21 +86,20 @@ jobs:
 
           echo "Scanning range: $RANGE"
           MATCHES=0
+          # GitHub auto-injects a "Co-authored-by: <name> <noreply@anthropic.com>"
+          # trailer on squash/rebase merge commits. That address is Anthropic's
+          # public GitHub integration email and the trailer carries no
+          # internal-only identifier, yet a publicly known model name can contain
+          # a reserved-term substring and trip the scan. Drop ONLY that trailer
+          # line before matching; author, committer, and the rest of the body
+          # stay fully in scope so no other line gets a free pass.
           while IFS= read -r line; do
-            # Skip the fleet's Claude co-author trailer. noreply@anthropic.com is
-            # Anthropic's public GitHub integration email and the model name is a
-            # public Anthropic identifier, so this line carries no Orange Way
-            # internal string. GitHub injects it on squash/rebase merges from the
-            # co-author identity, so it cannot be prevented at commit time. Only
-            # this exact trailer line is skipped; every other line is still scanned.
-            if printf '%s' "$line" | grep -qiE '^[[:space:]]*Co-authored-by:[[:space:]]*Claude[^<]*<noreply@anthropic\.com>[[:space:]]*$'; then
-              continue
-            fi
             if printf '%s' "$line" | grep -qEi "$PATTERN"; then
               echo "::error::Reserved-term pattern found in just-pushed commit metadata (redacted; see OW_RESERVED_TERMS)."
               MATCHES=$((MATCHES + 1))
             fi
-          done < <(git log $RANGE --format='%H AUTHOR %an <%ae> COMMITTER %cn <%ce>%n%B%n--END--')
+          done < <(git log $RANGE --format='%H AUTHOR %an <%ae> COMMITTER %cn <%ce>%n%B%n--END--' \
+                   | grep -viE '^[[:space:]]*Co-authored-by:[[:space:]]*Claude[[:space:]]+[A-Za-z]+[[:space:]]+[0-9.]+[[:space:]]*<noreply@anthropic\.com>[[:space:]]*$')
 
           if [ "$MATCHES" -gt 0 ]; then
             echo "::error::Identity-scan failed: $MATCHES commit(s) carry reserved-term strings."
