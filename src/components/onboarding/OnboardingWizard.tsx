@@ -19,7 +19,7 @@
  * Copy rule mirrors the rest of the app: plain English, no technical
  * terms leak to the UI.
  */
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,7 +38,7 @@ const STEPS = [1, 2, 3, 4, 5, 6, 7] as const;
 export type OnboardingStep = (typeof STEPS)[number];
 const LAST_STEP: OnboardingStep = 7;
 
-const stepIcon: Record<OnboardingStep, React.ComponentType<{ className?: string }>> = {
+const stepIcon: Record<OnboardingStep, ComponentType<{ className?: string }>> = {
   1: Sparkles,
   2: Mail,
   3: ShieldCheck,
