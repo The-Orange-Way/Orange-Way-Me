@@ -149,12 +149,12 @@ export function OnboardingWizard() {
             {step === 3 && (
               <div className="space-y-3 text-muted-foreground">
                 <p>
-                  Orange Way locks your family money data with a key only you hold. Your
-                  information is scrambled on your device before it ever leaves it.
+                  Orange Way locks your family money data with a key only you hold. Your information
+                  is scrambled on your device before it ever leaves it.
                 </p>
                 <p>
-                  That means we cannot read it, and no one else can either. The next few steps
-                  set up that lock.
+                  That means we cannot read it, and no one else can either. The next few steps set
+                  up that lock.
                 </p>
               </div>
             )}
