@@ -1,63 +1,14 @@
-name: autofix (prettier)
-
-# TEMPORARY. Lives only on feat/onboarding-wizard-shell and is deleted before
-# the merge ask. It exists because eslint-plugin-prettier reports formatting as
-# errors and no agent seat can read the raw Lint log to see the exact bytes
-# prettier wants. Rather than keep guessing the wrap shape by hand, let CI run
-# the same prettier the Lint job enforces and commit its deterministic output.
+# RETIRED temporary helper from PR 149. Safe to delete at any time.
+# Kept only because agent tooling has no delete-file operation. This workflow
+# can never run: it has no automatic trigger and its only job is disabled.
+name: autofix (retired)
 
 on:
-  push:
-    branches:
-      - feat/onboarding-wizard-shell
-
-# Loop guard: skip the run created by this job's own bot commit. Combined with
-# GitHub not re-triggering workflows on default-token pushes, this cannot loop.
-permissions:
-  contents: read
-  pull-requests: write
+  workflow_dispatch: {}
 
 jobs:
-  format:
-    if: github.actor != 'github-actions[bot]'
+  noop:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: feat/onboarding-wizard-shell
-
-      # Match CI exactly: the project is Bun (bun.lockb is the source of truth).
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # bun run format == prettier --write . with the repo prettier config,
-      # the same prettier eslint-plugin-prettier runs internally in Lint.
-      - name: Prettier write
-        run: bun run format
-
-      # The workflow token cannot push to this repo, so instead of committing,
-      # publish the exact prettier output as a PR comment. Any seat can then read
-      # the bytes and apply them via the API.
-      - name: Publish prettier diff as PR comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git diff > /tmp/prettier.diff
-          if [ -s /tmp/prettier.diff ]; then
-            {
-              echo 'Prettier autofix output (temporary workflow). Apply this diff to make Lint green:'
-              echo ''
-              echo '```diff'
-              cat /tmp/prettier.diff
-              echo '```'
-            } > /tmp/comment.md
-            gh pr comment 149 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
-          else
-            echo 'No prettier changes needed.'
-          fi
+      - run: echo retired
