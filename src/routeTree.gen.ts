@@ -19,6 +19,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as PrivacyChangelogRouteImport } from './routes/privacy-changelog'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as LandingClassicRouteImport } from './routes/landing-classic'
 import { Route as JoinRouteImport } from './routes/join'
 import { Route as HouseholdsRouteImport } from './routes/households'
@@ -105,6 +106,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
 const PricingRoute = PricingRouteImport.update({
   id: '/pricing',
   path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LandingClassicRoute = LandingClassicRouteImport.update({
@@ -297,6 +303,7 @@ const ApiPublicAiManifestDotjsonRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -346,6 +353,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -395,6 +403,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -446,6 +455,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -495,6 +505,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -543,6 +554,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -593,6 +605,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OnboardingRoute: typeof OnboardingRoute
   AboutRoute: typeof AboutRoute
   AccountsRoute: typeof AccountsRouteWithChildren
   AdminRoute: typeof AdminRoute
@@ -628,6 +641,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/wallets': {
       id: '/wallets'
       path: '/wallets'
@@ -1029,6 +1049,7 @@ const WalletsRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OnboardingRoute: OnboardingRoute,
   AboutRoute: AboutRoute,
   AccountsRoute: AccountsRouteWithChildren,
   AdminRoute: AdminRoute,
