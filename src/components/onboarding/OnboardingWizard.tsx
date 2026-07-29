@@ -110,9 +110,7 @@ export function OnboardingWizard() {
             </p>
             <Progress value={percent} className="h-1.5" />
           </div>
-          <div
-            className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"
-          >
+          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Icon className="h-5 w-5" />
           </div>
           <CardTitle className="text-lg">{stepTitle[step]}</CardTitle>
@@ -162,21 +160,15 @@ export function OnboardingWizard() {
             )}
 
             {step === 4 && (
-              <PlaceholderBody
-                label="Vault password setup arrives in the next PR. This shell reserves its place in the flow."
-              />
+              <PlaceholderBody label="Vault password setup arrives in the next PR. This shell reserves its place in the flow." />
             )}
 
             {step === 5 && (
-              <PlaceholderBody
-                label="Recovery code generation arrives in a later PR. It will be mandatory before you can continue."
-              />
+              <PlaceholderBody label="Recovery code generation arrives in a later PR. It will be mandatory before you can continue." />
             )}
 
             {step === 6 && (
-              <PlaceholderBody
-                label="Quick unlock (Face ID or fingerprint) arrives in a later PR, with a graceful fallback to your vault password."
-              />
+              <PlaceholderBody label="Quick unlock (Face ID or fingerprint) arrives in a later PR, with a graceful fallback to your vault password." />
             )}
 
             {step === 7 && (
