@@ -40,14 +40,8 @@ jobs:
       - name: Prettier write
         run: bun run format
 
-      - name: Commit formatting if changed
-        run: |
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "Already prettier-clean, nothing to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "style: prettier autofix (temporary autofix workflow)"
-          git push
+      - name: Commit prettier output if changed
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: prettier autofix (temporary autofix workflow)"
+          branch: feat/onboarding-wizard-shell
