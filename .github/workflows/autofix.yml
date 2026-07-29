@@ -14,7 +14,8 @@ on:
 # Loop guard: skip the run created by this job's own bot commit. Combined with
 # GitHub not re-triggering workflows on default-token pushes, this cannot loop.
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
 
 jobs:
   format:
@@ -40,8 +41,23 @@ jobs:
       - name: Prettier write
         run: bun run format
 
-      - name: Commit prettier output if changed
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "style: prettier autofix (temporary autofix workflow)"
-          branch: feat/onboarding-wizard-shell
+      # The workflow token cannot push to this repo, so instead of committing,
+      # publish the exact prettier output as a PR comment. Any seat can then read
+      # the bytes and apply them via the API.
+      - name: Publish prettier diff as PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff > /tmp/prettier.diff
+          if [ -s /tmp/prettier.diff ]; then
+            {
+              echo 'Prettier autofix output (temporary workflow). Apply this diff to make Lint green:'
+              echo ''
+              echo '```diff'
+              cat /tmp/prettier.diff
+              echo '```'
+            } > /tmp/comment.md
+            gh pr comment 149 --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
+          else
+            echo 'No prettier changes needed.'
+          fi
