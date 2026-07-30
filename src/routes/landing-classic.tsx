@@ -594,7 +594,6 @@ function MockConnect() {
     { name: "River", tag: "Exchange" },
     { name: "Cash App", tag: "Wallet" },
     { name: "Phoenix LN", tag: "Lightning" },
-    { name: "xpub watch only", tag: "Self custody" },
   ];
   return (
     <MockChrome label="connect an account">
