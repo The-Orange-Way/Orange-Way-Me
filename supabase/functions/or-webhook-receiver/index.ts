@@ -32,7 +32,7 @@
  *   2. Upsert a row into public.connections to ensure the FK parent exists.
  *      OR's hosted widget creates connections on OR's side; we mirror
  *      (id, user_id) here so the FK on sync_events is satisfied before the
- *      child insert. Idempotent: a no-op when the row already exists.
+ *      child insert. Idempotent: a no-op when the row already exists (ignoreDuplicates below).
  *   3. Insert a row into public.sync_events. The Connections page
  *      subscribes via Supabase realtime so the UI refreshes without
  *      polling.
