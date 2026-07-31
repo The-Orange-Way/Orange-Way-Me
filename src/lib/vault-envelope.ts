@@ -136,7 +136,11 @@ async function importMekExtractable(mekBytes: Uint8Array): Promise<CryptoKey> {
 
 // ---------- slot build / unwrap ----------
 
-async function buildSlot(id: string, mekBytes: Uint8Array, password: string): Promise<EnvelopeSlot> {
+async function buildSlot(
+  id: string,
+  mekBytes: Uint8Array,
+  password: string,
+): Promise<EnvelopeSlot> {
   const salt = crypto.getRandomValues(new Uint8Array(V4_SALT_LENGTH_BYTES));
   const slotMeta: EnvelopeSlot = {
     id,
