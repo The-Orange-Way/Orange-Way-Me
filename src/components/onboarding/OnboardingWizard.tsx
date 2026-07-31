@@ -164,7 +164,18 @@ export function OnboardingWizard() {
             )}
 
             {step === 5 && (
-              <PlaceholderBody label="Recovery code generation arrives in a later PR. It will be mandatory before you can continue." />
+              <div className="space-y-4 text-muted-foreground">
+                <p>This is the only way to add another phone or tablet. We do not store a copy.</p>
+                <label className="flex items-start gap-2 text-foreground">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4"
+                    checked={recoveryConfirmed}
+                    onChange={(e) => setRecoveryConfirmed(e.target.checked)}
+                  />
+                  <span>I have written it down somewhere safe.</span>
+                </label>
+              </div>
             )}
 
             {step === 6 && (
