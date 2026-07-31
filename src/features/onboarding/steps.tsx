@@ -95,7 +95,7 @@ const VERIFY_COPY = {
  * So verification is a mode, not a step count. Flipping this constant inserts
  * or removes StepVerify and nothing else moves: no id changes, no copy
  * rewrites, no renumbering above step 4. Whichever way the call lands, it
- * costs one line, and OWB can start its twin now instead of waiting.
+ * costs one line, and the sibling app can start its twin now, not later.
  *
  * Default is "checkbox": it is the reading with locked copy behind it.
  */
