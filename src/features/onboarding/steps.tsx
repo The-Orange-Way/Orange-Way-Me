@@ -132,7 +132,26 @@ const PASSWORD_MIN_LENGTH = 14;
 
 const RECOVERY_WORD_COUNT = 12;
 
-const VERIFY_WORD_POSITIONS = [3, 7, 11] as const;
+const VERIFY_WORD_COUNT = 3;
+
+/**
+ * Pick which words the parent has to type back.
+ *
+ * Random and CSPRNG-drawn, matching the sibling app, which has been doing this
+ * in production. A fixed triple is the same three slots on every account,
+ * which turns "prove you saved it" into "memorise three slots" for anyone who
+ * has seen the flow once. Cheap to do right.
+ */
+function pickVerifyPositions() {
+  const positions: number[] = [];
+  while (positions.length < VERIFY_WORD_COUNT) {
+    const buf = new Uint32Array(1);
+    window.crypto.getRandomValues(buf);
+    const position = buf[0] % RECOVERY_WORD_COUNT;
+    if (!positions.includes(position)) positions.push(position);
+  }
+  return positions.sort((a, b) => a - b);
+}
 
 const STRENGTH_LABELS = ["Too short", "Weak", "Fair", "Good", "Strong", "Strong"] as const;
 
@@ -292,15 +311,17 @@ function StepVaultPassword(props: OnboardingStepProps) {
 // Shared by the staged verify stage and by the standalone StepVerify, so the
 // two modes cannot drift apart.
 function RecoveryWordInputs({
+  positions,
   answers,
   onChange,
 }: {
+  positions: number[];
   answers: string[];
   onChange: (next: string[]) => void;
 }) {
   return (
     <>
-      {VERIFY_WORD_POSITIONS.map((position, index) => (
+      {positions.map((position, index) => (
         <input
           key={position}
           type="text"
@@ -311,8 +332,8 @@ function RecoveryWordInputs({
           }}
           autoComplete="off"
           spellCheck={false}
-          placeholder={"Word " + position}
-          aria-label={"Word " + position}
+          placeholder={"Word " + (position + 1)}
+          aria-label={"Word " + (position + 1)}
           className={FIELD_CLASS}
         />
       ))}
@@ -342,9 +363,18 @@ function StepRecovery(props: OnboardingStepProps) {
   // write down. That is exactly the dead end CX called out.
   const [stage, setStage] = useState<"display" | "verify">("display");
   const [confirmed, setConfirmed] = useState(false);
-  const [answers, setAnswers] = useState<string[]>(() => VERIFY_WORD_POSITIONS.map(() => ""));
+  const [positions, setPositions] = useState<number[]>([]);
+  const [answers, setAnswers] = useState<string[]>([]);
   const copy = ONBOARDING_COPY.recovery;
   const staged = RECOVERY_VERIFY_MODE === "staged";
+
+  // Drawn on entry to the verify stage, not on mount, so "Back to my code" and
+  // a second attempt ask for a fresh triple rather than the same one again.
+  const enterVerify = () => {
+    setPositions(pickVerifyPositions());
+    setAnswers(Array.from({ length: VERIFY_WORD_COUNT }, () => ""));
+    setStage("verify");
+  };
 
   // Stage 2. Advancing from here is the container's ordinary onNext, so a
   // pass moves to step 6 like any other step completion. The way out is the
@@ -363,7 +393,7 @@ function StepRecovery(props: OnboardingStepProps) {
         hideBack
       >
         <p>{VERIFY_COPY.body}</p>
-        <RecoveryWordInputs answers={answers} onChange={setAnswers} />
+        <RecoveryWordInputs positions={positions} answers={answers} onChange={setAnswers} />
       </StepShell>
     );
   }
@@ -371,7 +401,7 @@ function StepRecovery(props: OnboardingStepProps) {
   return (
     <StepShell
       {...props}
-      onNext={staged ? () => setStage("verify") : props.onNext}
+      onNext={staged ? enterVerify : props.onNext}
       title={copy.headline}
       nextLabel={copy.cta}
       nextDisabled={!confirmed}
@@ -403,7 +433,10 @@ function StepVerify(props: OnboardingStepProps) {
   // with a regenerated code on failure, and a 5 second cooldown after 3
   // failures. None of it can be built before the generator, so this gates on
   // non-empty input only.
-  const [answers, setAnswers] = useState<string[]>(() => VERIFY_WORD_POSITIONS.map(() => ""));
+  const [positions] = useState(pickVerifyPositions);
+  const [answers, setAnswers] = useState<string[]>(() =>
+    Array.from({ length: VERIFY_WORD_COUNT }, () => ""),
+  );
   const allFilled = answers.every((answer) => answer.trim().length > 0);
 
   return (
@@ -415,7 +448,7 @@ function StepVerify(props: OnboardingStepProps) {
       hideBack
     >
       <p>{VERIFY_COPY.body}</p>
-      <RecoveryWordInputs answers={answers} onChange={setAnswers} />
+      <RecoveryWordInputs positions={positions} answers={answers} onChange={setAnswers} />
     </StepShell>
   );
 }
