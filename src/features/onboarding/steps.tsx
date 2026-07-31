@@ -289,34 +289,96 @@ function StepVaultPassword(props: OnboardingStepProps) {
   );
 }
 
+// Shared by the staged verify stage and by the standalone StepVerify, so the
+// two modes cannot drift apart.
+function RecoveryWordInputs({
+  answers,
+  onChange,
+}: {
+  answers: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <>
+      {VERIFY_WORD_POSITIONS.map((position, index) => (
+        <input
+          key={position}
+          type="text"
+          value={answers[index] ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            onChange(answers.map((answer, i) => (i === index ? value : answer)));
+          }}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={"Word " + position}
+          aria-label={"Word " + position}
+          className={FIELD_CLASS}
+        />
+      ))}
+    </>
+  );
+}
+
+// TODO(DL-0414): the 12 words come from BIP-39 generation on this device.
+// Rendering blank slots is deliberate. Faking plausible words would ship a
+// wordlist and invite someone to treat a placeholder as a real code.
+function RecoveryCodeSlots() {
+  return (
+    <ol className={RECOVERY_GRID_CLASS}>
+      {Array.from({ length: RECOVERY_WORD_COUNT }, (_, index) => (
+        <li key={index} className="flex items-center gap-2">
+          <span className="w-4 text-right text-muted-foreground">{index + 1}</span>
+          <span className="h-4 flex-1 rounded bg-muted" />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function StepRecovery(props: OnboardingStepProps) {
-  // TODO(DL-0414): the 12 words come from BIP-39 generation on this device.
-  // Rendering blank slots is deliberate. Faking plausible words would ship a
-  // wordlist and invite someone to treat a placeholder as a real code.
-  //
-  // hideBack because going back to the vault password step would re-derive
-  // the key and invalidate the code the parent was just told to write down.
-  // That is exactly the dead end CX called out.
+  // hideBack throughout, because going back to the vault password step would
+  // re-derive the key and invalidate the code the parent was just told to
+  // write down. That is exactly the dead end CX called out.
+  const [stage, setStage] = useState<"display" | "verify">("display");
   const [confirmed, setConfirmed] = useState(false);
+  const [answers, setAnswers] = useState<string[]>(() => VERIFY_WORD_POSITIONS.map(() => ""));
   const copy = ONBOARDING_COPY.recovery;
+  const staged = RECOVERY_VERIFY_MODE === "staged";
+
+  // Stage 2. Advancing from here is the container's ordinary onNext, so a
+  // pass moves to step 6 like any other step completion. The way out is the
+  // secondary link back to the code, never a Back button that would unwind
+  // the vault password.
+  if (staged && stage === "verify") {
+    const allFilled = answers.every((answer) => answer.trim().length > 0);
+    return (
+      <StepShell
+        {...props}
+        title={VERIFY_COPY.headline}
+        nextLabel={VERIFY_COPY.cta}
+        nextDisabled={!allFilled}
+        secondaryLabel={VERIFY_COPY.back}
+        onSecondary={() => setStage("display")}
+        hideBack
+      >
+        <p>{VERIFY_COPY.body}</p>
+        <RecoveryWordInputs answers={answers} onChange={setAnswers} />
+      </StepShell>
+    );
+  }
 
   return (
     <StepShell
       {...props}
+      onNext={staged ? () => setStage("verify") : props.onNext}
       title={copy.headline}
       nextLabel={copy.cta}
       nextDisabled={!confirmed}
       hideBack
     >
       <p>{copy.body}</p>
-      <ol className={RECOVERY_GRID_CLASS}>
-        {Array.from({ length: RECOVERY_WORD_COUNT }, (_, index) => (
-          <li key={index} className="flex items-center gap-2">
-            <span className="w-4 text-right text-muted-foreground">{index + 1}</span>
-            <span className="h-4 flex-1 rounded bg-muted" />
-          </li>
-        ))}
-      </ol>
+      <RecoveryCodeSlots />
       <p className="mt-4 text-sm">{copy.instruction}</p>
       <label className="mt-4 flex items-center gap-3 text-sm">
         <input
@@ -331,12 +393,16 @@ function StepRecovery(props: OnboardingStepProps) {
   );
 }
 
-// Only mounted when RECOVERY_VERIFY_MODE is "reentry".
+// Only mounted when RECOVERY_VERIFY_MODE is "reentry", the reading that makes
+// the flow 8 steps.
 function StepVerify(props: OnboardingStepProps) {
   // TODO(DL-0414): compare against the mnemonic generated in StepRecovery.
-  // Spec: a wrong answer loops back to the recovery screen with a regenerated
-  // code, and 3 wrong answers add a 5 second cooldown. None of that can be
-  // built before the generator exists, so this gates on non-empty input only.
+  // The sibling app already does exactly this, matching 3 words at random
+  // positions case insensitively against the real code; port that check here
+  // once the generator exists. Spec adds a loop back to the recovery screen
+  // with a regenerated code on failure, and a 5 second cooldown after 3
+  // failures. None of it can be built before the generator, so this gates on
+  // non-empty input only.
   const [answers, setAnswers] = useState<string[]>(() => VERIFY_WORD_POSITIONS.map(() => ""));
   const allFilled = answers.every((answer) => answer.trim().length > 0);
 
@@ -349,21 +415,7 @@ function StepVerify(props: OnboardingStepProps) {
       hideBack
     >
       <p>{VERIFY_COPY.body}</p>
-      {VERIFY_WORD_POSITIONS.map((position, index) => (
-        <input
-          key={position}
-          type="text"
-          value={answers[index] ?? ""}
-          onChange={(event) => {
-            const value = event.target.value;
-            setAnswers((current) => current.map((answer, i) => (i === index ? value : answer)));
-          }}
-          autoComplete="off"
-          placeholder={"Word " + position}
-          aria-label={"Word " + position}
-          className={FIELD_CLASS}
-        />
-      ))}
+      <RecoveryWordInputs answers={answers} onChange={setAnswers} />
     </StepShell>
   );
 }
