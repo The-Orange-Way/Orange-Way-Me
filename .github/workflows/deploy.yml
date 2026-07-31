@@ -78,6 +78,31 @@ jobs:
           # only thing the prod build can render. Branch-derived rather
           # than repo-variable so a future env-var typo can't open prod.
           VITE_DEV_SIGNUP_OPEN: ${{ github.ref_name == 'dev' && '1' || '' }}
+          # Serve the v2 onboarding flow (DL-0429) ONLY on the dev branch
+          # deploy. `ONBOARDING_V2_ENABLED` in
+          # src/features/onboarding/onboarding-flow.tsx reads
+          # `import.meta.env.VITE_ONBOARDING_V2 === "true"`, and
+          # `beforeLoad` in src/routes/onboarding.tsx redirects /onboarding
+          # to /auth when it is false.
+          #
+          # Without this line the variable is simply absent from the build,
+          # Vite folds the compare to a constant false, and the guard
+          # compiles to an UNCONDITIONAL redirect. That is exactly what the
+          # dev bundle shipped after the flow merged: the screens were in
+          # the bundle and the route could not be reached by anyone.
+          # A Cloudflare Pages environment variable cannot substitute for
+          # this, for the same reason spelled out on VITE_SENTRY_DSN above.
+          #
+          # Branch-derived rather than repo-variable, matching
+          # VITE_DEV_SIGNUP_OPEN directly above, so no env-var typo can
+          # turn it on in prod. The prod bundle never contains the flag-on
+          # branch of the code at all.
+          #
+          # This makes the flow reachable for review. It does NOT make it
+          # functional: no magic link is sent, the recovery grid renders
+          # empty slots, no biometric credential is enrolled and finishing
+          # creates nothing. Those seams are marked TODO(DL-0414).
+          VITE_ONBOARDING_V2: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Cloudflare Turnstile captcha widget. Build-time inlined
           # public site key; the matching SECRET key lives in the
           # Supabase Auth project config (Studio: Auth -> Bot and
