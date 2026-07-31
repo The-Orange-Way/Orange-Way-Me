@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 // Feature flag for the v2 typeform-style onboarding (DL-0429).
 // Off by default. Enable per environment with VITE_ONBOARDING_V2="true".
@@ -34,7 +34,7 @@ export function StepShell({
   nextLabel,
 }: OnboardingStepProps & {
   title: string;
-  children?: React.ReactNode;
+  children?: ReactNode;
   nextLabel?: string;
 }) {
   return (
