@@ -84,6 +84,9 @@ export function OnboardingWizard() {
   const navigate = useNavigate();
   const [step, setStep] = useState<OnboardingStep>(1);
   const [draft, setDraft] = useState<OnboardingDraft>({ name: "", email: "" });
+  // Step 5 is non-skippable: the parent confirms they wrote the recovery code
+  // down before Continue activates. Pure UI gate, no cryptography here.
+  const [recoveryConfirmed, setRecoveryConfirmed] = useState(false);
 
   const percent = Math.round((step / LAST_STEP) * 100);
   const Icon = stepIcon[step];
