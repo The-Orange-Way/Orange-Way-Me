@@ -40,10 +40,42 @@ function StepHousehold(props: OnboardingStepProps) {
   );
 }
 
+function StepConnect(props: OnboardingStepProps) {
+  return (
+    <StepShell {...props} title="Add your first account.">
+      <p>
+        Bring an account in with a public watch-only key. Orange Way can show
+        balances without ever holding your private keys.
+      </p>
+    </StepShell>
+  );
+}
+
+function StepBudget(props: OnboardingStepProps) {
+  return (
+    <StepShell {...props} title="Set your first budget.">
+      <p>Pick a monthly target. It stays encrypted on your device.</p>
+    </StepShell>
+  );
+}
+
+function StepReady(props: OnboardingStepProps) {
+  return (
+    <StepShell {...props} title="You are all set." nextLabel="Go to my books">
+      <p>
+        Your household is ready. Nothing you entered ever left your device
+        unencrypted.
+      </p>
+    </StepShell>
+  );
+}
+
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   { id: "welcome", title: "Welcome", Component: StepWelcome },
   { id: "audience", title: "Audience", Component: StepAudience },
   { id: "keys", title: "Keys", Component: StepKeys },
   { id: "household", title: "Household", Component: StepHousehold },
-  // Steps 5-7 append here from feat/onboarding-steps-5-7.
+  { id: "connect", title: "Connect", Component: StepConnect },
+  { id: "budget", title: "Budget", Component: StepBudget },
+  { id: "ready", title: "Ready", Component: StepReady },
 ];
