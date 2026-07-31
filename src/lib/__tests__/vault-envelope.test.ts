@@ -67,7 +67,12 @@ describe("vault envelope v4 (AES-KW)", () => {
 
   it("adding a slot does not bump the epoch (MEK unchanged)", async () => {
     const { envelope, mekRawBytes } = await createVaultEnvelope(PW);
-    const two = await addSlotToEnvelope(envelope, mekRawBytes, "device-2", "second-device-pass-14c");
+    const two = await addSlotToEnvelope(
+      envelope,
+      mekRawBytes,
+      "device-2",
+      "second-device-pass-14c",
+    );
     expect(two.epoch).toBe(0);
   });
 
