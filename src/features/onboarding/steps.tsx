@@ -198,12 +198,7 @@ function StepEmail(props: OnboardingStepProps) {
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   return (
-    <StepShell
-      {...props}
-      title={copy.headline}
-      nextLabel={copy.cta}
-      nextDisabled={!looksLikeEmail}
-    >
+    <StepShell {...props} title={copy.headline} nextLabel={copy.cta} nextDisabled={!looksLikeEmail}>
       <p>{copy.body}</p>
       <input
         type="email"
