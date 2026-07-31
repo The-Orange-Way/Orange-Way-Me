@@ -65,9 +65,9 @@ const stepDescription: Record<OnboardingStep, string> = {
   2: "We send a one-time link here so there is no password to forget.",
   3: "Here is the promise behind Orange Way, in plain words.",
   4: "One password protects everything. We never see it.",
-  5: "Your paper key. It is the only way to add another device.",
-  6: "Use Face ID or a fingerprint to unlock on this device.",
-  7: "Your vault is ready.",
+  5: "Write this somewhere safe, away from this device.",
+  6: "This replaces your vault password for everyday unlocking, faster and just as secure.",
+  7: "Your wallet is protected and ready.",
 };
 
 /**
