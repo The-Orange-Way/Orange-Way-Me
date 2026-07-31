@@ -97,17 +97,27 @@ const VERIFY_COPY = {
  *             Chosen to hold down dropout at the recovery-code screen.
  *   reentry   DL-0414. The parent types back 3 highlighted words on a screen
  *             of its own, which makes the flow 8 steps.
+ *   staged    Both, as two stages of Step 5. Checkbox first, then type back
+ *             3 words, with a way back to the code. Still 7 steps.
  *
- * So verification is a mode, not a step count. Flipping this constant inserts
- * or removes StepVerify and nothing else moves: no id changes, no copy
- * rewrites, no renumbering above step 4. Whichever way the call lands, it
- * costs one line, and the sibling app can start its twin now, not later.
+ * "staged" is the default, and not as a split-the-difference compromise. It
+ * is what the sibling app already ships and has had in production through its
+ * own review: see its StepVaultPassword, where the display stage gates on a
+ * checkbox and the verify stage then matches 3 words at random positions,
+ * with "Back to code" so it is never a dead end.
  *
- * Default is "checkbox": it is the reading with locked copy behind it.
+ * Design-twin parity is a standing requirement, so copying the shipped
+ * pattern is both the cheapest correct answer and the one that needs no new
+ * decision from anyone. Neither reading of the spec has to lose an argument
+ * for the work to move.
+ *
+ * The other two modes stay because they cost nothing to keep. Flipping this
+ * constant is the whole change: no id changes, no copy rewrites, no
+ * renumbering above step 4.
  */
-export type RecoveryVerifyMode = "checkbox" | "reentry";
+export type RecoveryVerifyMode = "staged" | "checkbox" | "reentry";
 
-export const RECOVERY_VERIFY_MODE: RecoveryVerifyMode = "checkbox";
+export const RECOVERY_VERIFY_MODE: RecoveryVerifyMode = "staged";
 
 const FIELD_CLASS =
   "mt-6 w-full rounded-md border border-input bg-background px-4 py-3 text-lg text-foreground";
