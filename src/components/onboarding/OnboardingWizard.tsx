@@ -56,8 +56,8 @@ const stepTitle: Record<OnboardingStep, string> = {
   3: "Only you can read your data",
   4: "Create your vault password",
   5: "Save your recovery code",
-  6: "Turn on quick unlock",
-  7: "You are all set",
+  6: "Enable Face ID or fingerprint on this device",
+  7: "You're all set",
 };
 
 const stepDescription: Record<OnboardingStep, string> = {
