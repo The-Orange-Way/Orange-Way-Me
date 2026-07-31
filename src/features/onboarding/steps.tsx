@@ -5,15 +5,16 @@ import type { OnboardingStep, OnboardingStepProps } from "./onboarding-flow";
 /**
  * Screen copy below is VERBATIM from the locked specification:
  *
- *   "OWM and OWB: 7-step onboarding flow specification"
+ *   "7-step onboarding flow specification" (covers both apps, design twins)
  *   Copy locked 2026-07-30. Spec locked 2026-07-31.
- *   wiki.orangeway.dev/doc/owm-and-owb-7-step-onboarding-flow-specification-BL034ieTbG
+ *   Wiki doc id 13aecb24-1275-4f87-a986-a3cd6b299bdb
  *
  * CX owns this text. Do not reword it here. If a string has to change, change
- * the wiki first and port it down, so OWM and OWB stay design twins.
+ * the wiki first and port it down, so the two apps stay design twins.
  *
  * Hoisted into one object on purpose: it can be diffed against the wiki in a
- * single block, and OWB imports the same shape rather than retyping strings.
+ * single block, and the sibling app imports the same shape rather than
+ * retyping strings.
  *
  * This file is presentation only. Argon2id derivation, BIP-39 generation and
  * WebAuthn PRF wrapping are DL-0414's lane and land behind these screens
