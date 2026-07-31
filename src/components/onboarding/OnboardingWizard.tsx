@@ -94,7 +94,8 @@ export function OnboardingWizard() {
   const goNext = () => setStep((s) => (s < LAST_STEP ? ((s + 1) as OnboardingStep) : s));
   const goBack = () => setStep((s) => (s > 1 ? ((s - 1) as OnboardingStep) : s));
 
-  // Step 2 is the only step in this shell that gates advancing on input.
+  // Steps that gate advancing: step 2 needs an email, step 5 needs the
+  // written-it-down confirm. Every other step advances freely.
   let canAdvance = true;
   if (step === 2) canAdvance = draft.email.trim().length > 0;
   else if (step === 5) canAdvance = recoveryConfirmed;
