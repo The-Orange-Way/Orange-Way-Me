@@ -179,7 +179,14 @@ export function OnboardingWizard() {
             )}
 
             {step === 6 && (
-              <PlaceholderBody label="Quick unlock (Face ID or fingerprint) arrives in a later PR, with a graceful fallback to your vault password." />
+              // Locked copy commits both variants. PRF-capable path renders here.
+              // Fallback screen (older OS), rendered once the capability check
+              // lands with the crypto spike:
+              //   Headline: "Your device doesn't support this yet."
+              //   Body:     "You can still use your vault password to open Orange Way."
+              <div className="space-y-3 text-muted-foreground">
+                <p>Your vault password still works whenever you need it.</p>
+              </div>
             )}
 
             {step === 7 && (
