@@ -30,11 +30,11 @@ import { argon2id } from "hash-wasm";
 export const VAULT_ENVELOPE_VERSION = 4;
 
 /**
- * Argon2id parameters for the v4 KEK, per the locked DL-0414 spec.
+ * Argon2id parameters for the v4 KEK.
  *
  * NOTE: parallelism here is 1, which differs from v3 in vault.ts (4). This is
- * intentional per spec and flagged for the cryptography gate; it means a v4
- * KEK derivation is NOT interchangeable with a v3 one for the same password.
+ * intentional; it means a v4 KEK derivation is NOT interchangeable with a v3
+ * one for the same password.
  */
 export const V4_ARGON2ID_MEMORY_KIB = 64 * 1024; // 64 MiB
 export const V4_ARGON2ID_ITERATIONS = 3;
