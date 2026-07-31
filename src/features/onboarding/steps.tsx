@@ -25,8 +25,8 @@ function StepKeys(props: OnboardingStepProps) {
   return (
     <StepShell {...props} title="Your keys, your ledger.">
       <p>
-        Orange Way never sees your keys or your plaintext. Everything sensitive is
-        encrypted on your device before it leaves.
+        Orange Way never sees your keys or your plaintext. Everything sensitive is encrypted on your
+        device before it leaves.
       </p>
     </StepShell>
   );
