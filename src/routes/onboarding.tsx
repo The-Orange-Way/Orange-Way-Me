@@ -17,7 +17,10 @@ function OnboardingRoute() {
     <OnboardingFlow
       steps={ONBOARDING_STEPS}
       onComplete={() => {
-        void navigate({ to: "/auth" });
+        // The dashboard, not /auth. Finishing the flow leaves a signed-in
+        // session and an unlocked vault, so sending people to a sign-in page
+        // asked them to log into the account they had just finished creating.
+        void navigate({ to: "/dashboard" });
       }}
     />
   );

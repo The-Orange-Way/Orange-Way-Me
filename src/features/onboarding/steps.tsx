@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StepShell } from "./onboarding-flow";
 import type { OnboardingStep, OnboardingStepProps } from "./onboarding-flow";
+import { useOnboardingState, verifyRecoveryWords } from "./onboarding-state";
+import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
+import { supabase } from "@/integrations/supabase/client";
+import { useVault } from "@/context/VaultContext";
+import { useProfile } from "@/hooks/useProfile";
 
 /**
  * Screen copy below is VERBATIM from the locked specification:
@@ -16,9 +22,12 @@ import type { OnboardingStep, OnboardingStepProps } from "./onboarding-flow";
  * single block, and the sibling app imports the same shape rather than
  * retyping strings.
  *
- * This file is presentation only. Argon2id derivation, BIP-39 generation and
- * WebAuthn PRF wrapping are DL-0414's lane and land behind these screens
- * without changing the step contract. Every seam is marked TODO(DL-0414).
+ * This file was presentation only up to 2026-07-31; the steps now talk to
+ * Supabase auth and to VaultContext. What is real: the one-time code creates
+ * the account, step 5 runs Argon2id and writes the vault row, and the words
+ * shown are the ones that wrap the MEK. What is still a no-op: the biometric
+ * step, which offers WebAuthn PRF enrolment it cannot yet perform (DL-0414
+ * §6.1, founder-gated) and simply advances.
  */
 export const ONBOARDING_COPY = {
   name: {
@@ -202,9 +211,9 @@ function useHasPlatformAuthenticator() {
 }
 
 function StepName(props: OnboardingStepProps) {
-  // TODO(DL-0414): lift to flow state. The name is written to the profile row
-  // after the OTP round trip, not from here.
-  const [name, setName] = useState("");
+  // Held above this component, so pressing Back still shows what was typed and
+  // the value is still around at the end to be encrypted into user_profiles.
+  const { name, setName } = useOnboardingState();
   const copy = ONBOARDING_COPY.name;
 
   return (
@@ -228,15 +237,119 @@ function StepName(props: OnboardingStepProps) {
   );
 }
 
+/**
+ * Step 2, in two stages: send a one-time code, then verify it.
+ *
+ * A 6 digit code rather than a clickable link, decided 2026-07-31. The locked
+ * copy says "one-time link", and a link is the one thing that cannot work
+ * here: clicking it opens a new tab, this component tree is torn down, and the
+ * name from step 1 and everything after it goes with it. A code is typed in
+ * place, so the wizard survives. Copy correction is with CX.
+ *
+ * This is the only auth in the flow, and it is genuinely password-free: no
+ * supabase.auth.signUp, no account password. The only password anyone sets is
+ * the vault password on step 4, which is a different thing and never leaves
+ * the device.
+ */
 function StepEmail(props: OnboardingStepProps) {
-  // TODO(DL-0414): the CTA sends the one-time link. Advancing is gated on that
-  // round trip, not on the field merely looking well formed.
-  const [email, setEmail] = useState("");
+  const { email, setEmail, setEmailVerified } = useOnboardingState();
+  const [stage, setStage] = useState<"address" | "code">("address");
+  const [token, setToken] = useState("");
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const captchaRef = useRef<TurnstileInstance>(null);
   const copy = ONBOARDING_COPY.email;
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  const sendCode = async () => {
+    setBusy(true);
+    setError(null);
+    const { error: sendError } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        shouldCreateUser: true,
+        ...(captchaToken ? { captchaToken } : {}),
+      },
+    });
+    setBusy(false);
+    if (sendError) {
+      setError(sendError.message);
+      // A Turnstile token is single-use and Supabase has now spent it, so
+      // without this the retry fails on the captcha rather than on whatever
+      // actually went wrong, and the person is stuck on a button that will
+      // never work again.
+      setCaptchaToken(null);
+      captchaRef.current?.reset();
+      return;
+    }
+    setStage("code");
+  };
+
+  const confirmCode = async () => {
+    setBusy(true);
+    setError(null);
+    // type "email" is the code-in-the-body variant. "magiclink" is the one
+    // that only ever arrives as a clickable URL, which is what we are avoiding.
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: token.trim(),
+      type: "email",
+    });
+    setBusy(false);
+    if (verifyError || !data.session) {
+      setError(verifyError?.message ?? "That code did not work. Check it and try again.");
+      return;
+    }
+    setEmailVerified(true);
+    props.onNext();
+  };
+
+  if (stage === "code") {
+    return (
+      <StepShell
+        {...props}
+        onNext={() => void confirmCode()}
+        title="Enter the code we sent you."
+        nextLabel="Confirm"
+        nextDisabled={token.trim().length < 6}
+        busy={busy}
+        busyLabel="Checking..."
+        error={error}
+        secondaryLabel="Use a different address"
+        onSecondary={() => {
+          setStage("address");
+          setToken("");
+          setError(null);
+        }}
+        hideBack
+      >
+        <p>We sent a 6 digit code to {email.trim()}. It expires in a few minutes.</p>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={token}
+          onChange={(event) => setToken(event.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="000000"
+          aria-label="One-time code"
+          className={FIELD_CLASS + " tracking-[0.4em]"}
+        />
+      </StepShell>
+    );
+  }
+
   return (
-    <StepShell {...props} title={copy.headline} nextLabel={copy.cta} nextDisabled={!looksLikeEmail}>
+    <StepShell
+      {...props}
+      onNext={() => void sendCode()}
+      title={copy.headline}
+      nextLabel={copy.cta}
+      nextDisabled={!looksLikeEmail || (CAPTCHA_REQUIRED && !captchaToken)}
+      busy={busy}
+      busyLabel="Sending..."
+      error={error}
+    >
       <p>{copy.body}</p>
       <input
         type="email"
@@ -247,6 +360,14 @@ function StepEmail(props: OnboardingStepProps) {
         aria-label="Email address"
         className={FIELD_CLASS}
       />
+      <div className="mt-4">
+        <CaptchaWidget
+          ref={captchaRef}
+          onSuccess={setCaptchaToken}
+          onError={() => setCaptchaToken(null)}
+          onExpire={() => setCaptchaToken(null)}
+        />
+      </div>
     </StepShell>
   );
 }
@@ -264,10 +385,11 @@ function StepEducation(props: OnboardingStepProps) {
 }
 
 function StepVaultPassword(props: OnboardingStepProps) {
-  // TODO(DL-0414): this password never leaves the device. It is the input to
-  // Argon2id (>= 64 MiB, >= 3 iterations, client-generated CSPRNG salt) and
-  // the derived KEK wraps the vault key. Nothing typed here is transmitted.
-  const [password, setPassword] = useState("");
+  // This password never leaves the device. It is the input to Argon2id in
+  // createVault on the next step (64 MiB, 3 iterations, CSPRNG salt) and the
+  // derived KEK wraps the MEK. Nothing typed here is transmitted; only the
+  // wrapped ciphertext is.
+  const { vaultPassword: password, setVaultPassword: setPassword } = useOnboardingState();
   const [confirm, setConfirm] = useState("");
   const copy = ONBOARDING_COPY.vaultPassword;
   const score = passwordScore(password);
@@ -341,16 +463,27 @@ function RecoveryWordInputs({
   );
 }
 
-// TODO(DL-0414): the 12 words come from BIP-39 generation on this device.
-// Rendering blank slots is deliberate. Faking plausible words would ship a
-// wordlist and invite someone to treat a placeholder as a real code.
-function RecoveryCodeSlots() {
+/**
+ * The 12 real words, or skeleton slots while the vault is still being created.
+ *
+ * The words come from generateRecoveryCode() in src/lib/vault.ts, drawn from
+ * the 7776 word EFF list at ~155 bits. Never rendered from anything else:
+ * showing plausible-looking filler here would invite someone to write down a
+ * placeholder and discover at recovery time that it unlocks nothing.
+ */
+function RecoveryCodeSlots({ code }: { code: string | null }) {
+  const words = code ? code.trim().split(/\s+/) : [];
+
   return (
     <ol className={RECOVERY_GRID_CLASS}>
       {Array.from({ length: RECOVERY_WORD_COUNT }, (_, index) => (
         <li key={index} className="flex items-center gap-2">
           <span className="w-4 text-right text-muted-foreground">{index + 1}</span>
-          <span className="h-4 flex-1 rounded bg-muted" />
+          {words[index] ? (
+            <span className="flex-1 text-foreground">{words[index]}</span>
+          ) : (
+            <span className="h-4 flex-1 animate-pulse rounded bg-muted" />
+          )}
         </li>
       ))}
     </ol>
@@ -365,15 +498,71 @@ function StepRecovery(props: OnboardingStepProps) {
   const [confirmed, setConfirmed] = useState(false);
   const [positions, setPositions] = useState<number[]>([]);
   const [answers, setAnswers] = useState<string[]>([]);
+  const [wrong, setWrong] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const { vaultPassword, recoveryCode, setRecoveryCode } = useOnboardingState();
+  const { createVault } = useVault();
   const copy = ONBOARDING_COPY.recovery;
   const staged = RECOVERY_VERIFY_MODE === "staged";
+
+  // Only reachable by deep-linking past step 4 or by a bug in the step order.
+  // Says so rather than showing a grid of skeletons that will never fill in.
+  const missingPassword = !recoveryCode && !vaultPassword;
+
+  // Arriving on this step is what creates the vault. createVault generates the
+  // MEK, wraps it under Argon2id with the step 4 password AND under the
+  // recovery code, writes the row, and hands back the words rendered below.
+  //
+  // Guarded by a ref rather than by `recoveryCode` alone: React 19 strict mode
+  // mounts effects twice in development, and a second createVault would try to
+  // insert a second vault row for the same user and fail the unique
+  // constraint, which would look like a real error to whoever is testing.
+  const creating = useRef(false);
+  useEffect(() => {
+    // The no-password case is reported from render (missingPassword below)
+    // rather than by setting state here, so the effect only ever writes state
+    // asynchronously, after the promise settles.
+    if (recoveryCode || creating.current || !vaultPassword) return;
+    creating.current = true;
+    let cancelled = false;
+
+    void createVault(vaultPassword)
+      .then((result) => {
+        if (!cancelled) setRecoveryCode(result.recoveryCode);
+      })
+      .catch((cause: unknown) => {
+        creating.current = false;
+        if (cancelled) return;
+        setCreateError(
+          cause instanceof Error ? cause.message : "Could not create your vault. Try again.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [recoveryCode, vaultPassword, createVault, setRecoveryCode]);
 
   // Drawn on entry to the verify stage, not on mount, so "Back to my code" and
   // a second attempt ask for a fresh triple rather than the same one again.
   const enterVerify = () => {
     setPositions(pickVerifyPositions());
     setAnswers(Array.from({ length: VERIFY_WORD_COUNT }, () => ""));
+    setWrong(false);
     setStage("verify");
+  };
+
+  // Checks the typed words against the code that actually wraps the MEK. A
+  // wrong answer draws a fresh triple: re-asking the same three would let
+  // someone brute-force three known slots by repetition.
+  const submitVerify = () => {
+    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+      props.onNext();
+      return;
+    }
+    setWrong(true);
+    setPositions(pickVerifyPositions());
+    setAnswers(Array.from({ length: VERIFY_WORD_COUNT }, () => ""));
   };
 
   // Stage 2. Advancing from here is the container's ordinary onNext, so a
@@ -385,9 +574,11 @@ function StepRecovery(props: OnboardingStepProps) {
     return (
       <StepShell
         {...props}
+        onNext={submitVerify}
         title={VERIFY_COPY.headline}
         nextLabel={VERIFY_COPY.cta}
         nextDisabled={!allFilled}
+        error={wrong ? "Those words did not match. Here are three different ones." : null}
         secondaryLabel={VERIFY_COPY.back}
         onSecondary={() => setStage("display")}
         hideBack
@@ -404,11 +595,15 @@ function StepRecovery(props: OnboardingStepProps) {
       onNext={staged ? enterVerify : props.onNext}
       title={copy.headline}
       nextLabel={copy.cta}
-      nextDisabled={!confirmed}
+      // Not just "did they tick the box": the code has to exist. Advancing
+      // past a grid that is still loading would mean confirming words nobody
+      // has been shown.
+      nextDisabled={!confirmed || !recoveryCode}
+      error={createError ?? (missingPassword ? "Go back and set a vault password first." : null)}
       hideBack
     >
       <p>{copy.body}</p>
-      <RecoveryCodeSlots />
+      <RecoveryCodeSlots code={recoveryCode} />
       <p className="mt-4 text-sm">{copy.instruction}</p>
       <label className="mt-4 flex items-center gap-3 text-sm">
         <input
@@ -426,25 +621,40 @@ function StepRecovery(props: OnboardingStepProps) {
 // Only mounted when RECOVERY_VERIFY_MODE is "reentry", the reading that makes
 // the flow 8 steps.
 function StepVerify(props: OnboardingStepProps) {
-  // TODO(DL-0414): compare against the mnemonic generated in StepRecovery.
-  // The sibling app already does exactly this, matching 3 words at random
-  // positions case insensitively against the real code; port that check here
-  // once the generator exists. Spec adds a loop back to the recovery screen
-  // with a regenerated code on failure, and a 5 second cooldown after 3
-  // failures. None of it can be built before the generator, so this gates on
-  // non-empty input only.
-  const [positions] = useState(pickVerifyPositions);
+  const { recoveryCode } = useOnboardingState();
+  const [positions, setPositions] = useState(pickVerifyPositions);
   const [answers, setAnswers] = useState<string[]>(() =>
     Array.from({ length: VERIFY_WORD_COUNT }, () => ""),
   );
+  const [wrong, setWrong] = useState(false);
   const allFilled = answers.every((answer) => answer.trim().length > 0);
+
+  // Same check as the staged variant, against the same code: whichever reading
+  // of the spec we ship, the words typed here are matched to the ones that
+  // actually wrap the MEK.
+  //
+  // Still unbuilt from the spec: the 5 second cooldown after three failures.
+  // Redrawing the triple on every miss already denies the repeat-until-lucky
+  // attack the cooldown was there to slow, so this is a rate-limit refinement
+  // rather than a hole.
+  const submit = () => {
+    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+      props.onNext();
+      return;
+    }
+    setWrong(true);
+    setPositions(pickVerifyPositions());
+    setAnswers(Array.from({ length: VERIFY_WORD_COUNT }, () => ""));
+  };
 
   return (
     <StepShell
       {...props}
+      onNext={submit}
       title={VERIFY_COPY.headline}
       nextLabel={VERIFY_COPY.cta}
       nextDisabled={!allFilled}
+      error={wrong ? "Those words did not match. Here are three different ones." : null}
       hideBack
     >
       <p>{VERIFY_COPY.body}</p>
@@ -456,16 +666,24 @@ function StepVerify(props: OnboardingStepProps) {
 function StepBiometric(props: OnboardingStepProps) {
   const available = useHasPlatformAuthenticator();
 
+  // hideBack on every branch. Back from here lands on the recovery screen,
+  // whose effect sees a code already in state and so re-renders the same words
+  // without re-creating anything — but the vault row now exists, the code has
+  // been confirmed, and offering a way back into "write these down" reads as
+  // if something is still pending. Everything from step 5 on is one-way.
+
   // Probe still running. Show the headline with the CTA held shut rather than
   // flashing the fallback copy at a device that does support this.
   if (available === null) {
-    return <StepShell {...props} title={ONBOARDING_COPY.biometric.headline} nextDisabled />;
+    return (
+      <StepShell {...props} title={ONBOARDING_COPY.biometric.headline} nextDisabled hideBack />
+    );
   }
 
   if (!available) {
     const fallback = ONBOARDING_COPY.biometricFallback;
     return (
-      <StepShell {...props} title={fallback.headline} nextLabel={fallback.cta}>
+      <StepShell {...props} title={fallback.headline} nextLabel={fallback.cta} hideBack>
         <p>{fallback.body}</p>
       </StepShell>
     );
@@ -478,6 +696,7 @@ function StepBiometric(props: OnboardingStepProps) {
       title={copy.headline}
       nextLabel={copy.cta}
       secondaryLabel={copy.secondary}
+      hideBack
     >
       <p>{copy.body}</p>
     </StepShell>
@@ -489,6 +708,36 @@ function StepSuccess(props: OnboardingStepProps) {
   // onNext, and this is the last step, so it completes the wizard either way.
   // Per spec: acceptable, the aha moment was offered. Do not block on it.
   const copy = ONBOARDING_COPY.success;
+  const { name, recoveryCode } = useOnboardingState();
+  const { finalizeVaultSetup } = useVault();
+  const { updateDisplayName } = useProfile();
+
+  // Reaching this screen is what commits the account. createVault already put
+  // the keys in memory and wrote the vault row; finalizeVaultSetup flips the
+  // two flags the rest of the app reads, so the dashboard behind this screen
+  // opens unlocked instead of showing the "unlock your vault" gate to someone
+  // who just typed their password twice.
+  //
+  // The name goes in here rather than on step 1, because encrypting it needs
+  // the MEK and the MEK does not exist until step 5. It is written encrypted:
+  // enc_display_name, same column and same helper the settings page uses.
+  //
+  // Ref-guarded for the same strict-mode reason as createVault, and gated on
+  // recoveryCode so that a flow which somehow arrived here without a vault
+  // does not claim an unlocked one.
+  const committed = useRef(false);
+  useEffect(() => {
+    if (committed.current || !recoveryCode) return;
+    committed.current = true;
+    finalizeVaultSetup();
+    const displayName = name.trim();
+    if (!displayName) return;
+    // Deliberately not surfaced or awaited. The account, the vault and the
+    // recovery code are all already durable at this point; a failed profile
+    // write costs a greeting, and the name is editable in settings. Blocking
+    // the last screen of onboarding on it would be the wrong trade.
+    void updateDisplayName(displayName).catch(() => {});
+  }, [recoveryCode, name, finalizeVaultSetup, updateDisplayName]);
 
   return (
     <StepShell
