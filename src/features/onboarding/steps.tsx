@@ -68,15 +68,21 @@ export const ONBOARDING_COPY = {
 } as const;
 
 /**
- * COPY NOT LOCKED. The standalone verification screen exists only in the
- * 8-step reading of the spec (DL-0414) and CX has never written copy for it.
- * The wording below is a placeholder and needs CX sign-off before this mode
- * can ship to anyone.
+ * COPY NOT LOCKED, and this one is on the default path, so it is the shortest
+ * open item in the whole flow. CX has never written copy for the recovery
+ * verification screen; it appears in DL-0414 only as a mechanism. The wording
+ * below is mine and needs CX sign-off before this ships to anyone.
+ *
+ * For reference, the sibling app's shipped wording on the same screen is
+ * "Prove you saved it" over "Type the words at the positions below from your
+ * saved copy. This protects you from a future lockout." Twinning to that is
+ * a perfectly good outcome and probably the fastest one.
  */
 const VERIFY_COPY = {
   headline: "Confirm your recovery code.",
   body: "Type the three words we ask for, so we know the code is safely written down.",
   cta: "Confirm",
+  back: "Back to my code",
 };
 
 /**
