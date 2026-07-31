@@ -32,32 +32,56 @@ export function StepShell({
   isFirst,
   isLast,
   nextLabel,
+  nextDisabled = false,
+  secondaryLabel,
+  onSecondary,
+  hideBack = false,
 }: OnboardingStepProps & {
   title: string;
   children?: ReactNode;
   nextLabel?: string;
+  nextDisabled?: boolean;
+  secondaryLabel?: string;
+  onSecondary?: () => void;
+  hideBack?: boolean;
 }) {
   return (
     <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-6">
       <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
       <div className="mt-6 min-h-[8rem] text-muted-foreground">{children}</div>
       <div className="mt-10 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={isFirst}
-          className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
-        >
-          Back
-        </button>
+        {hideBack ? (
+          <span aria-hidden="true" />
+        ) : (
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={isFirst}
+            className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            Back
+          </button>
+        )}
         <button
           type="button"
           onClick={onNext}
-          className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          disabled={nextDisabled}
+          className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {nextLabel ?? (isLast ? "Finish" : "Continue")}
         </button>
       </div>
+      {secondaryLabel ? (
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={onSecondary ?? onNext}
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            {secondaryLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
