@@ -95,7 +95,9 @@ export function OnboardingWizard() {
   const goBack = () => setStep((s) => (s > 1 ? ((s - 1) as OnboardingStep) : s));
 
   // Step 2 is the only step in this shell that gates advancing on input.
-  const canAdvance = step === 2 ? draft.email.trim().length > 0 : true;
+  let canAdvance = true;
+  if (step === 2) canAdvance = draft.email.trim().length > 0;
+  else if (step === 5) canAdvance = recoveryConfirmed;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
