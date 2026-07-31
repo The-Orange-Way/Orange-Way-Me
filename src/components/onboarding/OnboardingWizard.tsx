@@ -191,7 +191,7 @@ export function OnboardingWizard() {
 
             {step === 7 && (
               <div className="space-y-3 text-muted-foreground">
-                <p>Your vault is ready. From here you can connect a wallet and start budgeting.</p>
+                <p>Connect your Bitcoin wallet to see your balance, or do it later from your dashboard.</p>
               </div>
             )}
           </div>
