@@ -667,7 +667,7 @@ function StepBiometric(props: OnboardingStepProps) {
 
   // hideBack on every branch. Back from here lands on the recovery screen,
   // whose effect sees a code already in state and so re-renders the same words
-  // without re-creating anything — but the vault row now exists, the code has
+  // without re-creating anything. But the vault row now exists, the code has
   // been confirmed, and offering a way back into "write these down" reads as
   // if something is still pending. Everything from step 5 on is one-way.
 
