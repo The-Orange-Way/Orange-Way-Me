@@ -109,7 +109,10 @@ const FIELD_CLASS =
 const RECOVERY_GRID_CLASS =
   "mt-6 grid grid-cols-3 gap-x-4 gap-y-2 rounded-md border border-dashed border-input p-4 font-mono text-sm";
 
-const PASSWORD_MIN_LENGTH = 12;
+// Matches MIN_VAULT_PASSWORD_LENGTH in the sibling app's src/lib/vault.ts,
+// which is enforced in its crypto layer, not just its UI. Design twins, so
+// the weaker of the two gates is the one that matters. Do not lower this.
+const PASSWORD_MIN_LENGTH = 14;
 
 const RECOVERY_WORD_COUNT = 12;
 
