@@ -13,7 +13,6 @@ import { useProfile } from "@/hooks/useProfile";
  *
  *   "7-step onboarding flow specification" (covers both apps, design twins)
  *   Copy locked 2026-07-30. Spec locked 2026-07-31.
- *   Wiki doc id 13aecb24-1275-4f87-a986-a3cd6b299bdb
  *
  * CX owns this text. Do not reword it here. If a string has to change, change
  * the wiki first and port it down, so the two apps stay design twins.
