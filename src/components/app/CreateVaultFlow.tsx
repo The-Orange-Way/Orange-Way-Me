@@ -312,7 +312,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
       )
       .join("");
     w.document.write(`
-      <html><head><title>Orange Way Vault Recovery Code</title></head>
+      <html><head><title>Orange Way - Vault recovery kit</title></head>
       <body style="font-family:system-ui;padding:32px;max-width:560px;margin:auto">
         <h1 style="font-size:18px">Orange Way - Vault recovery kit</h1>
         <p style="color:#666;font-size:13px">Generated: ${ts}</p>
