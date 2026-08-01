@@ -42,7 +42,7 @@ function TermsPage() {
 
         <h2 className="mt-8 text-xl font-semibold">Accounts</h2>
         <p className="mt-2 text-muted-foreground">
-          You're responsible for keeping your vault password and recovery code safe. We cannot
+          You're responsible for keeping your vault password and recovery kit safe. We cannot
           recover them for you. That is the point.
         </p>
 
