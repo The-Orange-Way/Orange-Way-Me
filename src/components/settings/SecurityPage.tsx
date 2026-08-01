@@ -488,7 +488,7 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
       "Orange Way Vault Recovery Kit",
       `Generated: ${ts}`,
       "",
-      "Keep this somewhere safe. Anyone with this kit can reset your vault password.",
+      "Keep this somewhere safe. Anyone with this recovery kit can reset your vault password.",
       "",
       code,
       "",
@@ -522,7 +522,7 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
       <body style="font-family:system-ui;padding:32px;max-width:560px;margin:auto">
         <h1 style="font-size:18px">Orange Way Vault Recovery Kit</h1>
         <p style="color:#666;font-size:13px">Generated: ${ts}</p>
-        <p style="font-size:13px"><strong>Keep this somewhere safe.</strong> Anyone with this code can reset your vault password.</p>
+        <p style="font-size:13px"><strong>Keep this somewhere safe.</strong> Anyone with this recovery kit can reset your vault password.</p>
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:16px">${grid}</div>
       </body></html>
     `);
