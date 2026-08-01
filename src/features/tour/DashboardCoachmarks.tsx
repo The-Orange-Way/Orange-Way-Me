@@ -16,7 +16,7 @@ import { TOUR_COPY } from "./copy";
  * happens via the "Got it" button on any bubble (dismisses all three)
  * or via the Escape key.
  *
- * App-agnostic: the component knows nothing about OWM or OWB. It reads
+ * App-agnostic: the component knows nothing about which product renders it. It reads
  * its anchors via CSS selectors and its strings from TOUR_COPY. OWB
  * can reuse DashboardCoachmarks with its own selectors and copy file.
  *
@@ -52,11 +52,7 @@ function computePos(selector: string): BubblePos | null {
   };
 }
 
-function CoachmarkBubble({
-  selector,
-  label,
-  onDismiss,
-}: BubbleAnchor & { onDismiss: () => void }) {
+function CoachmarkBubble({ selector, label, onDismiss }: BubbleAnchor & { onDismiss: () => void }) {
   const [pos, setPos] = useState<BubblePos | null>(null);
 
   useLayoutEffect(() => {
