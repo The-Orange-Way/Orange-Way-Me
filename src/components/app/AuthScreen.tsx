@@ -126,10 +126,13 @@ export function AuthScreen() {
   const navigate = useNavigate();
   const submitDisabled = busy || (CAPTCHA_REQUIRED && !captchaToken);
 
-  // V2 entry point: sign-in form + create-account route to /onboarding.
-  // Three checks stay independent: V2 (feature flag), SIGNUP_OPEN (env
-  // gate), and tab (sign-in vs reset). No auto-redirect: the user chooses.
-  if (V2 && SIGNUP_OPEN) {
+  // V2 entry point: sign-in form + create-account link to /onboarding.
+  // V2 is the only gate here. SIGNUP_OPEN is a separate flag that governs
+  // the legacy password sign-up form (the tab panel below) and is left
+  // empty in CI so the broken legacy flow stays off. Folding it into this
+  // guard made the entire block dead code at Vite build time. Keep them
+  // independent: the user chooses sign-in or create-account, no auto-redirect.
+  if (V2) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-6">
         <div className="w-full max-w-md">
