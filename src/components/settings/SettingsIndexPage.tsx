@@ -36,7 +36,7 @@ const TILES: Tile[] = [
   },
   {
     title: "Security",
-    description: "Change vault password, recovery code, auto-lock",
+    description: "Change vault password, recovery kit, auto-lock",
     icon: KeyRound,
     to: "/settings/security",
   },
