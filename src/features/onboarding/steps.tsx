@@ -51,7 +51,7 @@ export const ONBOARDING_COPY = {
     cta: "Set my password",
   },
   recovery: {
-    headline: "Save your recovery code.",
+    headline: "Save your recovery kit.",
     body: "Write this somewhere safe, away from this device.",
     instruction: "This is the only way to add another phone or tablet. We do not store a copy.",
     cta: "I've written it down",
@@ -87,7 +87,7 @@ export const ONBOARDING_COPY = {
  * a perfectly good outcome and probably the fastest one.
  */
 const VERIFY_COPY = {
-  headline: "Confirm your recovery code.",
+  headline: "Confirm your recovery kit.",
   body: "Type the three words we ask for, so we know the code is safely written down.",
   cta: "Confirm",
   back: "Back to my code",
