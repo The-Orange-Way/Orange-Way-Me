@@ -282,7 +282,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
       "Orange Way - Vault recovery kit",
       `Generated: ${ts}`,
       "",
-      "Keep this somewhere safe. Anyone with this code can reset your vault password.",
+      "Keep this somewhere safe. Anyone with this recovery kit can reset your vault password.",
       "",
       code,
       "",
