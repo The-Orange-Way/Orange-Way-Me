@@ -73,7 +73,7 @@ export function SecurityPage() {
         </Button>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">Security</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Vault password, recovery code, and auto-lock controls.
+          Vault password, recovery kit, and auto-lock controls.
         </p>
       </div>
 
@@ -104,7 +104,7 @@ export function SecurityPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <RefreshCw className="h-4 w-4" />
-            Recovery code
+            Recovery kit
           </CardTitle>
           <CardDescription>
             12 words that can restore access if you forget your vault password. Store them somewhere
@@ -117,10 +117,10 @@ export function SecurityPage() {
             onClick={() => void regenerateRecovery()}
             disabled={regenerating}
           >
-            {regenerating ? "Regenerating…" : "Regenerate recovery code"}
+            {regenerating ? "Regenerating…" : "Regenerate recovery kit"}
           </Button>
           <p className="mt-2 text-xs text-muted-foreground">
-            This invalidates your previous recovery code immediately.
+            This invalidates your previous recovery kit immediately.
           </p>
         </CardContent>
       </Card>
@@ -485,10 +485,10 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
   const onDownload = () => {
     const ts = new Date().toISOString();
     const body = [
-      "Orange Way - Vault recovery code",
+      "Orange Way - Vault recovery kit",
       `Generated: ${ts}`,
       "",
-      "Keep this somewhere safe. Anyone with this code can reset your vault password.",
+      "Keep this somewhere safe. Anyone with this kit can reset your vault password.",
       "",
       code,
       "",
@@ -520,7 +520,7 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
     w.document.write(`
       <html><head><title>Orange Way Vault Recovery Code</title></head>
       <body style="font-family:system-ui;padding:32px;max-width:560px;margin:auto">
-        <h1 style="font-size:18px">Orange Way - Vault recovery code</h1>
+        <h1 style="font-size:18px">Orange Way - Vault recovery kit</h1>
         <p style="color:#666;font-size:13px">Generated: ${ts}</p>
         <p style="font-size:13px"><strong>Keep this somewhere safe.</strong> Anyone with this code can reset your vault password.</p>
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:16px">${grid}</div>
@@ -534,9 +534,9 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
   return (
     <>
       <DialogHeader>
-        <DialogTitle>New recovery code</DialogTitle>
+        <DialogTitle>New recovery kit</DialogTitle>
         <DialogDescription>
-          This replaces your previous recovery code. Store it somewhere safe.
+          This replaces your previous recovery kit. Store it somewhere safe.
         </DialogDescription>
       </DialogHeader>
 
@@ -584,7 +584,7 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
       <label className="flex items-start gap-2 text-sm">
         <Checkbox checked={saved} onCheckedChange={(v) => setSaved(!!v)} className="mt-0.5" />
         <span className="text-muted-foreground">
-          I have saved my recovery code in a safe place. I understand it will not be shown again.
+          I have saved my recovery kit in a safe place. I understand it will not be shown again.
         </span>
       </label>
 
@@ -615,19 +615,19 @@ function RecoveryRegenVerify({ code, onDone }: { code: string; onDone: () => voi
       w1.trim().toLowerCase() === words[indices[0]] &&
       w2.trim().toLowerCase() === words[indices[1]];
     if (!ok) {
-      setError("One or both words don't match. Check your saved recovery code.");
+      setError("One or both recovery kit words don't match. Check what you saved.");
       return;
     }
-    toast.success("Recovery code confirmed.");
+    toast.success("Recovery kit confirmed.");
     onDone();
   };
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Confirm your new recovery code</DialogTitle>
+        <DialogTitle>Confirm your new recovery kit</DialogTitle>
         <DialogDescription>
-          Type two words from your code so we know you saved it.
+          Type two words from your kit so we know you saved it.
         </DialogDescription>
       </DialogHeader>
       <form onSubmit={onVerify} className="space-y-4">
