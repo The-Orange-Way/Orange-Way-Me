@@ -83,7 +83,7 @@ function UnlockForm() {
               className="text-foreground underline-offset-4 hover:underline"
               onClick={() => setRecoveryOpen(true)}
             >
-              Use recovery code
+              Use recovery kit
             </button>
           </p>
           <button
