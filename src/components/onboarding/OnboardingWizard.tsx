@@ -55,7 +55,7 @@ const stepTitle: Record<OnboardingStep, string> = {
   2: "What is your email?",
   3: "Only you can read your data",
   4: "Create your vault password",
-  5: "Save your recovery code",
+  5: "Save your recovery kit",
   6: "Turn on quick unlock",
   7: "You are all set",
 };
