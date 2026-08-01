@@ -98,7 +98,7 @@ const PILLARS: {
       },
       {
         h: "Recovery kit",
-        p: "One-time code at signup. Save it safely. With it, you can reset your password and keep your data.",
+        p: "One-time recovery kit at signup. Save it safely. With it, you can reset your password and keep your data.",
       },
       {
         h: "Household sharing",
