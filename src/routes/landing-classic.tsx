@@ -985,7 +985,7 @@ const PRIVACY_FAQ: { q: string; a: React.ReactNode }[] = [
         <p>{"We offer recovery, built so we never hold the keys to your data on our own."}</p>
         <p className="mt-3">
           {
-            "When you sign up, three recovery shares get created. You hold two of them: your password (in your head) and a recovery code (you save somewhere safe, like a password manager, a printed sheet, or a hardware wallet). We hold the third. Recovering access requires any two of the three."
+            "When you sign up, three recovery shares get created. You hold two of them: your password (in your head) and a recovery kit (you save somewhere safe, like a password manager, a printed sheet, or a hardware wallet). We hold the third. Recovering access requires any two of the three."
           }
         </p>
         <p className="mt-3">
