@@ -88,9 +88,9 @@ export const ONBOARDING_COPY = {
  */
 const VERIFY_COPY = {
   headline: "Confirm your recovery kit.",
-  body: "Type the three words we ask for, so we know the code is safely written down.",
+  body: "Type the three words we ask for, so we know the recovery kit is safely written down.",
   cta: "Confirm",
-  back: "Back to my code",
+  back: "Back to my recovery kit",
 };
 
 /**
@@ -777,9 +777,9 @@ export function buildOnboardingSteps(mode: RecoveryVerifyMode): OnboardingStep[]
     { id: "email", title: "Email", Component: StepEmail },
     { id: "education", title: "How Orange Way works", Component: StepEducation },
     { id: "vault-password", title: "Vault password", Component: StepVaultPassword },
-    { id: "recovery-code", title: "Recovery code", Component: StepRecovery },
+    { id: "recovery-code", title: "Recovery kit", Component: StepRecovery },
     ...(mode === "reentry"
-      ? [{ id: "verify-recovery-code", title: "Confirm recovery code", Component: StepVerify }]
+      ? [{ id: "verify-recovery-code", title: "Confirm recovery kit", Component: StepVerify }]
       : []),
     { id: "biometric", title: "Biometric unlock", Component: StepBiometric },
     { id: "success", title: "You are all set", Component: StepSuccess },
