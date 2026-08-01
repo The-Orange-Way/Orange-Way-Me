@@ -83,12 +83,12 @@ function SecurityPage() {
           title="What happens if you forget your password"
         >
           <p>
-            When you sign up, we give you a one-time recovery code. Print it, write it down, save it
+            When you sign up, we give you a one-time recovery kit. Write it down, save it
             in your password manager, somewhere safe and offline. With it, you can reset your
             password and keep all your data.
           </p>
           <p className="mt-3">
-            Without the password and without the recovery code, your data is unrecoverable. We can't
+            Without the password and without the recovery kit, your data is unrecoverable. We can't
             reset it for you, and we can't see it ourselves. That's the trade, and it's why your
             data is actually safe.
           </p>
