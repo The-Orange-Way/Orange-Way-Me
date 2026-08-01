@@ -80,7 +80,9 @@ jobs:
           # The AuthScreen `SIGNUP_OPEN` constant reads
           # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`; an empty value
           # keeps the flag-on branch out of every bundle, prod included.
-          # Re-enable by restoring the branch-derived '1' on the dev arm.
+          # Current value is an unconditional empty string on every branch
+          # (not a ternary). Re-enable on dev by changing to a ternary:
+          # github.ref_name == 'dev' && '1' || ''.
           VITE_DEV_SIGNUP_OPEN: ""
           # Serve the v2 onboarding flow (DL-0429) ONLY on the dev branch
           # deploy. `ONBOARDING_V2_ENABLED` in
@@ -102,10 +104,9 @@ jobs:
           # turn it on in prod. The prod bundle never contains the flag-on
           # branch of the code at all.
           #
-          # This makes the flow reachable for review. It does NOT make it
-          # functional: no magic link is sent, the recovery grid renders
-          # empty slots, no biometric credential is enrolled and finishing
-          # creates nothing. Those seams are marked TODO(DL-0414).
+          # Flow is wired to real auth, vault generation, and recovery-kit
+          # creation as of 615d1b51. This flag controls which branches
+          # serve /onboarding; the prod arm always resolves to false.
           VITE_ONBOARDING_V2: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Cloudflare Turnstile captcha widget. Build-time inlined
           # public site key; the matching SECRET key lives in the
