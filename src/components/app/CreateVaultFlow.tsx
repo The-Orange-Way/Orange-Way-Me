@@ -235,7 +235,7 @@ export function CreateVaultFlow() {
                 className="mt-0.5"
               />
               <span className="text-muted-foreground">
-                I understand this password cannot be recovered without my recovery code.
+                I understand this password cannot be recovered without my recovery kit.
               </span>
             </label>
             <Button type="submit" className="w-full" disabled={!canSubmit}>
@@ -279,7 +279,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
   const onDownload = () => {
     const ts = new Date().toISOString();
     const body = [
-      "Orange Way — Vault recovery code",
+      "Orange Way - Vault recovery kit",
       `Generated: ${ts}`,
       "",
       "Keep this somewhere safe. Anyone with this code can reset your vault password.",
@@ -314,7 +314,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
     w.document.write(`
       <html><head><title>Orange Way Vault Recovery Code</title></head>
       <body style="font-family:system-ui;padding:32px;max-width:560px;margin:auto">
-        <h1 style="font-size:18px">Orange Way — Vault recovery code</h1>
+        <h1 style="font-size:18px">Orange Way - Vault recovery kit</h1>
         <p style="color:#666;font-size:13px">Generated: ${ts}</p>
         <p style="font-size:13px"><strong>Keep this somewhere safe.</strong> Anyone with this code can reset your vault password.</p>
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:16px">${grid}</div>
@@ -328,7 +328,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
   return (
     <Card className="shadow-card">
       <CardHeader className="pb-4">
-        <CardTitle className="text-lg">Save your recovery code</CardTitle>
+        <CardTitle className="text-lg">Save your recovery kit</CardTitle>
         <CardDescription>Shown once. Store it somewhere safe.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -376,7 +376,7 @@ function RecoveryReveal({ code, onContinue }: { code: string; onContinue: () => 
         <label className="flex items-start gap-2 text-sm">
           <Checkbox checked={saved} onCheckedChange={(v) => setSaved(!!v)} className="mt-0.5" />
           <span className="text-muted-foreground">
-            I have saved my recovery code in a safe place. I understand it will not be shown again.
+            I have saved my recovery kit in a safe place. I understand it will not be shown again.
           </span>
         </label>
 
@@ -449,19 +449,19 @@ function RecoveryVerify({
     e.preventDefault();
     const allMatch = indices.every((idx, i) => inputs[i].trim().toLowerCase() === words[idx]);
     if (!allMatch) {
-      setError("One or more words don't match. Check your saved recovery code.");
+      setError("One or more recovery kit words don't match. Check what you saved.");
       return;
     }
-    toast.success("Recovery code confirmed. Welcome.");
+    toast.success("Recovery kit confirmed. Welcome.");
     onDone();
   };
 
   return (
     <Card className="shadow-card">
       <CardHeader className="pb-4">
-        <CardTitle className="text-lg">Confirm your recovery code</CardTitle>
+        <CardTitle className="text-lg">Confirm your recovery kit</CardTitle>
         <CardDescription>
-          Type these three words from your code to confirm you saved it.
+          Type these three words from your kit to confirm you saved it.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -489,7 +489,7 @@ function RecoveryVerify({
               onClick={onBack}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              Back to recovery code
+              Back to recovery kit
             </button>
           </div>
         </form>
