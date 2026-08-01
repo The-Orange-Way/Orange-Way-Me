@@ -1171,6 +1171,13 @@ function ConnectionCard({
     return `${row.label} → ${row.destinations[0]}${extra > 0 ? ` +${extra}` : ""}`;
   });
 
+  // Synced wallets with no destination account. Shown as a persistent banner
+  // so users who already synced and skipped the mapping step have a clear
+  // call to action. Clears reactively as wallets are mapped (no reload).
+  const unmappedWalletCount = Object.values(destinationsByWallet).filter(
+    (s) => s.accountNames.length === 0,
+  ).length;
+
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between gap-4 p-4">
@@ -1263,6 +1270,23 @@ function ConnectionCard({
           </DropdownMenu>
         </div>
       </div>
+
+      {unmappedWalletCount > 0 && (
+        <div className="flex items-center justify-between gap-3 border-t bg-amber-500/5 px-4 py-2.5 text-sm">
+          <span className="text-amber-700 dark:text-amber-400">
+            {unmappedWalletCount === 1
+              ? "1 account needs a destination"
+              : `${unmappedWalletCount} accounts need a destination`}
+          </span>
+          <button
+            type="button"
+            onClick={onEditMapping}
+            className="shrink-0 text-xs font-medium text-primary hover:underline"
+          >
+            Set up mapping
+          </button>
+        </div>
+      )}
 
       {expanded && (
         <div className="space-y-4 border-t bg-muted/20 px-4 py-3">
