@@ -76,19 +76,12 @@ export const ONBOARDING_COPY = {
 } as const;
 
 /**
- * COPY NOT LOCKED, and this one is on the default path, so it is the shortest
- * open item in the whole flow. CX has never written copy for the recovery
- * verification screen; it appears in DL-0414 only as a mechanism. The wording
- * below is mine and needs CX sign-off before this ships to anyone.
- *
- * For reference, the sibling app's shipped wording on the same screen is
- * "Prove you saved it" over "Type the words at the positions below from your
- * saved copy. This protects you from a future lockout." Twinning to that is
- * a perfectly good outcome and probably the fastest one.
+ * CX sign-off received (DL-0539). Wording twins the sibling app's shipped
+ * copy for the same screen. No further changes needed here before shipping.
  */
 const VERIFY_COPY = {
-  headline: "Confirm your recovery kit.",
-  body: "Type the three words we ask for, so we know the recovery kit is safely written down.",
+  headline: "Prove you saved it",
+  body: "Type the words at the positions below from your saved copy. This protects you from a future lockout.",
   cta: "Confirm",
   back: "Back to my recovery kit",
 };
