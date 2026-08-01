@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/context/AuthContext";
+import { ONBOARDING_V2_ENABLED } from "@/features/onboarding/onboarding-flow";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,7 +197,20 @@ export function AuthScreen() {
               </TabsContent>
 
               <TabsContent value="signup" className="mt-6 space-y-4">
-                {SIGNUP_OPEN ? (
+                {ONBOARDING_V2_ENABLED ? (
+                  <>
+                    <CardTitle className="text-lg">Create your account</CardTitle>
+                    <CardDescription>
+                      Set up your Orange Way account and encrypted vault in a guided flow.
+                    </CardDescription>
+                    <Link
+                      to="/onboarding"
+                      className="mt-2 inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                    >
+                      Start setup
+                    </Link>
+                  </>
+                ) : SIGNUP_OPEN ? (
                   <>
                     <CardTitle className="text-lg">Create your account</CardTitle>
                     <CardDescription>
