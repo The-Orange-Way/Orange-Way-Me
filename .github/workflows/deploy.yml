@@ -70,18 +70,15 @@ jobs:
           # import.meta.env.MODE/DEV is "production"/false during `vite build`
           # of either branch, so we derive it from the workflow ref instead.
           VITE_DEPLOY_ENV: ${{ steps.env_label.outputs.label }}
-          # Sign-up form OFF on every branch (DL-0429). The v2 onboarding
-          # flow (VITE_ONBOARDING_V2, served at /onboarding) is now the
-          # account-creation path on dev. The /auth password sign-up form
-          # dead-ends while v2 is on: the Confirm-signup email carries a
-          # 6-digit code, not a link, so a form submit sits waiting on a
-          # verifyOtp the form never runs. Turning the flag off sends dev
-          # testers to the "Private beta" gate instead of a dead form.
-          # The AuthScreen `SIGNUP_OPEN` constant reads
-          # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`; an empty value
-          # keeps the flag-on branch out of every bundle, prod included.
-          # Re-enable by restoring the branch-derived '1' on the dev arm.
-          VITE_DEV_SIGNUP_OPEN: ""
+          # Dev sign-up open, prod closed. The AuthScreen `SIGNUP_OPEN`
+          # constant reads `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`.
+          # When VITE_ONBOARDING_V2 is also true (dev only),
+          # ONBOARDING_V2_ENABLED takes precedence: the Create tab on
+          # /auth routes to /onboarding rather than showing the inline
+          # form, so SIGNUP_OPEN=true is safe to bundle on dev (that
+          # branch is unreachable via normal UI). On prod both flags are
+          # absent, so Create shows the private-beta gate. DL-0429.
+          VITE_DEV_SIGNUP_OPEN: ${{ github.ref_name == 'dev' && '1' || '' }}
           # Serve the v2 onboarding flow (DL-0429) ONLY on the dev branch
           # deploy. `ONBOARDING_V2_ENABLED` in
           # src/features/onboarding/onboarding-flow.tsx reads
@@ -102,10 +99,9 @@ jobs:
           # turn it on in prod. The prod bundle never contains the flag-on
           # branch of the code at all.
           #
-          # This makes the flow reachable for review. It does NOT make it
-          # functional: no magic link is sent, the recovery grid renders
-          # empty slots, no biometric credential is enrolled and finishing
-          # creates nothing. Those seams are marked TODO(DL-0414).
+          # With feat/onboarding-wire-real merged, the flow is wired to
+          # real Supabase auth, vault creation, and recovery. Biometric
+          # enrolment (WebAuthn PRF) remains a no-op pending DL-0414.
           VITE_ONBOARDING_V2: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Cloudflare Turnstile captcha widget. Build-time inlined
           # public site key; the matching SECRET key lives in the
