@@ -499,6 +499,11 @@ function StepRecovery(props: OnboardingStepProps) {
   const [answers, setAnswers] = useState<string[]>([]);
   const [wrong, setWrong] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Bumped by the retry affordance so the create-vault effect re-runs after a
+  // failure. Without it, a failed createVault sets creating.current back to
+  // false but nothing in the effect's deps changes, so it never fires again
+  // and the person is stranded: hideBack, no recovery code, Continue disabled.
+  const [retryToken, setRetryToken] = useState(0);
   const { vaultPassword, recoveryCode, setRecoveryCode } = useOnboardingState();
   const { createVault } = useVault();
   const copy = ONBOARDING_COPY.recovery;
@@ -540,7 +545,16 @@ function StepRecovery(props: OnboardingStepProps) {
     return () => {
       cancelled = true;
     };
-  }, [recoveryCode, vaultPassword, createVault, setRecoveryCode]);
+  }, [recoveryCode, vaultPassword, createVault, setRecoveryCode, retryToken]);
+
+  // Clears the error and re-arms the create-vault effect. On the common
+  // failure the insert is what throws, so no vault row was written and the
+  // retry is a clean first attempt rather than a second insert.
+  const retryCreate = () => {
+    creating.current = false;
+    setCreateError(null);
+    setRetryToken((token) => token + 1);
+  };
 
   // Drawn on entry to the verify stage, not on mount, so "Back to my code" and
   // a second attempt ask for a fresh triple rather than the same one again.
@@ -599,6 +613,12 @@ function StepRecovery(props: OnboardingStepProps) {
       // has been shown.
       nextDisabled={!confirmed || !recoveryCode}
       error={createError ?? (missingPassword ? "Go back and set a vault password first." : null)}
+      // Vault creation can fail (network, RLS, a transient). Without a way to
+      // retry, the failure is a dead end: Back is hidden and Continue stays
+      // disabled with no recovery code. Offer a retry only for that failure,
+      // never for the missing-password case, which needs a real Back instead.
+      secondaryLabel={createError ? "Try again" : undefined}
+      onSecondary={createError ? retryCreate : undefined}
       hideBack
     >
       <p>{copy.body}</p>
