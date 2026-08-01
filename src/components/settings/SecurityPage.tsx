@@ -518,7 +518,7 @@ function RecoveryRegenReveal({ code, onContinue }: { code: string; onContinue: (
       )
       .join("");
     w.document.write(`
-      <html><head><title>Orange Way Vault Recovery Code</title></head>
+      <html><head><title>Orange Way - Vault recovery kit</title></head>
       <body style="font-family:system-ui;padding:32px;max-width:560px;margin:auto">
         <h1 style="font-size:18px">Orange Way - Vault recovery kit</h1>
         <p style="color:#666;font-size:13px">Generated: ${ts}</p>
@@ -626,9 +626,7 @@ function RecoveryRegenVerify({ code, onDone }: { code: string; onDone: () => voi
     <>
       <DialogHeader>
         <DialogTitle>Confirm your new recovery kit</DialogTitle>
-        <DialogDescription>
-          Type two words from your kit so we know you saved it.
-        </DialogDescription>
+        <DialogDescription>Type two words from your kit so we know you saved it.</DialogDescription>
       </DialogHeader>
       <form onSubmit={onVerify} className="space-y-4">
         <div className="space-y-2">
