@@ -32,8 +32,9 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
     if (!user) return;
     let cancelled = false;
 
-    // TODO: remove `as any` after types.ts is regenerated post-migration.
-    (supabase as any)
+    // @ts-expect-error supabase types are generated against the deployed schema;
+    // has_seen_dashboard_tour regenerates on the next `supabase gen types` pass.
+    supabase
       .from("user_profiles")
       .select("has_seen_dashboard_tour")
       .eq("user_id", user.id)
@@ -56,13 +57,11 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
     // Hide immediately so the user sees the change at once.
     setShowTour(false);
     if (!user) return;
-    // TODO: remove `as any` after types.ts is regenerated post-migration.
-    (supabase as any)
+    // @ts-expect-error supabase types are generated against the deployed schema;
+    // has_seen_dashboard_tour regenerates on the next `supabase gen types` pass.
+    supabase
       .from("user_profiles")
-      .upsert(
-        { user_id: user.id, has_seen_dashboard_tour: true },
-        { onConflict: "user_id" },
-      );
+      .upsert({ user_id: user.id, has_seen_dashboard_tour: true }, { onConflict: "user_id" });
     // No await: fire-and-forget. If the write fails silently the tour
     // reappears on the next cold load -- minor friction, self-correcting.
   }, [user]);
