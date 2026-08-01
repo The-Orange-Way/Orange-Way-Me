@@ -32,8 +32,6 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
     if (!user) return;
     let cancelled = false;
 
-    // @ts-expect-error supabase types are generated against the deployed schema;
-    // has_seen_dashboard_tour regenerates on the next `supabase gen types` pass.
     supabase
       .from("user_profiles")
       .select("has_seen_dashboard_tour")
@@ -57,8 +55,6 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
     // Hide immediately so the user sees the change at once.
     setShowTour(false);
     if (!user) return;
-    // @ts-expect-error supabase types are generated against the deployed schema;
-    // has_seen_dashboard_tour regenerates on the next `supabase gen types` pass.
     supabase
       .from("user_profiles")
       .upsert({ user_id: user.id, has_seen_dashboard_tour: true }, { onConflict: "user_id" });
