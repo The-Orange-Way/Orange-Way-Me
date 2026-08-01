@@ -21,7 +21,7 @@ const QA = [
   },
   {
     q: "What happens if I forget my password?",
-    a: "You can recover with the recovery code generated at vault creation. Without either the password or the recovery code, the data is unrecoverable, by design.",
+    a: "You can recover with the recovery kit generated at vault creation. Without either the password or the recovery kit, the data is unrecoverable, by design.",
   },
   {
     q: "Can I track my Bitcoin?",
