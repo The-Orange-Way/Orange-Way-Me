@@ -879,7 +879,9 @@ export function ConnectionsPage() {
                 onClick={() => void handleAddConnection()}
                 disabled={opening || securing || !opkRegistered}
                 title={
-                  !opkRegistered ? "Securing the connection — please wait or retry above" : undefined
+                  !opkRegistered
+                    ? "Securing the connection — please wait or retry above"
+                    : undefined
                 }
                 data-testid="connections-add"
                 className="w-full"
