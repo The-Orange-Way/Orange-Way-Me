@@ -135,10 +135,10 @@ function PrivacyPage() {
           Receives error reports when the app crashes so we can fix bugs faster. We run GlitchTip on
           our own server. Sees: the technical details of the crash (route name, stack trace, browser
           version). Before any report leaves your device, an in-browser scrubber strips any field
-          whose name contains the substring &quot;recovery&quot; (covering all naming variants), along with
-          other known sensitive field names (passwords, vault keys, account balances, merchant
-          names), and rewrites URL fragments. Retention: 30 days on the GlitchTip server. No external
-          DPA: GlitchTip is operated by us, not a third-party vendor.
+          whose name contains the substring &quot;recovery&quot; (covering all naming variants),
+          along with other known sensitive field names (passwords, vault keys, account balances,
+          merchant names), and rewrites URL fragments. Retention: 30 days on the GlitchTip server.
+          No external DPA: GlitchTip is operated by us, not a third-party vendor.
         </p>
 
         <h3 className="mt-6 text-lg font-semibold">Quiltt</h3>
