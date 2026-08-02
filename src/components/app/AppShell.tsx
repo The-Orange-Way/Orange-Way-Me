@@ -82,7 +82,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
           <img
             src="/icon-192.png"
-            alt=""
+            alt={collapsed ? "Orange Way" : ""}
             width={32}
             height={32}
             className="h-8 w-8 shrink-0 rounded-lg"
