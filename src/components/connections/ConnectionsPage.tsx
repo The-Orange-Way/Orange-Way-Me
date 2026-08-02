@@ -76,8 +76,7 @@ const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 // the prod bundle never renders the "+ Connect a Bitcoin source" button and
 // no route can reach the OR connect widget (DL-0393). `=== "true"` so an
 // absent or empty value reads as OFF.
-const OR_CONNECT_ENABLED =
-  (import.meta.env.VITE_OR_CONNECT_ENABLED as string | undefined) === "true";
+const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
  *  (no "quiltt"/"orangerails" jargon). Banks read as "Bank" when we don't
