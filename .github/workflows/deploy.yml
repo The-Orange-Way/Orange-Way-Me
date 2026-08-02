@@ -158,6 +158,20 @@ jobs:
           # widget.ts treats "" as unset and takes its `||` fallback, which
           # would name the prod platform from a dev build.
           VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
+          # Gate the Orange Rails stealth-sync connector to the environments
+          # where it is actually provisioned. Today that is dev only; prod
+          # still lands the "+ Connect a Bitcoin source" button on the broken
+          # XPUB sync screen (DL-0393), so prod must not render it.
+          #
+          # OR_CONNECT_ENABLED in src/components/connections/ConnectionsPage.tsx
+          # reads `import.meta.env.VITE_OR_CONNECT_ENABLED === "true"`. Branch
+          # derived rather than a repo variable, same shape and reasoning as
+          # VITE_ONBOARDING_V2 above: an empty value folds the compare to a
+          # constant false, so the prod bundle never contains the flag-on
+          # branch of the button and no route reaches the connect widget.
+          # Flip prod on here (change the prod arm to 'true') once the OR
+          # connector is live in prod.
+          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors
