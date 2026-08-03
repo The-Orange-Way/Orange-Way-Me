@@ -71,7 +71,7 @@ jobs:
             echo "Every file \`${FROM}\` changed since the fork point."
             echo "\`${FROM} commits\` and \`${INTO} commits\` count commits touching that one file on each side since the fork."
             echo "A file with zero commits on the receiving side can be taken wholesale with no loss."
-            echo "A file with commits on both sides is CONTESTED: taking either version discards the other side's work, so it needs a human decision."
+            echo "A file with commits on both sides is contested: taking either version discards the other side's work, so it needs a human decision."
             echo
             echo "| File | ${FROM} commits | ${INTO} commits | Trial merge | Verdict |"
             echo "| --- | ---: | ---: | --- | --- |"
