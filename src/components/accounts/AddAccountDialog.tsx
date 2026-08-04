@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
-  CONNECTORS,
+  PICKER_CONNECTORS,
   type Connector,
   type ConnectorType,
   type AccountDraft,
@@ -77,7 +77,7 @@ export function AddAccountDialog({ open, onOpenChange, onCreated }: AddAccountDi
 
         {!selected && (
           <div className="grid grid-cols-1 gap-2">
-            {CONNECTORS.map((c) => (
+            {PICKER_CONNECTORS.map((c) => (
               <ConnectorTile key={c.type} connector={c} onSelect={() => handleSelect(c)} />
             ))}
           </div>
