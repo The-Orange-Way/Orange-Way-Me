@@ -196,5 +196,15 @@ Deno.serve(async (req: Request) => {
 
       return jsonResponse({ status: "ok" }, 200);
     }
+    default: {
+      // Exhaustiveness guard. The Event union has a single member today,
+      // so event.type narrows to `never` here and this assignment compiles.
+      // When a new type (e.g. sync.failed) is added to the union without a
+      // matching case, this line fails to compile, forcing a deliberate
+      // handler. It also gives the handler a return on every path.
+      const _unhandled: never = event.type;
+      console.warn(`[or-webhook-receiver] unhandled event type: ${String(_unhandled)}`);
+      return jsonResponse({ status: "ignored" }, 202);
+    }
   }
 });
