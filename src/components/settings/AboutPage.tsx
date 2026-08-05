@@ -65,7 +65,7 @@ export function AboutPage() {
           </p>
           <p>
             Your vault password never leaves your device. Losing it means losing access unless you
-            have your recovery code.
+            have your recovery kit.
           </p>
         </CardContent>
       </Card>

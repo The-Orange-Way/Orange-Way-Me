@@ -20,6 +20,8 @@ import { useCategories } from "@/hooks/useCategories";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { useHousehold } from "@/hooks/useHousehold";
 import { monthRange } from "@/lib/date-ranges";
+import { useDashboardTour } from "@/features/tour/useDashboardTour";
+import { DashboardCoachmarks } from "@/features/tour/DashboardCoachmarks";
 
 /** localStorage flag: have we ever seeded this device's prefs from the
  *  household defaults? Set once per user so a manual chip override stays
@@ -34,6 +36,7 @@ export function DashboardPage() {
   const { household } = useHousehold();
   const { categories } = useCategories();
   const seedAppliedRef = useRef(false);
+  const { showTour, dismiss: dismissTour } = useDashboardTour();
 
   // Seed per-device prefs from household defaults on first dashboard load
   // for this user. Runs once — after that, the user's chip choice wins.
@@ -85,7 +88,7 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Row 1: Net worth (wide) + This month */}
-        <div className="lg:col-span-2">
+        <div data-tour="net-worth" className="lg:col-span-2">
           <NetWorthCard />
         </div>
         <div>
@@ -96,7 +99,7 @@ export function DashboardPage() {
         <div>
           <CashFlowChart />
         </div>
-        <div>
+        <div data-tour="accounts">
           <AccountsSummary />
         </div>
         <div>
@@ -113,13 +116,15 @@ export function DashboardPage() {
         </div>
 
         {/* Row 4: Recent transactions (wide) + Upcoming bills */}
-        <div className="lg:col-span-2">
+        <div data-tour="transactions" className="lg:col-span-2">
           <RecentTransactions />
         </div>
         <div>
           <UpcomingBills />
         </div>
       </div>
+
+      {showTour && <DashboardCoachmarks onDismiss={dismissTour} />}
     </div>
   );
 }

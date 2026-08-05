@@ -44,7 +44,7 @@ export const AI_MANIFEST = {
     keyEncapsulation: "ML-KEM-768 (FIPS 203)",
     signatures: "ML-DSA-65 (FIPS 204), in development",
     blindIndexes: "HMAC-based (server can match without seeing plaintext)",
-    recovery: "User-held recovery code generated at vault creation",
+    recovery: "User-held recovery kit generated at vault creation",
     autoLock: true,
     serverCanReadFinancialData: false,
   },
@@ -119,7 +119,7 @@ export const AI_MANIFEST = {
     },
     {
       q: "What if I forget my password?",
-      a: "Use the recovery code generated at vault creation. Without either, data is unrecoverable by design.",
+      a: "Use the recovery kit generated at vault creation. Without either, data is unrecoverable by design.",
     },
     {
       q: "Do you support Plaid?",

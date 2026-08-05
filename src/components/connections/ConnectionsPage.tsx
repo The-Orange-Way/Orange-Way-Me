@@ -65,8 +65,18 @@ import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./B
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
 import { humanizeError, toastError } from "@/lib/friendly-error";
+import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
+
+// Gate the Orange Rails stealth-sync connector to environments where it is
+// actually provisioned. Branch-derived in .github/workflows/deploy.yml
+// (VITE_OR_CONNECT_ENABLED), exactly like VITE_ONBOARDING_V2: "true" on the
+// dev build, empty on prod. Empty folds the compare to a constant false, so
+// the prod bundle never renders the "+ Connect a Bitcoin source" button and
+// no route can reach the OR connect widget (DL-0393). `=== "true"` so an
+// absent or empty value reads as OFF.
+const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
  *  (no "quiltt"/"orangerails" jargon). Banks read as "Bank" when we don't
@@ -101,23 +111,6 @@ interface ConnectionRow {
   decrypted_label?: string | null;
   decrypted_last_error?: string | null;
   decrypted_wallets?: DecryptedWalletForBadges[];
-}
-
-/**
- * Error class for failures from the ow-or-proxy edge function. Carries the
- * upstream HTTP status and (when available) the JSON body so callers can
- * branch on specific status codes — registerOpk's 409 rotation-guard
- * retry, for example. Vanilla `Error` would drop both.
- */
-export class CallProxyError extends Error {
-  status: number;
-  body: unknown;
-  constructor(message: string, status: number, body: unknown) {
-    super(message);
-    this.name = "CallProxyError";
-    this.status = status;
-    this.body = body;
-  }
 }
 
 async function callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -214,10 +207,15 @@ export function ConnectionsPage() {
     return m;
   }, [connAccountMapRows, accountById]);
 
+  const userId = user?.id ?? null;
+
   const [subaccountId, setSubaccountId] = useState<string | null>(null);
+  // Caps the stale-subaccount recovery in refreshList at one attempt per mount.
+  // If OR rejects even a freshly provisioned id, clearing and re-provisioning
+  // again would loop against OR for as long as the page stays open.
+  const recoveredStaleSubaccountRef = useRef(false);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [provisioning, setProvisioning] = useState(false);
   const [securing, setSecuring] = useState(false);
   const [securingError, setSecuringError] = useState<string | null>(null);
   const [opkRegistered, setOpkRegistered] = useState(false);
@@ -251,7 +249,6 @@ export function ConnectionsPage() {
     if (!user || subaccountId || !isUnlocked) return;
     let cancelled = false;
     (async () => {
-      setProvisioning(true);
       try {
         const res = (await callProxy("or-provision", {})) as { subaccount_id: string };
         if (cancelled) return;
@@ -264,8 +261,6 @@ export function ConnectionsPage() {
             humanizeError(err, "We couldn't finish setting up your connections. Try again."),
           );
         }
-      } finally {
-        if (!cancelled) setProvisioning(false);
       }
     })();
     return () => {
@@ -309,6 +304,10 @@ export function ConnectionsPage() {
   const refreshList = useCallback(async () => {
     if (!subaccountId || !isUnlocked) return;
     setLoading(true);
+    // Set when the catch below hands off to the provision effect, so the
+    // finally leaves the spinner up for the re-provision instead of flashing
+    // the "No connections yet" empty state mid-recovery.
+    let recovering = false;
     try {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
@@ -364,12 +363,24 @@ export function ConnectionsPage() {
       );
       setConnections(decoded);
     } catch (err) {
+      // An id OR does not recognise is recoverable, so fix it rather than
+      // report it. Dropping subaccountId re-runs the provision effect, which
+      // issues one against the OR this build actually talks to and re-runs this
+      // list when it lands. The OPK effect re-runs on the new id for free.
+      if (isSubaccountNotFound(err) && userId && !recoveredStaleSubaccountRef.current) {
+        recoveredStaleSubaccountRef.current = true;
+        console.warn("[Connections] cached subaccount is unknown to OR, re-provisioning");
+        localStorage.removeItem(SUBACCOUNT_LS_PREFIX + userId);
+        setSubaccountId(null);
+        recovering = true;
+        return;
+      }
       console.error("[Connections] list failed", err);
       toastError(err, "We couldn't load your connections.");
     } finally {
-      setLoading(false);
+      if (!recovering) setLoading(false);
     }
-  }, [subaccountId, isUnlocked, decryptOrCipher]);
+  }, [subaccountId, isUnlocked, decryptOrCipher, userId]);
 
   useEffect(() => {
     void refreshList();
@@ -512,7 +523,10 @@ export function ConnectionsPage() {
 
       if (user && res.synced > 0) {
         try {
-          await importSyncedTransactionsForConnection(conn);
+          const importResult = await importSyncedTransactionsForConnection(conn);
+          if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
+            handleEditMapping(conn);
+          }
         } catch (importErr) {
           console.error("[Connections] OR import bridge failed", importErr);
           toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
@@ -677,14 +691,16 @@ export function ConnectionsPage() {
     ],
   );
 
-  async function importSyncedTransactionsForConnection(conn: ConnectionRow): Promise<void> {
-    if (!user || !subaccountId) return;
+  async function importSyncedTransactionsForConnection(
+    conn: ConnectionRow,
+  ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
+    if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
     const listRes = (await callProxy("or-transactions-list", {
       subaccount_id: subaccountId,
       limit: 500,
     })) as { transactions: EncryptedTxRow[] };
     const forThisConn = (listRes.transactions ?? []).filter((t) => t.connection_id === conn.id);
-    if (forThisConn.length === 0) return;
+    if (forThisConn.length === 0) return { unmapped: 0, unmappedWalletIds: [] };
 
     const decoded: OrImportTransaction[] = [];
     let decryptFailures = 0;
@@ -728,7 +744,7 @@ export function ConnectionsPage() {
 
     const skipped = result.unmapped + result.untagged + decryptFailures;
     if (result.imported === 0 && skipped === 0 && result.errored === 0) {
-      return;
+      return { unmapped: 0, unmappedWalletIds: [] };
     }
     const parts: string[] = [];
     if (result.imported > 0) parts.push(`${result.imported} imported`);
@@ -747,12 +763,11 @@ export function ConnectionsPage() {
     if (result.errored > 0 || decryptFailures > 0) {
       toast.warning(`Wallet ledger: ${summary}.`);
     } else if (result.unmapped > 0 || result.untagged > 0) {
-      toast.info(
-        `Wallet ledger: ${summary}.${result.unmapped > 0 ? " Click 'Edit mapping' to map the missing wallets." : ""}`,
-      );
+      toast.info(`Wallet ledger: ${summary}.`);
     } else {
       toast.success(`Wallet ledger: ${summary}.`);
     }
+    return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
   }
 
   function handleDelete(conn: ConnectionRow) {
@@ -859,17 +874,21 @@ export function ConnectionsPage() {
             >
               + Connect a bank
             </Button>
-            <Button
-              onClick={() => void handleAddConnection()}
-              disabled={opening || securing || !opkRegistered}
-              title={
-                !opkRegistered ? "Securing the connection — please wait or retry above" : undefined
-              }
-              data-testid="connections-add"
-              className="w-full"
-            >
-              {opening ? "Opening…" : "+ Connect a Bitcoin source"}
-            </Button>
+            {OR_CONNECT_ENABLED && (
+              <Button
+                onClick={() => void handleAddConnection()}
+                disabled={opening || securing || !opkRegistered}
+                title={
+                  !opkRegistered
+                    ? "Securing the connection — please wait or retry above"
+                    : undefined
+                }
+                data-testid="connections-add"
+                className="w-full"
+              >
+                {opening ? "Opening…" : "+ Connect a Bitcoin source"}
+              </Button>
+            )}
             {connections.length > 1 && (
               <Button
                 variant="ghost"
@@ -891,16 +910,14 @@ export function ConnectionsPage() {
         )}
       </div>
 
-      {/* Two-phase loader on the empty state:
-            phase 1 — provisioning the OR subaccount  → 'Connecting…'
-            phase 2 — registering the OPK public key  → 'Securing your data…'
-          The copy now matches what's actually happening at each step. */}
-      {(provisioning || securing) && connections.length === 0 && (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          {provisioning ? "Connecting…" : "Securing your data…"}
-        </div>
-      )}
+      {/* No setup spinner here on purpose. It used to show 'Connecting…' or
+          'Securing your data…' on the empty state, and it could contradict
+          itself: the provision effect only cleared its flag when the run was
+          not cancelled, so a run cancelled mid-flight left the spinner up
+          forever while the failure banner below said the opposite. The two
+          connect buttons already disable while `securing`, and any failure
+          surfaces in that banner, so the spinner carried no signal of its
+          own. Setup is a background concern; it does not need its own box. */}
 
       {/* OPK registration failed — surface loudly. Without a registered OPK
           public key on OR, every incoming bank transaction would seal under
@@ -1167,6 +1184,13 @@ function ConnectionCard({
     return `${row.label} → ${row.destinations[0]}${extra > 0 ? ` +${extra}` : ""}`;
   });
 
+  // Synced wallets with no destination account. Shown as a persistent banner
+  // so users who already synced and skipped the mapping step have a clear
+  // call to action. Clears reactively as wallets are mapped (no reload).
+  const unmappedWalletCount = Object.values(destinationsByWallet).filter(
+    (s) => s.accountNames.length === 0,
+  ).length;
+
   return (
     <div className="rounded-lg border">
       <div className="flex items-center justify-between gap-4 p-4">
@@ -1259,6 +1283,23 @@ function ConnectionCard({
           </DropdownMenu>
         </div>
       </div>
+
+      {unmappedWalletCount > 0 && (
+        <div className="flex items-center justify-between gap-3 border-t bg-amber-500/5 px-4 py-2.5 text-sm">
+          <span className="text-amber-700 dark:text-amber-400">
+            {unmappedWalletCount === 1
+              ? "1 account needs a destination"
+              : `${unmappedWalletCount} accounts need a destination`}
+          </span>
+          <button
+            type="button"
+            onClick={onEditMapping}
+            className="shrink-0 text-xs font-medium text-primary hover:underline"
+          >
+            Set up mapping
+          </button>
+        </div>
+      )}
 
       {expanded && (
         <div className="space-y-4 border-t bg-muted/20 px-4 py-3">

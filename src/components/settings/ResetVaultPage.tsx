@@ -126,7 +126,7 @@ export function ResetVaultPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Your vault is locked</CardTitle>
               <CardDescription>
-                Without your vault password or recovery code you cannot export your encrypted data.
+                Without your vault password or recovery kit you cannot export your encrypted data.
                 Resetting will erase your connections and credentials permanently. Your transaction
                 history will remain.
               </CardDescription>

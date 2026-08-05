@@ -7,7 +7,29 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
+  # true is intentional for Cloudflare Pages. Two concurrent Wrangler uploads
+  # can finish out of order: an older build can land on the edge after a newer
+  # one, which is a silent stale-content failure. Cancellation is safe because
+  # both pushes share the same branch -- the surviving run's commit is always a
+  # superset of the cancelled one's content. Do not flip this to false.
+  #
+  # That safety depends on this job publishing ONE atomic artifact: a Pages
+  # deploy replaces the whole site in a single step. A pipeline that also ships
+  # Supabase edge functions has the opposite answer, because those apply per
+  # function and incrementally, so cancelling mid run can leave some functions
+  # updated and others not. If you find a sibling deploy workflow set to false,
+  # it is almost certainly one that ships edge functions incrementally, where a
+  # cancelled mid run leaves a partial deploy: that is a real reason, not drift,
+  # and the two settings must NOT be harmonised. Check what a workflow ships
+  # before assuming either is wrong.
   cancel-in-progress: true
+
+# Least privilege for the automatic GITHUB_TOKEN. The deploy authenticates to
+# Cloudflare and GlitchTip with their own tokens from secrets, and writes no
+# GitHub state of its own, so read access to the checkout is the whole
+# requirement. Matches the sibling Books repo's deploy workflow.
+permissions:
+  contents: read
 
 jobs:
   build-and-deploy:
@@ -21,7 +43,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
@@ -52,19 +74,55 @@ jobs:
           # the DSN MUST be passed here (Cloudflare Pages env vars wouldn't
           # take effect on a Wrangler-uploaded build). The wrapper at
           # src/lib/observability/sentry.ts is a no-op when DSN is unset.
-          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          #
+          # Per-env DSN so dev and prod errors land in separate projects and
+          # alert rules can fire on prod only. Same branch-derived shape as
+          # VITE_TURNSTILE_SITE_KEY below. Until VITE_SENTRY_DSN_DEV is set
+          # the dev arm is empty and the wrapper no-ops, which matches the
+          # behaviour dev has today.
+          VITE_SENTRY_DSN: ${{ github.ref_name == 'prod' && vars.VITE_SENTRY_DSN_PROD || vars.VITE_SENTRY_DSN_DEV }}
           # Tags the env in Sentry so dev/prod errors don't pile up together.
           # import.meta.env.MODE/DEV is "production"/false during `vite build`
           # of either branch, so we derive it from the workflow ref instead.
           VITE_DEPLOY_ENV: ${{ steps.env_label.outputs.label }}
-          # Open the sign-up form ONLY on the dev branch deploy. The
-          # AuthScreen `SIGNUP_OPEN` constant reads
-          # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`. Vite inlines
-          # this at build time, so the prod bundle never contains the
-          # flag-on branch of the code; the "Private beta" gate is the
-          # only thing the prod build can render. Branch-derived rather
-          # than repo-variable so a future env-var typo can't open prod.
-          VITE_DEV_SIGNUP_OPEN: ${{ github.ref_name == 'dev' && '1' || '' }}
+          # Sign-up form OFF on every branch (DL-0429). The v2 onboarding
+          # flow (VITE_ONBOARDING_V2, served at /onboarding) is now the
+          # account-creation path on dev. The /auth password sign-up form
+          # dead-ends while v2 is on: the Confirm-signup email carries a
+          # 6-digit code, not a link, so a form submit sits waiting on a
+          # verifyOtp the form never runs. Turning the flag off sends dev
+          # testers to the "Private beta" gate instead of a dead form.
+          # The AuthScreen `SIGNUP_OPEN` constant reads
+          # `import.meta.env.VITE_DEV_SIGNUP_OPEN === "1"`; an empty value
+          # keeps the flag-on branch out of every bundle, prod included.
+          # Current value is an unconditional empty string on every branch
+          # (not a ternary). Re-enable on dev by changing to a ternary:
+          # github.ref_name == 'dev' && '1' || ''.
+          VITE_DEV_SIGNUP_OPEN: ""
+          # Serve the v2 onboarding flow (DL-0429) ONLY on the dev branch
+          # deploy. `ONBOARDING_V2_ENABLED` in
+          # src/features/onboarding/onboarding-flow.tsx reads
+          # `import.meta.env.VITE_ONBOARDING_V2 === "true"`, and
+          # `beforeLoad` in src/routes/onboarding.tsx redirects /onboarding
+          # to /auth when it is false.
+          #
+          # Without this line the variable is simply absent from the build,
+          # Vite folds the compare to a constant false, and the guard
+          # compiles to an UNCONDITIONAL redirect. That is exactly what the
+          # dev bundle shipped after the flow merged: the screens were in
+          # the bundle and the route could not be reached by anyone.
+          # A Cloudflare Pages environment variable cannot substitute for
+          # this, for the same reason spelled out on VITE_SENTRY_DSN above.
+          #
+          # Branch-derived rather than repo-variable, matching
+          # VITE_DEV_SIGNUP_OPEN directly above, so no env-var typo can
+          # turn it on in prod. The prod bundle never contains the flag-on
+          # branch of the code at all.
+          #
+          # Flow is wired to real auth, vault generation, and recovery-kit
+          # creation as of 615d1b51. This flag controls which branches
+          # serve /onboarding; the prod arm always resolves to false.
+          VITE_ONBOARDING_V2: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Cloudflare Turnstile captcha widget. Build-time inlined
           # public site key; the matching SECRET key lives in the
           # Supabase Auth project config (Studio: Auth -> Bot and
@@ -81,20 +139,64 @@ jobs:
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
           VITE_SENTRY_RELEASE: ${{ github.sha }}
-          # Per-environment OrangeRails Connect widget URL. Baked in at
-          # build time so the dev site opens the dev widget (which posts
-          # from a stable origin and does not redirect) and prod uses the
-          # prod widget via the fallback in src/lib/or/widget.ts.
-          # Leaving this empty on prod preserves the existing behaviour.
-          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'dev' && 'https://dev.orangerails.com/connect' || '' }}
+          # Per-environment Orange Rails Connect widget URL, baked in at
+          # build time.
+          #
+          # BOTH values must name a host that serves the widget directly.
+          # The apex orangerails.com/connect does NOT: it redirects to
+          # connect.orangerails.com, so the widget posts its completion
+          # message from an origin that never equals
+          # `new URL(OR_CONNECT_BASE).origin` in src/lib/or/widget.ts.
+          # That compare is strict and drops the message with no error.
+          #
+          # Prod must be set explicitly and must NOT be left empty. An
+          # empty string is not nullish, so the `??` fallback in
+          # widget.ts does not fire: the base becomes "" and
+          # `new URL("")` throws. Verified by building both shapes and
+          # reading the emitted bundle.
+          VITE_OR_CONNECT_URL: ${{ github.ref_name == 'prod' && 'https://connect.orangerails.com/connect' || 'https://dev.orangerails.com/connect' }}
+          # Per-environment Orange Rails platform slug, baked in at build
+          # time. OR is a separate deployment per environment, so the two
+          # environments authenticate as two different platform rows and
+          # the slug has to follow.
+          #
+          # It MUST name the same platform this environment's
+          # OR_PLATFORM_API_KEY authenticates as. The widget token is
+          # minted through ow-or-proxy, which sends the key, so OR records
+          # the session under the KEY's platform; the browser then claims
+          # that session by this SLUG with no key. Name two different
+          # platforms and the claim never matches its own session row, and
+          # the flow dies at discovery with a 401 that blames the widget
+          # token instead.
+          #
+          # BOTH arms are explicit on purpose. An empty arm is not unset:
+          # widget.ts treats "" as unset and takes its `||` fallback, which
+          # would name the prod platform from a dev build.
+          VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
+          # Gate the Orange Rails stealth-sync connector to the environments
+          # where it is actually provisioned. Today that is dev only; prod
+          # still lands the "+ Connect a Bitcoin source" button on the broken
+          # XPUB sync screen (DL-0393), so prod must not render it.
+          #
+          # OR_CONNECT_ENABLED in src/components/connections/ConnectionsPage.tsx
+          # reads `import.meta.env.VITE_OR_CONNECT_ENABLED === "true"`. Branch
+          # derived rather than a repo variable, same shape and reasoning as
+          # VITE_ONBOARDING_V2 above: an empty value folds the compare to a
+          # constant false, so the prod bundle never contains the flag-on
+          # branch of the button and no route reaches the connect widget.
+          # Flip prod on here (change the prod arm to 'true') once the OR
+          # connector is live in prod.
+          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip
-        # Skip when DSN is unset (open-source contributors building dist locally
-        # don't need to upload anywhere). The run block below also skips when
-        # the auth token isn't configured -- checking secrets.* in an `if:`
-        # expression is what made the whole workflow fail validation in 0s on
-        # previous attempts, so we keep the gate purely on vars.* here.
-        if: ${{ vars.VITE_SENTRY_DSN != '' }}
+        # Skip when the DSN for THIS branch is unset (open-source contributors
+        # building dist locally don't need to upload anywhere, and a dev build
+        # before VITE_SENTRY_DSN_DEV exists has nowhere to send maps). The run
+        # block below also skips when the auth token isn't configured --
+        # checking secrets.* in an `if:` expression is what made the whole
+        # workflow fail validation in 0s on previous attempts, so we keep the
+        # gate purely on vars.* here.
+        if: ${{ (github.ref_name == 'prod' && vars.VITE_SENTRY_DSN_PROD != '') || (github.ref_name != 'prod' && vars.VITE_SENTRY_DSN_DEV != '') }}
         env:
           # GlitchTip is Sentry-protocol-compatible; sentry-cli talks to it
           # natively when SENTRY_URL points at the self-hosted instance.
