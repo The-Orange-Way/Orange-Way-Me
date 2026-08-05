@@ -206,7 +206,11 @@ jobs:
           SENTRY_URL: ${{ vars.SENTRY_URL != '' && vars.SENTRY_URL || 'https://pulse.orangeway.app' }}
           SENTRY_AUTH_TOKEN: ${{ secrets.GLITCHTIP_API_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG != '' && vars.SENTRY_ORG || 'orangeway' }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT != '' && vars.SENTRY_PROJECT || 'orange-way-web' }}
+          # Branch derived, same shape as VITE_OR_PLATFORM_SLUG above. These
+          # are the two project slugs that actually exist on the GlitchTip
+          # side, so the upload cannot be pointed at a project that is not
+          # there by a stale repository variable.
+          SENTRY_PROJECT: ${{ github.ref_name == 'prod' && 'orange-way-me' || 'orange-way-me-dev' }}
           RELEASE: ${{ github.sha }}
         run: |
           set -euo pipefail
