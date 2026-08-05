@@ -113,9 +113,12 @@ jobs:
         run: |
           set -u
 
-          # Scoped to the edge functions only. The rest of the repo is
-          # Bun/Vite and is covered by the lint-and-build job.
-          mapfile -t FILES < <(find supabase/functions -name '*.ts' -type f | sort)
+          # Scoped to deployable edge functions only. The rest of the repo is
+          # Bun/Vite and is covered by the lint-and-build job. *.test.ts is
+          # excluded: colocated vitest tests run under Node/vitest, not the Deno
+          # edge runtime, so deno check on them only reports unresolvable vitest
+          # imports, never a real edge-runtime type error.
+          mapfile -t FILES < <(find supabase/functions -name '*.ts' -type f ! -name '*.test.ts' | sort)
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "::error::No .ts files found under supabase/functions -- this job is checking nothing. Fix the path rather than let it report green."
             exit 1
