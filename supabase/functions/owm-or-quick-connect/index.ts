@@ -43,12 +43,17 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http.ts";
+import { getOrGatewayFromEnv, OR_GATEWAY_NOT_ALLOWED_ERROR } from "../_shared/or-gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-// Canonical Orange Rails API gateway; see ow-or-proxy/index.ts comment block.
-const OR_SUPABASE_URL = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
+// Canonical Orange Rails API gateway, resolved against the shared allowlist
+// in _shared/or-gateway.ts. This function forwards X-Platform-API-Key to
+// whatever host OR_SUPABASE_URL names, exactly as ow-or-proxy does, so it
+// enforces exactly the same host set. Null means the configured value is not
+// allowed and every request below is refused.
+const OR_SUPABASE_URL = getOrGatewayFromEnv("owm-or-quick-connect");
 const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
 
 const QUILTT_CACHE_REUSE_FLOOR_MS = 60 * 60 * 1000; // 1hr
@@ -150,7 +155,11 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "OR_PLATFORM_API_KEY not configured" }, 500, cors);
   }
   if (!OR_SUPABASE_URL) {
-    return jsonResponse({ error: "OR_SUPABASE_URL not configured" }, 500, cors);
+    // OR_SUPABASE_URL is unset-and-defaulted-out or set to a host outside the
+    // allowlist (see _shared/or-gateway.ts). Refuse rather than fall back to
+    // a host the operator did not configure: this function hands the platform
+    // key to whatever it dials.
+    return jsonResponse({ error: OR_GATEWAY_NOT_ALLOWED_ERROR }, 500, cors);
   }
 
   try {

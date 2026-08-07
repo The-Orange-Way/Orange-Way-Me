@@ -38,11 +38,10 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http.ts";
+import { getOrGatewayFromEnv, OR_GATEWAY_NOT_ALLOWED_ERROR } from "../_shared/or-gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-// Canonical Orange Rails API gateway; see ow-or-proxy/index.ts comment block.
-const OR_SUPABASE_URL = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
 const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
 
 /**
@@ -73,11 +72,18 @@ interface AccountsResp {
   error?: string;
 }
 
+/**
+ * `gatewayUrl` is always the resolved value from getOrGatewayFromEnv, never
+ * the raw env var. Taking it as a parameter is deliberate: there is no
+ * module-level copy of the host here, so no path builds this request with an
+ * unresolved value.
+ */
 async function fetchAccounts(
+  gatewayUrl: string,
   appUserId: string,
   quilttConnectionId: string,
 ): Promise<{ ok: boolean; status: number; accounts: QuilttAccount[]; error?: string }> {
-  const res = await fetch(`${OR_SUPABASE_URL}/functions/v1/or-quiltt-accounts`, {
+  const res = await fetch(`${gatewayUrl}/functions/v1/or-quiltt-accounts`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -105,7 +111,9 @@ Deno.serve(async (req: Request) => {
 
   if (!OR_PLATFORM_API_KEY)
     return jsonResponse({ error: "OR_PLATFORM_API_KEY not configured" }, 500, cors);
-  if (!OR_SUPABASE_URL) return jsonResponse({ error: "OR_SUPABASE_URL not configured" }, 500, cors);
+
+  const gatewayUrl = getOrGatewayFromEnv("owm-or-discover-quiltt");
+  if (!gatewayUrl) return jsonResponse({ error: OR_GATEWAY_NOT_ALLOWED_ERROR }, 500, cors);
 
   try {
     // Auth
@@ -142,7 +150,7 @@ Deno.serve(async (req: Request) => {
       const delay = RETRY_DELAYS_MS[i];
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
 
-      const result = await fetchAccounts(user.id, quilttConnectionId);
+      const result = await fetchAccounts(gatewayUrl, user.id, quilttConnectionId);
       lastStatus = result.status;
       lastError = result.error;
 
