@@ -29,7 +29,11 @@ const RESOLVER_PATH = join(SHARED_DIR, "or-gateway.ts");
  * here, which is the point: the list is the contract, and a new reader that
  * skips the resolver fails the second assertion below rather than shipping.
  */
-const KNOWN_READERS = ["ow-or-proxy", "owm-or-quick-connect", "owm-or-discover-quiltt"];
+const KNOWN_READERS = [
+  "ow-or-proxy",
+  "owm-or-quick-connect",
+  "owm-or-discover-quiltt",
+];
 
 const DIRECT_READ = /Deno\s*\.\s*env\s*\.\s*get\(\s*["'`]OR_SUPABASE_URL["'`]\s*\)/;
 
@@ -62,7 +66,10 @@ describe("OR gateway readers", () => {
 
     // Named in the message so a failure says which file to fix, not just
     // that something somewhere is wrong.
-    expect(offenders, `read OR_SUPABASE_URL directly: ${offenders.join(", ")}`).toEqual([]);
+    expect(
+      offenders,
+      `read OR_SUPABASE_URL directly: ${offenders.join(", ")}`,
+    ).toEqual([]);
   });
 
   it.each(KNOWN_READERS)("%s resolves through getOrGatewayFromEnv", (fn) => {
