@@ -13,8 +13,12 @@ describe("resolveOrGatewayUrl", () => {
   });
 
   it("allows both real API gateways", () => {
-    expect(resolveOrGatewayUrl("https://api.orangerails.com")).toBe("https://api.orangerails.com");
-    expect(resolveOrGatewayUrl("https://api.orangerails.dev")).toBe("https://api.orangerails.dev");
+    expect(resolveOrGatewayUrl("https://api.orangerails.com")).toBe(
+      "https://api.orangerails.com",
+    );
+    expect(resolveOrGatewayUrl("https://api.orangerails.dev")).toBe(
+      "https://api.orangerails.dev",
+    );
   });
 
   it("refuses a host outside the allowlist", () => {
@@ -22,14 +26,20 @@ describe("resolveOrGatewayUrl", () => {
   });
 
   it("refuses lookalike hosts that merely contain an allowed name", () => {
-    expect(resolveOrGatewayUrl("https://api.orangerails.com.evil.example")).toBeNull();
+    expect(
+      resolveOrGatewayUrl("https://api.orangerails.com.evil.example"),
+    ).toBeNull();
     expect(resolveOrGatewayUrl("https://api-orangerails.com")).toBeNull();
-    expect(resolveOrGatewayUrl("https://evil.example/api.orangerails.com")).toBeNull();
+    expect(
+      resolveOrGatewayUrl("https://evil.example/api.orangerails.com"),
+    ).toBeNull();
   });
 
   it("refuses an allowed host carrying a path or a trailing slash", () => {
     expect(resolveOrGatewayUrl("https://api.orangerails.com/")).toBeNull();
-    expect(resolveOrGatewayUrl("https://api.orangerails.com/redirect")).toBeNull();
+    expect(
+      resolveOrGatewayUrl("https://api.orangerails.com/redirect"),
+    ).toBeNull();
   });
 
   it("refuses an http downgrade of an allowed host", () => {
