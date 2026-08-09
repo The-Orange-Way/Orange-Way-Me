@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { OnboardingStateContext } from "./onboarding-state";
 import type { OnboardingStateValue } from "./onboarding-state";
@@ -140,6 +140,25 @@ export function OnboardingFlow({
   const [vaultPassword, setVaultPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
 
+  // Seed one synthetic history entry on mount so browser-back steps to
+  // step 0 rather than exiting /onboarding immediately. Empty URL string
+  // keeps the current href so TanStack Router sees no route change.
+  useEffect(() => {
+    window.history.pushState({ owStep: 0 }, '');
+  }, []);
+
+  // Mirror browser back/forward into the React step index. Each onNext
+  // call pushes an entry; popstate fires when the user navigates them.
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (event.state && typeof event.state.owStep === 'number') {
+        setIndex(event.state.owStep);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const state = useMemo<OnboardingStateValue>(
     () => ({
       name,
@@ -171,11 +190,16 @@ export function OnboardingFlow({
       onComplete();
       return;
     }
-    setIndex((current) => Math.min(current + 1, total - 1));
+    const nextIndex = Math.min(index + 1, total - 1);
+    window.history.pushState({ owStep: nextIndex }, '');
+    setIndex(nextIndex);
   };
 
   const onBack = () => {
-    setIndex((current) => Math.max(current - 1, 0));
+    // Delegate to browser history so the in-app Back button and the
+    // browser back button both go through the popstate handler above.
+    // Keeping one code path means history and React index stay in sync.
+    window.history.back();
   };
 
   const percent = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
