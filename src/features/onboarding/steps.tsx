@@ -7,6 +7,7 @@ import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { supabase } from "@/integrations/supabase/client";
 import { useVault } from "@/context/VaultContext";
 import { useProfile } from "@/hooks/useProfile";
+import { humanizeError } from "@/lib/friendly-error";
 
 /**
  * Screen copy below is VERBATIM from the locked specification:
@@ -530,9 +531,8 @@ function StepRecovery(props: OnboardingStepProps) {
       .catch((cause: unknown) => {
         creating.current = false;
         if (cancelled) return;
-        setCreateError(
-          cause instanceof Error ? cause.message : "Could not create your vault. Try again.",
-        );
+        console.error(cause);
+        setCreateError(humanizeError(cause, "Could not create your vault. Try again."));
       });
 
     return () => {
