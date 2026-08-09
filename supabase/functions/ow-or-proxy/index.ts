@@ -36,37 +36,18 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http.ts";
+import { getOrGatewayFromEnv, OR_GATEWAY_NOT_ALLOWED_ERROR } from "../_shared/or-gateway.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Canonical Orange Rails API gateways.
-//
-// OR_URL_ALLOWLIST: the complete set of hosts OR_SUPABASE_URL may take.
-// An operator who tries to point this function at an unrecognized host
-// (e.g., via a compromised secret store) cannot redirect proxy traffic
-// to an attacker-controlled endpoint. New allowed values require a
-// code-review pass, not just an env-var edit.
-//
-// Entries:
-//   api.orangerails.com  -- OR production API gateway
-//   api.orangerails.dev  -- OR development API gateway
-//
-// Note: dev.orangerails.com is OR's dev CDN/frontend origin and returns
-// 405 on all function paths; it is NOT an API host and must not appear
-// here. staging.orangerails.com has no DNS.
-const OR_URL_ALLOWLIST = new Set<string>([
-  "https://api.orangerails.com",
-  "https://api.orangerails.dev",
-]);
-const OR_SUPABASE_URL_RAW = Deno.env.get("OR_SUPABASE_URL") ?? "https://api.orangerails.com";
-const OR_SUPABASE_URL = OR_URL_ALLOWLIST.has(OR_SUPABASE_URL_RAW) ? OR_SUPABASE_URL_RAW : null;
-if (!OR_SUPABASE_URL) {
-  console.error(
-    `[ow-or-proxy] OR_SUPABASE_URL=${OR_SUPABASE_URL_RAW} is not in the allowlist; all requests will 500 until the env var is corrected or the code allowlist is extended.`,
-  );
-}
+// Canonical Orange Rails API gateway. The allowed host set lives in
+// _shared/or-gateway.ts, not here: owm-or-quick-connect reads the same
+// OR_SUPABASE_URL and forwards the same platform key, so both functions must
+// enforce the same list. Null means the configured value is not allowed and
+// every request below is refused. See that module for the host notes.
+const OR_SUPABASE_URL = getOrGatewayFromEnv("ow-or-proxy");
 
 const OR_PLATFORM_API_KEY = Deno.env.get("OR_PLATFORM_API_KEY");
 
@@ -141,17 +122,9 @@ Deno.serve(async (req: Request) => {
   }
   if (!OR_SUPABASE_URL) {
     // OR_SUPABASE_URL was set to something outside the allowlist (see
-    // OR_URL_ALLOWLIST near the top of the file). Refuse all proxy
-    // traffic until either the env var is corrected or the code's
-    // allowlist is extended via a reviewed PR.
-    return jsonResponse(
-      {
-        error:
-          "Orange Rails endpoint is not in the function's allowlist. This is a deploy-side misconfiguration.",
-      },
-      500,
-      cors,
-    );
+    // _shared/or-gateway.ts). Refuse all proxy traffic until either the env
+    // var is corrected or the code's allowlist is extended via a reviewed PR.
+    return jsonResponse({ error: OR_GATEWAY_NOT_ALLOWED_ERROR }, 500, cors);
   }
 
   try {
