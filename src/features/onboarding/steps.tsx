@@ -42,7 +42,7 @@ export const ONBOARDING_COPY = {
     cta: "Send my link",
   },
   education: {
-    headline: "Your money stays yours.",
+    headline: "Your data stays yours.",
     body: "Orange Way is built so we can never see your balance, your keys, or your transactions. Not us. Not anyone. It lives on your device.",
     cta: "Got it",
   },
@@ -368,10 +368,12 @@ function StepEmail(props: OnboardingStepProps) {
 // Non-skippable by construction: one CTA, no secondary link, nothing to
 // dismiss. This is the trust moment, so the parent has to read past it.
 function StepEducation(props: OnboardingStepProps) {
+  const { name } = useOnboardingState();
   const copy = ONBOARDING_COPY.education;
+  const headline = name.trim() ? `${name.trim()}, your data stays yours.` : copy.headline;
 
   return (
-    <StepShell {...props} title={copy.headline} nextLabel={copy.cta}>
+    <StepShell {...props} title={headline} nextLabel={copy.cta}>
       <p>{copy.body}</p>
     </StepShell>
   );
@@ -751,10 +753,12 @@ function StepSuccess(props: OnboardingStepProps) {
     void updateDisplayName(displayName).catch(() => {});
   }, [recoveryCode, name, finalizeVaultSetup, updateDisplayName]);
 
+  const headline = name.trim() ? `You're all set, ${name.trim()}.` : copy.headline;
+
   return (
     <StepShell
       {...props}
-      title={copy.headline}
+      title={headline}
       nextLabel={copy.cta}
       secondaryLabel={copy.secondary}
       hideBack
