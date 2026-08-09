@@ -811,7 +811,6 @@ export function buildOnboardingSteps(mode: RecoveryVerifyMode): OnboardingStep[]
     ...(mode === "reentry"
       ? [{ id: "verify-recovery-code", title: "Confirm recovery kit", Component: StepVerify }]
       : []),
-    { id: "biometric", title: "Biometric unlock", Component: StepBiometric },
     { id: "success", title: "You are all set", Component: StepSuccess },
   ];
 }
