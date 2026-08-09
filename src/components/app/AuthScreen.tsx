@@ -144,7 +144,9 @@ export function AuthScreen() {
         setOtpStage("email");
       }
     } catch (err) {
-      toastError(err instanceof Error ? err : new Error("Could not send the code. Please try again."));
+      toastError(
+        err instanceof Error ? err : new Error("Could not send the code. Please try again."),
+      );
       setOtpStage("email");
     } finally {
       resetCaptcha();
