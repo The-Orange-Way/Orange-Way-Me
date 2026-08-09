@@ -100,6 +100,12 @@ export function humanizeError(
   if (lower.includes("institution_unavailable") || lower.includes("institution unavailable")) {
     return "Your bank's connection service is down right now. Try again in a few minutes.";
   }
+  if (
+    lower.includes("vault_metadata") &&
+    (lower.includes("duplicate key") || lower.includes("unique constraint"))
+  ) {
+    return "Your vault is already set up. Reload the page to continue.";
+  }
   if (lower.includes("duplicate key") || lower.includes("unique constraint")) {
     return "Looks like that's already in your account.";
   }
