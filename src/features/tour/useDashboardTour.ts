@@ -24,9 +24,14 @@ import { useAuth } from "@/context/AuthContext";
  *
  * Design-twin note: OWB uses the same hook. Keep the signature stable.
  */
-export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
+export function useDashboardTour(): {
+  showTour: boolean;
+  isFirstVisit: boolean | undefined;
+  dismiss: () => void;
+} {
   const { user } = useAuth();
   const [showTour, setShowTour] = useState(false);
+  const [isFirstVisit, setIsFirstVisit] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
     if (!user) return;
@@ -42,9 +47,9 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
         // Show if the row is missing (new user) or the flag is false.
         // Do not show if the flag is true, if auth is not ready, or if the
         // read failed, because a failed read is not evidence of a new user.
-        if (data === null || data.has_seen_dashboard_tour === false) {
-          setShowTour(true);
-        }
+        const firstVisit = data === null || data.has_seen_dashboard_tour === false;
+        if (firstVisit) setShowTour(true);
+        setIsFirstVisit(firstVisit);
       });
 
     return () => {
@@ -66,5 +71,5 @@ export function useDashboardTour(): { showTour: boolean; dismiss: () => void } {
       });
   }, [user]);
 
-  return { showTour, dismiss };
+  return { showTour, isFirstVisit, dismiss };
 }
