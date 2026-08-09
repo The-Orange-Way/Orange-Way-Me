@@ -139,9 +139,6 @@ export function AuthScreen() {
           ...(captchaToken ? { captchaToken } : {}),
         },
       });
-      if (sendError) {
-        toast.error("Unable to send the code. Please try again.");
-      }
     } catch (err) {
       toast.error("Unable to send the code. Please try again.");
     } finally {
