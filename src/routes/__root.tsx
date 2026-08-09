@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { Outlet, Link, createRootRoute, HeadContent, useLocation } from "@tanstack/react-router";
 import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
@@ -10,6 +10,7 @@ import { RootErrorFallback } from "@/components/error/RootErrorFallback";
 import { logBoundaryError } from "@/components/error/logError";
 import { refreshLiveBTCRate } from "@/lib/orbi-rates";
 import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import { isMarketingPath } from "@/lib/observability/analytics-surface";
 
 // Toaster is lazy-loaded: sonner transitively imports lucide-react icons
 // (CheckCircle, Info, etc.), which would otherwise drag the entire
@@ -67,34 +68,72 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  const location = useLocation();
+  // Whether posthog.init has run. Init is deferred until the user is on a
+  // marketing route, so inside the app the SDK is never initialised at all.
+  const analyticsStarted = useRef(false);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // Cookieless PostHog — privacy-first analytics for Orange Way.
-    // Memory-only persistence, no cookies, no localStorage tracking,
-    // no session recording, no person profiles. Each page load is a
-    // fresh anonymous event stream. Pageview + explicit captures only.
-    // phc_ keys are PostHog "Project API Keys" — write-only, public-safe.
-    posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? "", {
-      api_host: import.meta.env.VITE_POSTHOG_HOST ?? "https://eu.i.posthog.com",
-      persistence: "memory",
-      person_profiles: "never",
-      capture_pageview: true,
-      autocapture: false,
-      disable_session_recording: true,
-      respect_dnt: true,
-      // Cybersec audit finding 2026-06-19: PostHog captures URL query
-      // strings and path params on pageview. If a route happens to
-      // surface an account / household / transaction id in the URL,
-      // PostHog would receive it. The before_send hook scrubs:
-      //  - any url field's query string + fragment
-      //  - any path segment that looks like a UUID, slug, or numeric id
-      //  - any property whose key name suggests decrypted content
-      // The Sentry init does the same on its side. Keep the two
-      // scrubbers in shape with each other.
-      before_send: scrubPostHogEvent,
-    });
-    posthog.register({ app: "orangeway", brand: "orange-way" });
-  }, []);
+
+    if (!isMarketingPath(location.pathname)) {
+      // Authenticated app, auth screens, and anything unrecognised. If the
+      // user arrived here from marketing the SDK is already live, so stop
+      // capturing rather than leaving it running behind the sign-in wall.
+      if (analyticsStarted.current && !posthog.has_opted_out_capturing()) {
+        posthog.opt_out_capturing();
+      }
+      return;
+    }
+
+    if (!analyticsStarted.current) {
+      // Cookieless PostHog, privacy-first analytics for Orange Way.
+      // Memory-only persistence, no cookies, no localStorage tracking,
+      // no session recording, no person profiles. Each page load is a
+      // fresh anonymous event stream.
+      // phc_ keys are PostHog "Project API Keys": write-only, public-safe.
+      posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? "", {
+        api_host: import.meta.env.VITE_POSTHOG_HOST ?? "https://eu.i.posthog.com",
+        persistence: "memory",
+        person_profiles: "never",
+        // Explicit capture only. Automatic pageviews follow SPA navigation,
+        // which would fire on app routes the moment the user signs in. The
+        // capture below is what makes the route gate actually hold.
+        capture_pageview: false,
+        autocapture: false,
+        disable_session_recording: true,
+        respect_dnt: true,
+        // Cybersec audit finding 2026-06-19: PostHog captures URL query
+        // strings and path params on pageview. If a route happens to
+        // surface an account / household / transaction id in the URL,
+        // PostHog would receive it. The before_send hook scrubs:
+        //  - any url field's query string + fragment
+        //  - any path segment that looks like a UUID, slug, or numeric id
+        //  - any property whose key name suggests decrypted content
+        // The Sentry init does the same on its side. Keep the two
+        // scrubbers in shape with each other.
+        before_send: scrubPostHogEvent,
+      });
+      posthog.register({ app: "orangeway", brand: "orange-way" });
+      analyticsStarted.current = true;
+    }
+
+    // Opt-out state is persisted by posthog to localStorage under its own
+    // key, independent of persistence: "memory". So a user who signed in
+    // during an earlier visit loads a later marketing page already opted
+    // out, and every capture below would be a silent no-op. This runs
+    // after init rather than as an else branch so it covers both the fresh
+    // load and the in-session return from the app. captureEventName false
+    // suppresses the default $opt_in event, which would otherwise report
+    // the transition we just declined to record. The route gate above has
+    // already established this is a marketing path, so opting back in
+    // cannot widen what we collect.
+    if (posthog.has_opted_out_capturing()) {
+      posthog.opt_in_capturing({ captureEventName: false });
+    }
+
+    posthog.capture("$pageview");
+  }, [location.pathname]);
 
   // Bootstrap + refresh the live ORBI BTC/USD rate. The fx-rates convert()
   // reads from this cache for any BTC↔fiat path; static 65k fallback kicks
@@ -128,26 +167,15 @@ function RootComponent() {
 // localStorage (UI state, not tracking — exempt from consent under
 // GDPR Article 6 because it's strictly necessary for the banner not to
 // nag). Consistent wording across every Orange Way surface.
-// Marketing pages only — suppress on app/auth surfaces. Re-evaluated on
-// every SPA route change so navigating from marketing → app hides it.
-const NOTICE_SUPPRESSED_PREFIXES = [
-  "/auth",
-  "/reset-password",
-  "/dashboard",
-  "/accounts",
-  "/budgets",
-  "/goals",
-  "/households",
-  "/connections",
-  "/settings",
-];
-
+// Renders only where analytics actually runs. It reads the same helper as
+// the init gate above, so the banner and the behaviour it describes cannot
+// drift apart: no analytics, no notice.
 function AnalyticsNotice() {
   const location = useLocation();
   const [show, setShow] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (NOTICE_SUPPRESSED_PREFIXES.some((p) => location.pathname.startsWith(p))) {
+    if (!isMarketingPath(location.pathname)) {
       setShow(false);
       return;
     }

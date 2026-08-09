@@ -72,7 +72,7 @@ export function RecoveryDialog({ open, onOpenChange }: Props) {
   const onContinueCode = (e: React.FormEvent) => {
     e.preventDefault();
     if (normalizedWords.length !== 12) {
-      setCodeError(`Recovery code must be exactly 12 words (got ${normalizedWords.length}).`);
+      setCodeError(`Recovery kit must be exactly 12 words (got ${normalizedWords.length}).`);
       return;
     }
     setCodeError(null);
@@ -106,7 +106,7 @@ export function RecoveryDialog({ open, onOpenChange }: Props) {
         // Send the user back to step 1 with a friendly inline error
         setStep("code");
         setCodeError(
-          "That recovery code did not unlock your vault. Check for typos and try again.",
+          "Your recovery kit words did not unlock your vault. Check for typos and try again.",
         );
       } else {
         setPwError(msg || "Could not reset vault password.");
@@ -122,14 +122,14 @@ export function RecoveryDialog({ open, onOpenChange }: Props) {
         {step === "code" && (
           <form onSubmit={onContinueCode}>
             <DialogHeader>
-              <DialogTitle>Enter your recovery code</DialogTitle>
+              <DialogTitle>Enter your recovery kit words</DialogTitle>
               <DialogDescription>
-                Paste the 12-word recovery code you saved when creating your vault.
+                Paste your 12 recovery kit words you saved when creating your vault.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2 py-4">
               <Label htmlFor="rc-code" className="sr-only">
-                Recovery code
+                Recovery kit words
               </Label>
               <Textarea
                 id="rc-code"

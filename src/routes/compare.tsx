@@ -58,7 +58,6 @@ const ROWS = [
     "No",
   ],
   ["Native Bitcoin / sats display", "Yes", "No", "No", "No", "No", "Limited", "No", "No"],
-  ["xpub watch only wallet sync", "Yes", "No", "No", "No", "No", "No", "No", "No"],
   [
     "Household / multi user vaults",
     "Yes (PQ-wrapped)",

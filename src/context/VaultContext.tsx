@@ -228,6 +228,12 @@ interface VaultContextType {
   loading: boolean;
   hasVault: boolean;
   /**
+   * True when the vault-existence check failed (RLS denial, dropped
+   * connection, offline). Distinct from hasVault=false ("checked, no row").
+   * Consumers must not offer the create-vault path while this is true.
+   */
+  vaultCheckError: boolean;
+  /**
    * Which KDF currently protects the MEK wrapper: 2 = PBKDF2, 3 = Argon2id.
    * Null before the row is fetched. Used by the Security page to show/hide
    * the upgrade prompt.
@@ -340,6 +346,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hasVault, setHasVault] = useState(false);
+  // True when the vault-existence check itself failed (RLS denial, dropped
+  // connection, offline). Distinct from hasVault=false, which means "checked,
+  // no row". VaultGate uses this to block the create path so a returning user
+  // cannot insert a duplicate vault_metadata row on a transient error.
+  const [vaultCheckError, setVaultCheckError] = useState(false);
   const [vaultKeyVersion, setVaultKeyVersion] = useState<number | null>(null);
   const mekRef = useRef<CryptoKey | null>(null);
   const mekBytesRef = useRef<Uint8Array | null>(null);
@@ -415,11 +426,24 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         if (showLoading) setLoading(false);
         return;
       }
-      const { data } = await vaultTable()
+      const { data, error } = await vaultTable()
         .select("user_id,vault_key_version")
         .eq("user_id", user.id)
         .maybeSingle();
       if (cancelled) return;
+      if (error) {
+        // "I could not check" is NOT "there is no vault". A failed select
+        // (RLS denial, dropped connection, offline tab) previously fell
+        // through to setHasVault(false), which renders CreateVaultFlow and
+        // lets a returning user insert a duplicate vault_metadata row. Surface
+        // a distinct error and leave hasVault untouched so the gate can block
+        // the create path.
+        console.error("vault existence check failed", error);
+        setVaultCheckError(true);
+        if (showLoading) setLoading(false);
+        return;
+      }
+      setVaultCheckError(false);
       setHasVault(Boolean(data));
       if (data) {
         const row = data as { vault_key_version: number | null };
@@ -1397,6 +1421,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         isUnlocked,
         loading,
         hasVault,
+        vaultCheckError,
         vaultKeyVersion,
         unlock,
         createVault,

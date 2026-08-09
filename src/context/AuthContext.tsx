@@ -62,11 +62,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // user-correlatable) to PostHog. ZKA-aligned posture is "don't
     // associate any identifier with the analytics stream"; reset on
     // sign-out is sufficient and remains.
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (!newSession?.user) {
         posthog.reset();
+      }
+
+      // Consume a pending invite code once the session is first established.
+      // JoinPage writes the code to localStorage before calling signUp() so
+      // it survives the email-confirmation link opening in a new tab
+      // (sessionStorage does not survive that hop). The key is removed before
+      // the RPC fires so a fast double-fire of SIGNED_IN does not double-spend.
+      // Failure is non-fatal: the Before-User-Created auth hook is the
+      // authoritative enforcement and the account is not rolled back.
+      if (event === "SIGNED_IN" && newSession?.user) {
+        try {
+          const pendingCode = localStorage.getItem("ow_pending_invite_code");
+          if (pendingCode) {
+            localStorage.removeItem("ow_pending_invite_code");
+            // @ts-expect-error supabase types are generated against the deployed
+            // schema; redeem_invite_code regenerates on the next `supabase gen types` pass.
+            void supabase.rpc("redeem_invite_code", { p_code: pendingCode });
+          }
+        } catch {
+          /* localStorage blocked: non-fatal */
+        }
       }
     });
 

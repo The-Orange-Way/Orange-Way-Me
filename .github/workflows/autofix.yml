@@ -1,0 +1,14 @@
+# RETIRED temporary helper from PR 149. Safe to delete at any time.
+# Kept only because agent tooling has no delete-file operation. This workflow
+# can never run: it has no automatic trigger and its only job is disabled.
+name: autofix (retired)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  noop:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo retired
