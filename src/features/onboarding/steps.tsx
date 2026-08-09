@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { StepShell } from "./onboarding-flow";
 import type { OnboardingStep, OnboardingStepProps } from "./onboarding-flow";
-import { useOnboardingState, verifyRecoveryWords } from "./onboarding-state";
+import { useOnboardingState, verifyRecoveryKitWords } from "./onboarding-state";
 import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { supabase } from "@/integrations/supabase/client";
@@ -536,14 +536,14 @@ function StepRecovery(props: OnboardingStepProps) {
   // false but nothing in the effect's deps changes, so it never fires again
   // and the person is stranded: hideBack, no recovery code, Continue disabled.
   const [retryToken, setRetryToken] = useState(0);
-  const { vaultPassword, recoveryCode, setRecoveryCode } = useOnboardingState();
+  const { vaultPassword, recoveryKit, setRecoveryKit } = useOnboardingState();
   const { createVault } = useVault();
   const copy = ONBOARDING_COPY.recovery;
   const staged = RECOVERY_VERIFY_MODE === "staged";
 
   // Only reachable by deep-linking past step 4 or by a bug in the step order.
   // Says so rather than showing a grid of skeletons that will never fill in.
-  const missingPassword = !recoveryCode && !vaultPassword;
+  const missingPassword = !recoveryKit && !vaultPassword;
 
   // Arriving on this step is what creates the vault. createVault generates the
   // MEK, wraps it under Argon2id with the step 4 password AND under the
@@ -558,13 +558,13 @@ function StepRecovery(props: OnboardingStepProps) {
     // The no-password case is reported from render (missingPassword below)
     // rather than by setting state here, so the effect only ever writes state
     // asynchronously, after the promise settles.
-    if (recoveryCode || creating.current || !vaultPassword) return;
+    if (recoveryKit || creating.current || !vaultPassword) return;
     creating.current = true;
     let cancelled = false;
 
     void createVault(vaultPassword)
       .then((result) => {
-        if (!cancelled) setRecoveryCode(result.recoveryCode);
+        if (!cancelled) setRecoveryKit(result.recoveryCode);
       })
       .catch((cause: unknown) => {
         creating.current = false;
@@ -576,7 +576,7 @@ function StepRecovery(props: OnboardingStepProps) {
     return () => {
       cancelled = true;
     };
-  }, [recoveryCode, vaultPassword, createVault, setRecoveryCode, retryToken]);
+  }, [recoveryKit, vaultPassword, createVault, setRecoveryKit, retryToken]);
 
   // Clears the error and re-arms the create-vault effect. On the common
   // failure the insert is what throws, so no vault row was written and the
@@ -600,7 +600,7 @@ function StepRecovery(props: OnboardingStepProps) {
   // wrong answer draws a fresh triple: re-asking the same three would let
   // someone brute-force three known slots by repetition.
   const submitVerify = () => {
-    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+    if (verifyRecoveryKitWords(recoveryKit, positions, answers)) {
       props.onNext();
       return;
     }
@@ -642,7 +642,7 @@ function StepRecovery(props: OnboardingStepProps) {
       // Not just "did they tick the box": the code has to exist. Advancing
       // past a grid that is still loading would mean confirming words nobody
       // has been shown.
-      nextDisabled={!confirmed || !recoveryCode}
+      nextDisabled={!confirmed || !recoveryKit}
       error={createError ?? (missingPassword ? "Go back and set a vault password first." : null)}
       // Vault creation can fail (network, RLS, a transient). Without a way to
       // retry, the failure is a dead end: Back is hidden and Continue stays
@@ -653,7 +653,7 @@ function StepRecovery(props: OnboardingStepProps) {
       hideBack
     >
       <p>{copy.body}</p>
-      <RecoveryCodeSlots code={recoveryCode} />
+      <RecoveryCodeSlots code={recoveryKit} />
       <p className="mt-4 text-sm">{copy.instruction}</p>
       <label className="mt-4 flex items-center gap-3 text-sm">
         <input
@@ -671,7 +671,7 @@ function StepRecovery(props: OnboardingStepProps) {
 // Only mounted when RECOVERY_VERIFY_MODE is "reentry", the reading that makes
 // the flow 8 steps.
 function StepVerify(props: OnboardingStepProps) {
-  const { recoveryCode } = useOnboardingState();
+  const { recoveryKit } = useOnboardingState();
   const [positions, setPositions] = useState(pickVerifyPositions);
   const [answers, setAnswers] = useState<string[]>(() =>
     Array.from({ length: VERIFY_WORD_COUNT }, () => ""),
@@ -688,7 +688,7 @@ function StepVerify(props: OnboardingStepProps) {
   // attack the cooldown was there to slow, so this is a rate-limit refinement
   // rather than a hole.
   const submit = () => {
-    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+    if (verifyRecoveryKitWords(recoveryKit, positions, answers)) {
       props.onNext();
       return;
     }
@@ -718,7 +718,7 @@ function StepSuccess(props: OnboardingStepProps) {
   // onNext, and this is the last step, so it completes the wizard either way.
   // Per spec: acceptable, the aha moment was offered. Do not block on it.
   const copy = ONBOARDING_COPY.success;
-  const { name, recoveryCode } = useOnboardingState();
+  const { name, recoveryKit } = useOnboardingState();
   const { finalizeVaultSetup } = useVault();
   const { updateDisplayName } = useProfile();
 
@@ -737,7 +737,7 @@ function StepSuccess(props: OnboardingStepProps) {
   // does not claim an unlocked one.
   const committed = useRef(false);
   useEffect(() => {
-    if (committed.current || !recoveryCode) return;
+    if (committed.current || !recoveryKit) return;
     committed.current = true;
     finalizeVaultSetup();
     const displayName = name.trim();
@@ -747,7 +747,7 @@ function StepSuccess(props: OnboardingStepProps) {
     // write costs a greeting, and the name is editable in settings. Blocking
     // the last screen of onboarding on it would be the wrong trade.
     void updateDisplayName(displayName).catch(() => {});
-  }, [recoveryCode, name, finalizeVaultSetup, updateDisplayName]);
+  }, [recoveryKit, name, finalizeVaultSetup, updateDisplayName]);
 
   const headline = name.trim() ? `You're all set, ${name.trim()}.` : copy.headline;
 
