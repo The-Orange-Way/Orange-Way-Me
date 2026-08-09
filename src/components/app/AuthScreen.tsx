@@ -47,6 +47,9 @@ export function AuthScreen() {
    * Studio.
    */
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [otpStage, setOtpStage] = useState<"email" | "code">("email");
+  const [otpToken, setOtpToken] = useState("");
+  const [resendDisabled, setResendDisabled] = useState(false);
   /**
    * Ref to the widget so the auth call's error branch can call
    * `widgetRef.current?.reset()` and re-issue a fresh challenge
@@ -123,6 +126,50 @@ export function AuthScreen() {
     }
   };
 
+  const sendOtpCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setOtpStage("code"); // advance immediately; send runs in the background
+    setResendDisabled(true);
+    try {
+      const { error: sendError } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          shouldCreateUser: false,
+          ...(captchaToken ? { captchaToken } : {}),
+        },
+      });
+      if (sendError) {
+        toastError(sendError);
+        setOtpStage("email");
+      }
+    } catch (err) {
+      toastError(err instanceof Error ? err : new Error("Could not send the code. Please try again."));
+      setOtpStage("email");
+    } finally {
+      resetCaptcha();
+      setBusy(false);
+      setTimeout(() => setResendDisabled(false), 5_000);
+    }
+  };
+
+  const verifyOtpCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: otpToken.trim(),
+      type: "email",
+    });
+    setBusy(false);
+    if (verifyError || !data.session) {
+      toastError(verifyError ?? new Error("That code did not work. Check it and try again."));
+      return;
+    }
+    // Session established. AuthContext picks it up via onAuthStateChange;
+    // AuthRoute redirects to /dashboard automatically.
+  };
+
   const navigate = useNavigate();
   const submitDisabled = busy || (CAPTCHA_REQUIRED && !captchaToken);
 
@@ -151,50 +198,70 @@ export function AuthScreen() {
               {tab !== "reset" ? (
                 <>
                   {/*
-                    e2e-anchor: tests/e2e/auth.setup.ts logs the fixture
-                    test user in via the #si-email and #si-pw inputs and
-                    the "Sign in" button. Keep ids and button text stable.
+                    e2e-anchor: OTP flow. Stage "email" shows #si-email
+                    (kept for compatibility with auth.setup.ts which drives
+                    the non-V2 fixture path). Stage "code" shows #si-otp.
+                    #si-pw is removed from the V2 path: V2 accounts have no
+                    password (OTP-only onboarding, DL-0708).
                   */}
-                  <form onSubmit={onSignIn} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="si-email">Email</Label>
-                      <Input
-                        id="si-email"
-                        type="email"
-                        autoComplete="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
+                  {otpStage === "email" ? (
+                    <form onSubmit={sendOtpCode} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="si-email">Email</Label>
+                        <Input
+                          id="si-email"
+                          type="email"
+                          autoComplete="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <CaptchaWidget
+                        ref={widgetRef}
+                        onSuccess={setCaptchaToken}
+                        onError={resetCaptcha}
+                        onExpire={resetCaptcha}
                       />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="si-pw">Password</Label>
-                      <Input
-                        id="si-pw"
-                        type="password"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <CaptchaWidget
-                      ref={widgetRef}
-                      onSuccess={setCaptchaToken}
-                      onError={resetCaptcha}
-                      onExpire={resetCaptcha}
-                    />
-                    <Button type="submit" className="w-full" disabled={submitDisabled}>
-                      {busy ? "Signing in..." : "Sign in"}
-                    </Button>
-                    <button
-                      type="button"
-                      className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => setTab("reset")}
-                    >
-                      Forgot your password?
-                    </button>
-                  </form>
+                      <Button type="submit" className="w-full" disabled={submitDisabled}>
+                        {busy ? "Sending..." : "Send my code"}
+                      </Button>
+                    </form>
+                  ) : (
+                    <form onSubmit={verifyOtpCode} className="space-y-4">
+                      <p className="text-sm text-muted-foreground">
+                        We sent a code to <strong>{email}</strong>. Check your inbox.
+                      </p>
+                      <div className="space-y-2">
+                        <Label htmlFor="si-otp">One-time code</Label>
+                        <Input
+                          id="si-otp"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          value={otpToken}
+                          onChange={(e) => setOtpToken(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <Button type="submit" className="w-full" disabled={busy}>
+                        {busy ? "Verifying..." : "Sign in"}
+                      </Button>
+                      <button
+                        type="button"
+                        className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+                        disabled={resendDisabled || busy}
+                        onClick={() => {
+                          setOtpToken("");
+                          setOtpStage("email");
+                        }}
+                      >
+                        {resendDisabled
+                          ? "Resend available shortly..."
+                          : "Use a different email or resend code"}
+                      </button>
+                    </form>
+                  )}
                   <p className="mt-6 text-center text-sm text-muted-foreground">
                     New to Orange Way?{" "}
                     <button
