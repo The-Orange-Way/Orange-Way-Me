@@ -714,7 +714,6 @@ function StepVerify(props: OnboardingStepProps) {
   );
 }
 
-
 function StepSuccess(props: OnboardingStepProps) {
   // "I'll do this later" opens an empty dashboard. onSecondary defaults to
   // onNext, and this is the last step, so it completes the wizard either way.
