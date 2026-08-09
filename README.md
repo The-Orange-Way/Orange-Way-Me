@@ -132,10 +132,10 @@ Today Orange Way is a local-first tracker with:
 - Client-side dashboard, cash-flow chart, net-worth view
 - Demo mode with seed data
 - Household sharing primitives (hybrid post-quantum key encapsulation, per-member key wrapping)
+- **Bank syncing through [OrangeRails](https://github.com/Orange-The-World/orangerails)** (our sister project, the open-source answer to Plaid), with Quiltt as the bank feed. The honest data path: your bank login happens in Quiltt's connector or your bank's own sign-in and is never sent to Orange Way; the feed is briefly handled in the clear by the OrangeRails connector to seal each transaction to a key only you hold; Orange Way stores only the sealed version. Full detail on the [security page](https://orangeway.app/security).
 
 Next on the roadmap:
 
-- **Bank syncing through [OrangeRails](https://github.com/MorningRevolution/orangerails)** (our sister project, the open-source answer to Plaid). Bank credentials encrypted on your device before they ever reach a server.
 - **Multi-device sync.** Unlock once per device. Keep encrypted state in sync through Supabase. The server still cannot read content.
 - **Bitcoin-native reporting.** Cost basis, sats-denominated net worth, Lightning transaction history, xpub wallets.
 - **Hardware-key second factor.** WebAuthn / passkey unlock as a vault-second-factor option.
@@ -157,7 +157,7 @@ This is a cypherpunk project. Its success depends on community scrutiny and cont
 
 ### Designers + writers
 
-- **UX designers** who care about making zero-knowledge feel invisible to a non-technical household.
+- **UX designers** who care about making client-side encryption feel invisible to a non-technical household.
 - **Technical writers** to keep the threat model, docs, and onboarding clear.
 - **Translators** to take the app multilingual once the surface stabilizes.
 
@@ -200,7 +200,7 @@ On first launch, create a vault password. Everything you enter from that point i
 
 **Stack:** TanStack Start (SSR-capable React) + Vite + Supabase (auth, Postgres, row-level security) + Cloudflare Pages (deploy target) + TypeScript.
 
-A turnkey self-host package (Docker compose, one-command setup) ships once the bank-sync integration stabilizes.
+A turnkey self-host package (Docker compose, one-command setup) ships once the bank-sync integration hardens post-launch.
 
 ---
 
@@ -227,7 +227,7 @@ Orange Way stands on thirty-five years of cypherpunk thought.
 ## Related projects
 
 - **[Orange Way Books](https://github.com/The-Orange-Way/Orange-Way-Books):** the sibling project for businesses. Same architecture, applied to double-entry bookkeeping. Built for Bitcoin-native companies whose accountants want sovereign books.
-- **[OrangeRails](https://github.com/MorningRevolution/orangerails):** the zero-knowledge bank-and-exchange aggregator. The open-source answer to Plaid. Orange Way will use OrangeRails for every bank, card, and exchange connection so your credentials never touch our server either.
+- **[OrangeRails](https://github.com/Orange-The-World/orangerails):** self-custody for your financial data. The open-source answer to Plaid. Orange Way uses OrangeRails for bank connections: your credentials stay with your bank or the feed provider, and the connector seals each transaction to a key only you hold before Orange Way stores it.
 
 ---
 

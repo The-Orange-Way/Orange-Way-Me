@@ -97,8 +97,8 @@ const PILLARS: {
         p: "Every balance, transaction, category, and note is scrambled in your browser before it ever reaches our servers.",
       },
       {
-        h: "Recovery code",
-        p: "One-time code at signup. Save it safely. With it, you can reset your password and keep your data.",
+        h: "Recovery kit",
+        p: "One-time recovery kit at signup. Save it safely. With it, you can reset your password and keep your data.",
       },
       {
         h: "Household sharing",

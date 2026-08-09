@@ -1012,6 +1012,8 @@ export type Database = {
         Row: {
           avatar_url: string | null;
           enc_display_name: string | null;
+          // hand-added ahead of next `supabase gen types` pass
+          has_seen_dashboard_tour: boolean;
           or_subaccount_id: string | null;
           quiltt_session_expires_at: string | null;
           quiltt_session_token: string | null;
@@ -1021,6 +1023,8 @@ export type Database = {
         Insert: {
           avatar_url?: string | null;
           enc_display_name?: string | null;
+          // hand-added ahead of next `supabase gen types` pass
+          has_seen_dashboard_tour?: boolean;
           or_subaccount_id?: string | null;
           quiltt_session_expires_at?: string | null;
           quiltt_session_token?: string | null;
@@ -1030,6 +1034,8 @@ export type Database = {
         Update: {
           avatar_url?: string | null;
           enc_display_name?: string | null;
+          // hand-added ahead of next `supabase gen types` pass
+          has_seen_dashboard_tour?: boolean;
           or_subaccount_id?: string | null;
           quiltt_session_expires_at?: string | null;
           quiltt_session_token?: string | null;

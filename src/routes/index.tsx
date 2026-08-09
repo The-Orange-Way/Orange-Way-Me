@@ -235,7 +235,7 @@ function Nav() {
             {COPY.navLogIn}
           </Link>
           <Link
-            to="/auth"
+            to="/onboarding"
             className="rounded-full px-4 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5"
             style={{ background: C.deep, color: "#fff" }}
           >
@@ -316,7 +316,7 @@ function Hero() {
       </p>
       <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
         <Link
-          to="/auth"
+          to="/onboarding"
           className="inline-flex items-center justify-center rounded-full px-7 py-3.5 text-base font-semibold transition-transform hover:-translate-y-0.5"
           style={{
             background: C.orange,
@@ -707,7 +707,7 @@ function Pricing() {
               {COPY.pricingFreeUnit}
             </p>
             <Link
-              to="/auth"
+              to="/onboarding"
               className="mt-8 inline-flex w-full items-center justify-center rounded-full px-6 py-3 text-base font-semibold transition-transform hover:-translate-y-0.5"
               style={{
                 background: C.orange,
@@ -813,7 +813,7 @@ function FinalCTA() {
         </h2>
         <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
-            to="/auth"
+            to="/onboarding"
             className="inline-flex items-center justify-center rounded-full px-7 py-3.5 text-base font-semibold transition-transform hover:scale-105"
             style={{
               background: C.orange,
@@ -874,7 +874,7 @@ function FooterCol({
     items: Array<{
       label: string;
       href?: string;
-      to?: "/auth" | "/security" | "/privacy" | "/terms";
+      to?: "/auth" | "/onboarding" | "/security" | "/privacy" | "/terms";
     }>;
   };
 }) {

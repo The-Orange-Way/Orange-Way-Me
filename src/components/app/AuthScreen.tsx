@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/context/AuthContext";
+import { ONBOARDING_V2_ENABLED } from "@/features/onboarding/onboarding-flow";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +23,12 @@ import type { TurnstileInstance } from "@marsidev/react-turnstile";
  * is deliberately no runtime toggle a malicious client could flip.
  */
 const SIGNUP_OPEN = import.meta.env.VITE_DEV_SIGNUP_OPEN === "1";
+// V2 entry: reuses the gate already defined in onboarding-flow so the
+// auth entry link and the /onboarding route are always in sync. If
+// ONBOARDING_V2_ENABLED is off, /onboarding redirects to /auth anyway,
+// so linking there from a v2 entry that is also off is harmless, but
+// keeping them tied prevents that inconsistency from even arising.
+const V2 = ONBOARDING_V2_ENABLED;
 
 export function AuthScreen() {
   const { signUp, signIn, resetPassword } = useAuth();
@@ -115,7 +123,135 @@ export function AuthScreen() {
     }
   };
 
+  const navigate = useNavigate();
   const submitDisabled = busy || (CAPTCHA_REQUIRED && !captchaToken);
+
+  // V2 entry point: sign-in form + create-account link to /onboarding.
+  // V2 is the only gate here. SIGNUP_OPEN is a separate flag that governs
+  // the legacy password sign-up form (the tab panel below) and is left
+  // empty in CI so the broken legacy flow stays off. Folding it into this
+  // guard made the entire block dead code at Vite build time. Keep them
+  // independent: the user chooses sign-in or create-account, no auto-redirect.
+  if (V2) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md">
+          <div className="mb-8 flex justify-center">
+            <img
+              src="/icon-192.png"
+              alt=""
+              width={48}
+              height={48}
+              className="h-12 w-12 rounded-2xl"
+            />
+          </div>
+
+          <Card className="shadow-card">
+            <CardContent className="pt-6">
+              {tab !== "reset" ? (
+                <>
+                  {/*
+                    e2e-anchor: tests/e2e/auth.setup.ts logs the fixture
+                    test user in via the #si-email and #si-pw inputs and
+                    the "Sign in" button. Keep ids and button text stable.
+                  */}
+                  <form onSubmit={onSignIn} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="si-email">Email</Label>
+                      <Input
+                        id="si-email"
+                        type="email"
+                        autoComplete="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="si-pw">Password</Label>
+                      <Input
+                        id="si-pw"
+                        type="password"
+                        autoComplete="current-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <CaptchaWidget
+                      ref={widgetRef}
+                      onSuccess={setCaptchaToken}
+                      onError={resetCaptcha}
+                      onExpire={resetCaptcha}
+                    />
+                    <Button type="submit" className="w-full" disabled={submitDisabled}>
+                      {busy ? "Signing in..." : "Sign in"}
+                    </Button>
+                    <button
+                      type="button"
+                      className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setTab("reset")}
+                    >
+                      Forgot your password?
+                    </button>
+                  </form>
+                  <p className="mt-6 text-center text-sm text-muted-foreground">
+                    New to Orange Way?{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-primary underline underline-offset-2"
+                      onClick={() => void navigate({ to: "/onboarding" })}
+                    >
+                      Create an account
+                    </button>
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <CardTitle className="text-lg">Reset password</CardTitle>
+                    <CardDescription>We&apos;ll email you a reset link.</CardDescription>
+                  </div>
+                  <form onSubmit={onReset} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="rs-email">Email</Label>
+                      <Input
+                        id="rs-email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <CaptchaWidget
+                      ref={widgetRef}
+                      onSuccess={setCaptchaToken}
+                      onError={resetCaptcha}
+                      onExpire={resetCaptcha}
+                    />
+                    <Button type="submit" className="w-full" disabled={submitDisabled}>
+                      {busy ? "Sending..." : "Send reset link"}
+                    </Button>
+                    <button
+                      type="button"
+                      className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setTab("signin")}
+                    >
+                      Back to sign in
+                    </button>
+                  </form>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            Your data is encrypted with a separate vault password we never see.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">

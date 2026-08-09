@@ -1,0 +1,121 @@
+name: divergence-report
+
+# On demand only. This never runs itself and never writes to a branch.
+on:
+  workflow_dispatch:
+    inputs:
+      into_branch:
+        description: "Receiving branch (the one that would take the changes)"
+        required: false
+        default: "dev"
+      from_branch:
+        description: "Donating branch (the one carrying commits the receiver lacks)"
+        required: false
+        default: "prod"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build divergence report
+        env:
+          INTO: ${{ github.event.inputs.into_branch || 'dev' }}
+          FROM: ${{ github.event.inputs.from_branch || 'prod' }}
+        run: |
+          set -euo pipefail
+
+          git config user.email "actions@github.com"
+          git config user.name "divergence-report"
+
+          git fetch --no-tags --prune origin "+refs/heads/${INTO}:refs/remotes/origin/${INTO}"
+          git fetch --no-tags --prune origin "+refs/heads/${FROM}:refs/remotes/origin/${FROM}"
+
+          FORK="$(git merge-base "origin/${INTO}" "origin/${FROM}")"
+          FROM_ONLY="$(git rev-list --count "${FORK}..origin/${FROM}")"
+          INTO_ONLY="$(git rev-list --count "${FORK}..origin/${INTO}")"
+
+          # Trial merge in a detached worktree state to find the genuinely
+          # conflicted set. A file can differ on both sides and still merge
+          # cleanly, so "changed on both sides" and "conflicted" are not the
+          # same list and both matter.
+          git checkout -q --detach "origin/${INTO}"
+          CONFLICTED_FILE="$(mktemp)"
+          if git merge --no-commit --no-ff "origin/${FROM}" >/dev/null 2>&1; then
+            : > "${CONFLICTED_FILE}"
+          else
+            git diff --name-only --diff-filter=U > "${CONFLICTED_FILE}" || true
+          fi
+          git merge --abort >/dev/null 2>&1 || true
+          git reset --hard -q "origin/${INTO}"
+
+          REPORT="divergence-report.md"
+          {
+            echo "# Divergence report: ${FROM} into ${INTO}"
+            echo
+            echo "Fork point: \`${FORK}\`"
+            echo
+            echo "- Commits on \`${FROM}\` that \`${INTO}\` lacks: **${FROM_ONLY}**"
+            echo "- Commits on \`${INTO}\` that \`${FROM}\` lacks: **${INTO_ONLY}**"
+            echo "- Files conflicting on a trial merge: **$(wc -l < "${CONFLICTED_FILE}" | tr -d ' ')**"
+            echo
+            echo "## Per file"
+            echo
+            echo "Every file \`${FROM}\` changed since the fork point."
+            echo "\`${FROM} commits\` and \`${INTO} commits\` count commits touching that one file on each side since the fork."
+            echo "A file with zero commits on the receiving side can be taken wholesale with no loss."
+            echo "A file with commits on both sides is contested: taking either version discards the other side's work, so it needs a human decision."
+            echo
+            echo "| File | ${FROM} commits | ${INTO} commits | Trial merge | Verdict |"
+            echo "| --- | ---: | ---: | --- | --- |"
+          } > "${REPORT}"
+
+          SAFE=0
+          CONTESTED=0
+
+          git diff --name-only "${FORK}" "origin/${FROM}" | while IFS= read -r f; do
+            [ -n "${f}" ] || continue
+            n_from="$(git rev-list --count "${FORK}..origin/${FROM}" -- "${f}")"
+            n_into="$(git rev-list --count "${FORK}..origin/${INTO}" -- "${f}")"
+            if grep -Fxq "${f}" "${CONFLICTED_FILE}"; then
+              merge_state="conflict"
+            else
+              merge_state="clean"
+            fi
+            if [ "${n_into}" -eq 0 ]; then
+              verdict="safe to take ${FROM}"
+            else
+              verdict="CONTESTED, needs a decision"
+            fi
+            printf '| `%s` | %s | %s | %s | %s |\n' "${f}" "${n_from}" "${n_into}" "${merge_state}" "${verdict}" >> "${REPORT}"
+          done
+
+          SAFE="$(grep -c 'safe to take' "${REPORT}" || true)"
+          CONTESTED="$(grep -c 'CONTESTED' "${REPORT}" || true)"
+
+          {
+            echo
+            echo "## Summary"
+            echo
+            echo "- Safe to take from \`${FROM}\`: **${SAFE}**"
+            echo "- Contested, needing a per file decision: **${CONTESTED}**"
+            echo
+            echo "This job reports. It does not resolve, does not push, and does not open a pull request."
+          } >> "${REPORT}"
+
+          cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+          cat "${REPORT}"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: divergence-report
+          path: divergence-report.md
+          if-no-files-found: error

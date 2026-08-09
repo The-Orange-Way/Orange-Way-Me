@@ -100,6 +100,12 @@ export function humanizeError(
   if (lower.includes("institution_unavailable") || lower.includes("institution unavailable")) {
     return "Your bank's connection service is down right now. Try again in a few minutes.";
   }
+  if (
+    lower.includes("vault_metadata") &&
+    (lower.includes("duplicate key") || lower.includes("unique constraint"))
+  ) {
+    return "Your vault is already set up. Reload the page to continue.";
+  }
   if (lower.includes("duplicate key") || lower.includes("unique constraint")) {
     return "Looks like that's already in your account.";
   }
@@ -135,16 +141,13 @@ export function humanizeError(
   // tail of the message isn't paired with "Failed to create account: …".
   const stripped = raw.replace(/^(failed to (create|map|update|delete|fetch|save)[^:]*:\s*)/i, "");
   if (stripped !== raw) {
-    const head = stripped.trim().slice(0, 1).toUpperCase() + stripped.trim().slice(1);
-    if (head.length > 140) return head.slice(0, 137) + "…";
-    return head.endsWith(".") || head.endsWith("!") || head.endsWith("?") ? head : head + ".";
+    // The tail after stripping is still raw DB or runtime text the user cannot
+    // act on. Return the caller's fallback so internal strings never reach the UI.
+    return fallback;
   }
 
-  // For anything else, surface a short version of the message rather than the
-  // full stack-like string, capped so toasts stay readable.
-  const trimmed = raw.trim();
-  if (trimmed.length > 140) return trimmed.slice(0, 137) + "…";
-  return trimmed.endsWith(".") || trimmed.endsWith("!") || trimmed.endsWith("?")
-    ? trimmed
-    : trimmed + ".";
+  // No pattern matched: return the caller's fallback. The raw message may contain
+  // Postgres error detail, column names, or internal state. The real string is
+  // available via toastError's console.error sidecar or GlitchTip's global handler.
+  return fallback;
 }

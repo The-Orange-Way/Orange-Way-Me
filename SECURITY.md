@@ -12,7 +12,7 @@ but you're the only one who has the key — and the key never leaves your head.
 
 ## Encryption stack
 
-### Layer 1: Password → Key (Argon2id, with PBKDF2 fallback for legacy vaults)
+### Layer 1: Password → Key (Argon2id)
 
 Your vault password is transformed into a 256-bit Master Encryption Key (MEK)
 using **Argon2id**. The client-side implementation is shipped today; see
@@ -30,19 +30,21 @@ specific class of attack PBKDF2 is weak to.
 > unlocked by an 8-lane client. The right way to raise this is to bump
 > `vault_key_version` and ship a re-key migration that derives the new MEK
 > under the new parameters and re-wraps every existing ciphertext. Tracked
-> as a follow-up next to the PBKDF2 → Argon2id migration RPC.
+> as a follow-up.
 
-Legacy vaults created before the Argon2id rollout still derive their MEK with
-**PBKDF2-SHA256 at 600,000 iterations**, double the OWASP 2023 minimum. The
-vault picks the right strategy based on the `vault_key_version` field stored
-next to the vault. Unknown versions fail closed: the client refuses to unlock
-rather than silently downgrade to PBKDF2.
+Every live vault uses Argon2id. The strategy registry
+(`KEY_DERIVATION_STRATEGIES` in `src/lib/vault.ts`) carries a single entry,
+v=1, mapping to the parameters above: the public-launch wipe removed every
+vault created before the Argon2id rollout, so no production vault derives
+its key with anything weaker. The vault picks its strategy from the
+`vault_key_version` field, and unknown versions fail closed: the client
+refuses to unlock rather than silently downgrade. (PBKDF2-SHA256 at 600,000
+iterations remains in the codebase for recovery-code key derivation and the
+pre-wipe vault format; no live vault uses it for password unlock.)
 
-The remaining piece is the server-side migration RPC that lets existing
-vaults move from PBKDF2 to Argon2id on the next password change. Tracked
-as a follow-up.
-
-**Crack-time estimates at current PBKDF2-600k (single RTX 4090):**
+**Crack-time estimates, computed at PBKDF2-600k on a single RTX 4090.
+Argon2id is strictly harder to attack, so read these as conservative
+lower bounds:**
 
 | Password                                          | Time to crack                       |
 | ------------------------------------------------- | ----------------------------------- |
@@ -121,6 +123,13 @@ KEK. It does not store the recovery code or the recovery KEK.
 | Your vault password     | Never transmitted              | Never                               |
 | Recovery code           | Never stored                   | Never                               |
 
+One honest exception on the way in: bank-synced transactions arrive through
+Quiltt (the bank feed) and the OrangeRails connector, which briefly handles
+them in the clear to seal each transaction to a key only you hold. Supabase
+still only ever stores the sealed version; the table above describes what
+lands at rest. The full data path is on the
+[security page](https://orangeway.app/security).
+
 **What ciphertext looks like in the database:**
 
 ```
@@ -140,19 +149,25 @@ random noise.
 ### ✅ Shipped
 
 - AES-256-GCM encryption for all financial fields
-- PBKDF2-SHA256 at 600,000 iterations with per-user random salt
+- Argon2id key derivation (64 MiB memory, 3 iterations, 4 lanes): see
+  `deriveMekArgon2id` in `src/lib/vault.ts`. Every live vault uses it; the
+  public-launch wipe removed all pre-Argon2id vaults (see Layer 1 above)
 - Separate HMAC-SHA-256 blind indexes for merchant + category search
 - Recovery code (12-word BIP-39 style) with MEK wrapping
 - Row-level security: every Supabase table enforces `user_id = auth.uid()`
 - Isolated `hmac_salt` from `kdf_salt` — search key never overlaps encrypt key
+- **Post-quantum key wrapping**: hybrid X25519 + ML-KEM-768 (FIPS 203) for
+  long-lived household keys, so today's recorded ciphertext resists future
+  quantum decryption (see `src/lib/pqc.ts`)
 
 ### 🔜 Planned
 
-- **Argon2id upgrade** — port from OrangeRails (10,000× harder to brute-
-  force at equivalent wall-clock cost). Opt-in migration, no data loss.
+- **ML-DSA-65 per-mutation signing** (FIPS 204): implemented client-side
+  behind a feature flag; ships publicly once the server-side verifier lands
 - **zxcvbn password strength meter** + EFF passphrase generator at setup
-- **Post-quantum key wrapping** (hybrid X25519 + ML-KEM-768 + ML-DSA-65)
-  for long-lived data protection against future quantum computers
+- **Vault re-key migration** so a future Argon2id parameter bump (or a new
+  memory-hard KDF) can roll out by bumping `vault_key_version` and
+  re-wrapping existing ciphertext
 
 ### 🗓 Future (Household milestone)
 
@@ -164,15 +179,15 @@ random noise.
 
 ## How contributors can help
 
-**1. Server-side Argon2id migration RPC**
-The client-side Argon2id implementation is already shipped in
-`src/lib/vault.ts` (see `deriveMekArgon2id`, `wrapMekWithPasswordArgon2id`).
-What's still open is the Supabase RPC that lets existing PBKDF2 vaults
-re-key atomically: derive the new MEK under Argon2id, re-wrap every
-existing ciphertext with the new MEK, and flip `vault_key_version` on
-success. The client refuses to silently downgrade, so the RPC is the only
-path from a legacy vault to a modern one. Highest-value contribution open
-right now.
+**1. Vault re-key migration**
+Every live vault is Argon2id already (the launch wipe removed the PBKDF2
+generation), but the strategy registry is designed for parameter evolution:
+a future bump (say 4 lanes to 8, or a new memory-hard KDF) needs an atomic
+re-key path that derives the new MEK under the new parameters, re-wraps
+every existing ciphertext, and flips `vault_key_version` on success. The
+client refuses to silently downgrade, so this migration is the only way to
+move a vault between versions. Design it once, and every future KDF
+improvement ships on top of it. Highest-value contribution open right now.
 
 **2. Extended blind index coverage**
 Currently only merchant + category fields have HMAC blind indexes. Goal
@@ -195,18 +210,21 @@ SimpleFIN and xpub connectors store credentials in `enc_credentials`
 - Re-connection generates fresh encryption rather than re-encrypting old creds
 - Server never sees plaintext credentials even transiently
 
-**5. PQC port from OrangeRails**
-Once the Argon2id migration is done, the PQC layer from OrangeRails
-(`pqc.ts`, `key-wrapping.ts`, `signatures.ts`, `pqc-lifecycle.ts`) can be
-ported directly. The interface contracts are designed to be portable.
+**5. ML-DSA-65 server-side verifier**
+The PQC key-wrapping layer is shipped (`src/lib/pqc.ts`,
+`src/lib/key-wrapping.ts`; hybrid X25519 + ML-KEM-768). What remains is the
+signing half: client-side ML-DSA-65 per-mutation signing exists behind a
+feature flag, and it ships publicly once a real server-side verifier
+replaces the placeholder (see `src/lib/feature-flags.ts` for the honest
+status). Building that verifier is the open contribution.
 
 ---
 
 ## Known operational gaps
 
-The following items are known weaknesses of the current deploy. They do
-not break the zero-knowledge guarantee but they are real gaps that we
-plan to close. Pull requests welcome.
+The following items are known weaknesses of the current deploy. None of
+them lets the server read your encrypted data at rest, but they are real
+gaps that we plan to close. Pull requests welcome.
 
 **Signup / waitlist rate limiting.** `functions/api/signup.ts` accepts
 POSTs without a per-IP or per-account rate limit. An attacker can burn
@@ -219,7 +237,7 @@ not a full substitute on a high-volume target.
 **Argon2id parallelism.** Fixed at 4 lanes (see the Layer 1 callout
 above). Modern devices can comfortably handle 8; raising it requires a
 new vault key version and a re-key migration so existing vaults stay
-unlockable. Tracked alongside the PBKDF2 → Argon2id migration RPC.
+unlockable. Tracked as contribution idea #1 above.
 
 **Five build-time-only npm advisories.** `vite` (Windows UNC path on the
 dev server), `dompurify` `IN_PLACE` mode (unused in `src/`), and three
