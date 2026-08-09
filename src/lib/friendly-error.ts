@@ -109,6 +109,15 @@ export function humanizeError(
   if (lower.includes("duplicate key") || lower.includes("unique constraint")) {
     return "Looks like that's already in your account.";
   }
+  // Turnstile / Supabase captcha errors. "timeout-or-duplicate" means the
+  // token was already spent or expired before the request landed. The fix
+  // for the person is to let the challenge re-appear and try again.
+  if (lower.includes("captcha") && lower.includes("timeout-or-duplicate")) {
+    return "That security check expired. Complete the challenge and try again.";
+  }
+  if (lower.includes("captcha protection") || lower.includes("captcha verification")) {
+    return "The security check did not pass. Please try again.";
+  }
   if (lower.includes("timeout") || lower.includes("timed out")) {
     return "That took longer than expected. Please try again.";
   }
