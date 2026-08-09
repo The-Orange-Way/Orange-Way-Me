@@ -11,7 +11,7 @@ import { RecoveryDialog } from "./RecoveryDialog";
 import { CreateVaultFlow } from "./CreateVaultFlow";
 
 export function VaultGate() {
-  const { hasVault } = useVault();
+  const { hasVault, vaultCheckError } = useVault();
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-md">
@@ -20,12 +20,46 @@ export function VaultGate() {
             <ShieldCheck className="h-5 w-5" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight">
-            {hasVault ? "Unlock your vault" : "Set up your vault"}
+            {vaultCheckError
+              ? "Couldn't reach your vault"
+              : hasVault
+                ? "Unlock your vault"
+                : "Set up your vault"}
           </h1>
         </div>
-        {hasVault ? <UnlockForm /> : <CreateVaultFlow />}
+        {vaultCheckError ? (
+          <VaultCheckError />
+        ) : hasVault ? (
+          <UnlockForm />
+        ) : (
+          <CreateVaultFlow />
+        )}
       </div>
     </div>
+  );
+}
+
+// Shown when we could not determine whether a vault exists. We deliberately
+// do NOT offer CreateVaultFlow here: a false "no vault" is what lets a
+// returning user insert a duplicate vault_metadata row, so blocking the create
+// path is the fail-safe direction on this ZKA surface. A full reload re-runs
+// the existence check and exposes no key material.
+function VaultCheckError() {
+  return (
+    <Card className="shadow-card">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-lg">We couldn't verify your vault</CardTitle>
+        <CardDescription>
+          We couldn't confirm whether you already have a vault, so we won't risk
+          creating a second one. Check your connection and try again.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button className="w-full" onClick={() => window.location.reload()}>
+          Try again
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
