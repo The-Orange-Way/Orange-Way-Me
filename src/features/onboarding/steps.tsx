@@ -37,13 +37,13 @@ export const ONBOARDING_COPY = {
     secondary: "Skip",
   },
   email: {
-    headline: "What's your email address?",
-    body: "We'll send a one-time link to confirm it's you. No password yet.",
-    cta: "Send my link",
+    headline: "What's your email?",
+    body: "We'll send a one-time code. No password needed.",
+    cta: "Send my code",
   },
   education: {
     headline: "Your data stays yours.",
-    body: "Orange Way is built so we can never see your balance, your keys, or your transactions. Not us. Not anyone. It lives on your device.",
+    body: "Orange Way is built so we can never read your balances, your keys, or your history. Not us. Not anyone. It lives on your device.",
     cta: "Got it",
   },
   vaultPassword: {
@@ -303,7 +303,7 @@ function StepEmail(props: OnboardingStepProps) {
       <StepShell
         {...props}
         onNext={() => void confirmCode()}
-        title="Enter the code we sent you."
+        title="Check your inbox."
         nextLabel="Confirm"
         nextDisabled={token.trim().length < 6}
         busy={busy}
