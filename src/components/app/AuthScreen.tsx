@@ -31,8 +31,8 @@ const SIGNUP_OPEN = import.meta.env.VITE_DEV_SIGNUP_OPEN === "1";
 const V2 = ONBOARDING_V2_ENABLED;
 
 export function AuthScreen() {
-  const { signUp, signIn, resetPassword } = useAuth();
-  const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
+  const { signUp, signIn, resetPassword, sendOtp, verifyOtp } = useAuth();
+  const [tab, setTab] = useState<"signin" | "signup" | "reset" | "otp-send" | "otp-verify" | "password">(V2 ? "otp-send" : "signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,6 +47,7 @@ export function AuthScreen() {
    * Studio.
    */
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
   /**
    * Ref to the widget so the auth call's error branch can call
    * `widgetRef.current?.reset()` and re-issue a fresh challenge
@@ -70,6 +71,30 @@ export function AuthScreen() {
       toastError(error);
       resetCaptcha();
     }
+  };
+
+  const onSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const { error } = await sendOtp(email, captchaToken);
+    setBusy(false);
+    if (error) {
+      toastError(error);
+      resetCaptcha();
+    } else {
+      setTab("otp-verify");
+    }
+  };
+
+  const onVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const { error } = await verifyOtp(email, otpCode);
+    setBusy(false);
+    if (error) {
+      toastError(error);
+    }
+    // On success onAuthStateChange fires and the route redirects automatically.
   };
 
   const onSignUp = async (e: React.FormEvent) => {
