@@ -1,8 +1,8 @@
 /**
  * TOUR_COPY -- first-run dashboard coachmarks.
  *
- * All strings are PLACEHOLDERS. CX owns the final wording.
- * Swap each value when CX delivers copy; the object shape must stay the same.
+ * CX owns all strings. Do not change wording here without a CX ruling in
+ * the workstream Zulip topic. The Auditor checks bytes, not intent.
  *
  * Same pattern as ONBOARDING_COPY in src/features/onboarding/steps.tsx:
  * one exported object, one import path, one diff to review when strings change.
@@ -13,16 +13,24 @@
 export const TOUR_COPY = {
   netWorth: {
     /** Bubble label for the NetWorthCard anchor. */
-    label: "PLACEHOLDER: Your total picture, updated in real time.",
+    label: "All your accounts, totalled in one private number.",
   },
   accounts: {
     /** Bubble label for the AccountsSummary anchor. */
-    label: "PLACEHOLDER: Connect a wallet or account here to get started.",
+    label: "Each account you connect shows up here.",
   },
-  transactions: {
-    /** Bubble label for the RecentTransactions anchor. */
-    label: "PLACEHOLDER: Every transaction lands here automatically.",
+  upcomingBills: {
+    /** Bubble label for the UpcomingBills anchor. */
+    label: "Bills due soon, so nothing catches you off guard.",
   },
-  /** CTA on every bubble. Clicking any one of these dismisses all three. */
-  dismiss: "Got it",
+  /** CTA on every bubble -- clicking any one dismisses all three. */
+  skip: "I'll explore on my own",
+  /** Toast shown once when the tour is dismissed. */
+  toast: "Tap any card to get started.",
+  /**
+   * Heading for the user's very first dashboard visit, shown in place of the
+   * time-of-day greeting until the tour is dismissed. One-time moment of truth.
+   * Subsequent visits revert to "Good morning/afternoon/evening, [Name]".
+   */
+  arrival: "Your finances are ready. Private by design, and yours alone.",
 } as const;
