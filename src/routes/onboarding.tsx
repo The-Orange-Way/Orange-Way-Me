@@ -29,6 +29,14 @@ function OnboardingRoute() {
   const { hasVault, loading } = useVault();
   const [decision, setDecision] = useState<"pending" | "resume" | "redirect">("pending");
 
+  // Auth hydration fires checkVault(true) which cycles loading true->false.
+  // Reset the snapshot so the settled post-auth result wins over the pre-auth
+  // null-user pass. finalizeVaultSetup() never cycles loading, so a genuine
+  // new-vault flow in progress is not affected by this reset.
+  useEffect(() => {
+    if (loading) setDecision("pending");
+  }, [loading]);
+
   useEffect(() => {
     if (loading || decision !== "pending") return;
     setDecision(hasVault ? "redirect" : "resume");
