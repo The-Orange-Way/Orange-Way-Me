@@ -13,9 +13,10 @@ describe("humanizeError", () => {
     expect(humanizeError(new Error("401 Unauthorized"))).toMatch(/sign in again/i);
   });
 
-  it("strips engineer-y 'Failed to X:' prefixes", () => {
-    expect(humanizeError(new Error("Failed to create account: bad input"))).toBe("Bad input.");
-    expect(humanizeError(new Error("Failed to map account: row missing"))).toBe("Row missing.");
+  it("returns fallback for unrecognized engineer-y 'Failed to X:' prefixes", () => {
+    const fb = "fallback.";
+    expect(humanizeError(new Error("Failed to create account: bad input"), fb)).toBe(fb);
+    expect(humanizeError(new Error("Failed to map account: row missing"), fb)).toBe(fb);
   });
 
   it("catches Postgres duplicate / unique violations", () => {
@@ -35,16 +36,16 @@ describe("humanizeError", () => {
     expect(humanizeError(new Error("Request timed out"))).toMatch(/took longer/i);
   });
 
-  it("trims long messages", () => {
+  it("returns fallback for long unrecognized messages", () => {
     const long = "x".repeat(200);
-    const out = humanizeError(new Error(long));
-    expect(out.length).toBeLessThanOrEqual(140);
-    expect(out.endsWith("…")).toBe(true);
+    const fb = "Something went wrong. Please try again.";
+    expect(humanizeError(new Error(long), fb)).toBe(fb);
   });
 
-  it("ensures trailing period for plain messages", () => {
-    expect(humanizeError(new Error("Something broke"))).toBe("Something broke.");
-    expect(humanizeError(new Error("Already a sentence."))).toBe("Already a sentence.");
+  it("returns fallback for plain unrecognized messages", () => {
+    const fb = "Something went wrong. Please try again.";
+    expect(humanizeError(new Error("Something broke"))).toBe(fb);
+    expect(humanizeError(new Error("Already a sentence."))).toBe(fb);
   });
 
   it("strips owm-or / or- edge function prefixes", () => {
