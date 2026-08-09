@@ -66,7 +66,13 @@ export function StepShell({
   error?: string | null;
 }) {
   return (
-    <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-6">
+    <form
+      className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!nextDisabled && !busy) onNext();
+      }}
+    >
       <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
       <div className="mt-6 min-h-[8rem] text-muted-foreground">{children}</div>
       {error ? (
@@ -88,8 +94,7 @@ export function StepShell({
           </button>
         )}
         <button
-          type="button"
-          onClick={onNext}
+          type="submit"
           disabled={nextDisabled || busy}
           aria-busy={busy}
           className="inline-flex items-center justify-center rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -109,7 +114,7 @@ export function StepShell({
           </button>
         </div>
       ) : null}
-    </div>
+    </form>
   );
 }
 
