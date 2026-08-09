@@ -780,6 +780,11 @@ function StepSuccess(props: OnboardingStepProps) {
     finalizeVaultSetup();
     const displayName = name.trim();
     if (!displayName) return;
+    // Cache a plaintext greeting hint so the sign-in screen can greet the
+    // user by name on their next visit. UX convenience only: no security
+    // decision rides on it. Swallow storage-blocked errors so onboarding
+    // never fails over a greeting hint.
+    try { localStorage.setItem("ow_greeting_name", displayName); } catch {}
     // Deliberately not surfaced or awaited. The account, the vault and the
     // recovery code are all already durable at this point; a failed profile
     // write costs a greeting, and the name is editable in settings. Blocking
