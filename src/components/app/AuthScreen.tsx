@@ -158,7 +158,7 @@ export function AuthScreen() {
     });
     setBusy(false);
     if (verifyError || !data.session) {
-      toastError(verifyError ?? new Error("That code did not work. Check it and try again."));
+      toastError(new Error("That code did not work. Check it and try again."));
       return;
     }
     // Session established. AuthContext picks it up via onAuthStateChange;
