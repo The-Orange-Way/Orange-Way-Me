@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import { TOUR_COPY } from "./copy";
 
 /**
@@ -100,7 +101,7 @@ function CoachmarkBubble({ selector, label, onDismiss }: BubbleAnchor & { onDism
           onClick={onDismiss}
           className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
         >
-          {TOUR_COPY.dismiss}
+          {TOUR_COPY.skip}
         </button>
         <button
           type="button"
@@ -122,23 +123,28 @@ interface DashboardCoachmarksProps {
 const ANCHORS: BubbleAnchor[] = [
   { selector: '[data-tour="net-worth"]', label: TOUR_COPY.netWorth.label },
   { selector: '[data-tour="accounts"]', label: TOUR_COPY.accounts.label },
-  { selector: '[data-tour="transactions"]', label: TOUR_COPY.transactions.label },
+  { selector: '[data-tour="upcoming-bills"]', label: TOUR_COPY.upcomingBills.label },
 ];
 
 export function DashboardCoachmarks({ onDismiss }: DashboardCoachmarksProps) {
+  const handleDismiss = useCallback(() => {
+    onDismiss();
+    toast(TOUR_COPY.toast);
+  }, [onDismiss]);
+
   // Dismiss on Escape.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onDismiss();
+      if (e.key === "Escape") handleDismiss();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onDismiss]);
+  }, [handleDismiss]);
 
   return createPortal(
     <>
       {ANCHORS.map((anchor) => (
-        <CoachmarkBubble key={anchor.selector} {...anchor} onDismiss={onDismiss} />
+        <CoachmarkBubble key={anchor.selector} {...anchor} onDismiss={handleDismiss} />
       ))}
     </>,
     document.body,
