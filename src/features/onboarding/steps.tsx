@@ -262,7 +262,7 @@ function StepEmail(props: OnboardingStepProps) {
   // they see "Check your inbox." at once and any error surfaces there.
   const sendCode = async () => {
     setError(null);
-    setStage("code");      // non-blocking: advance before the network call
+    setStage("code"); // non-blocking: advance before the network call
     setSendBusy(true);
     setResendDisabled(true);
     try {
