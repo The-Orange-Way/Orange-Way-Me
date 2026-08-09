@@ -258,25 +258,34 @@ function StepEmail(props: OnboardingStepProps) {
   const sendCode = async () => {
     setBusy(true);
     setError(null);
-    const { error: sendError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        shouldCreateUser: true,
-        ...(captchaToken ? { captchaToken } : {}),
-      },
-    });
-    setBusy(false);
-    if (sendError) {
-      setError(sendError.message);
-      // A Turnstile token is single-use and Supabase has now spent it, so
-      // without this the retry fails on the captcha rather than on whatever
-      // actually went wrong, and the person is stuck on a button that will
-      // never work again.
+    try {
+      const { error: sendError } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          shouldCreateUser: true,
+          ...(captchaToken ? { captchaToken } : {}),
+        },
+      });
+      if (sendError) {
+        setError(humanizeError(sendError, "Could not send the code. Please try again."));
+        // A Turnstile token is single-use and Supabase has now spent it, so
+        // without this the retry fails on the captcha rather than on whatever
+        // actually went wrong, and the person is stuck on a button that will
+        // never work again.
+        setCaptchaToken(null);
+        captchaRef.current?.reset();
+        return;
+      }
+      setStage("code");
+    } catch (err) {
+      // Covers thrown exceptions (network drop mid-flight, etc.) that would
+      // otherwise leave the captcha spent with no reset and busy stuck true.
+      setError(humanizeError(err, "Could not send the code. Please try again."));
       setCaptchaToken(null);
       captchaRef.current?.reset();
-      return;
+    } finally {
+      setBusy(false);
     }
-    setStage("code");
   };
 
   const confirmCode = async () => {
@@ -291,7 +300,7 @@ function StepEmail(props: OnboardingStepProps) {
     });
     setBusy(false);
     if (verifyError || !data.session) {
-      setError(verifyError?.message ?? "That code did not work. Check it and try again.");
+      setError(humanizeError(verifyError, "That code did not work. Check it and try again."));
       return;
     }
     setEmailVerified(true);
