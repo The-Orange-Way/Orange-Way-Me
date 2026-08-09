@@ -167,6 +167,12 @@ export function AuthScreen() {
 
   const navigate = useNavigate();
   const submitDisabled = busy || (CAPTCHA_REQUIRED && !captchaToken);
+  // Read the greeting-name hint written by onboarding when the user first
+  // completed setup. UX convenience only: no security decision depends on it.
+  const greetingName = typeof window !== "undefined" ? (localStorage.getItem("ow_greeting_name") ?? "") : "";
+  const welcomeTitle = greetingName.trim()
+    ? `Welcome back, ${greetingName.trim()}. Your vault is already here.`
+    : "Welcome back. Your vault is already here.";
 
   // V2 entry point: sign-in form + create-account link to /onboarding.
   // V2 is the only gate here. SIGNUP_OPEN is a separate flag that governs
@@ -201,6 +207,7 @@ export function AuthScreen() {
                   */}
                   {otpStage === "email" ? (
                     <form onSubmit={sendOtpCode} className="space-y-4">
+                      <p className="text-lg font-semibold leading-none tracking-tight">{welcomeTitle}</p>
                       <div className="space-y-2">
                         <Label htmlFor="si-email">Email</Label>
                         <Input
