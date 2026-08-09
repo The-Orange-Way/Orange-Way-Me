@@ -25,9 +25,10 @@ import { humanizeError } from "@/lib/friendly-error";
  * This file was presentation only up to 2026-07-31; the steps now talk to
  * Supabase auth and to VaultContext. What is real: the one-time code creates
  * the account, step 5 runs Argon2id and writes the vault row, and the words
- * shown are the ones that wrap the MEK. What is still a no-op: the biometric
- * step, which offers WebAuthn PRF enrolment it cannot yet perform (DL-0414
- * §6.1, founder-gated) and simply advances.
+ * shown are the ones that wrap the MEK. The biometric step has been removed
+ * per DL-0714 (founder ruling DEC-0285); PRF enrolment is not yet implemented.
+ * The capability probe and copy are kept as WebAuthn groundwork for when the
+ * step returns (DL-0414 §6.1, founder-gated).
  */
 export const ONBOARDING_COPY = {
   name: {
@@ -168,8 +169,9 @@ function passwordScore(value: string) {
 }
 
 /**
- * Capability probe for Step 6. The parent never chooses between biometric and
- * password mode; the device decides which screen renders.
+ * Capability probe for the biometric step, kept as WebAuthn groundwork for
+ * when PRF enrolment is implemented (DL-0414 §6.1). The parent never chooses
+ * between biometric and password mode; the device decides which screen renders.
  *
  * TODO(DL-0414): a platform authenticator is necessary but not sufficient for
  * PRF. The real probe creates a credential and reads the prf extension
@@ -711,46 +713,6 @@ function StepVerify(props: OnboardingStepProps) {
   );
 }
 
-function StepBiometric(props: OnboardingStepProps) {
-  const available = useHasPlatformAuthenticator();
-
-  // hideBack on every branch. Back from here lands on the recovery screen,
-  // whose effect sees a code already in state and so re-renders the same words
-  // without re-creating anything. But the vault row now exists, the code has
-  // been confirmed, and offering a way back into "write these down" reads as
-  // if something is still pending. Everything from step 5 on is one-way.
-
-  // Probe still running. Show the headline with the CTA held shut rather than
-  // flashing the fallback copy at a device that does support this.
-  if (available === null) {
-    return (
-      <StepShell {...props} title={ONBOARDING_COPY.biometric.headline} nextDisabled hideBack />
-    );
-  }
-
-  if (!available) {
-    const fallback = ONBOARDING_COPY.biometricFallback;
-    return (
-      <StepShell {...props} title={fallback.headline} nextLabel={fallback.cta} hideBack>
-        <p>{fallback.body}</p>
-      </StepShell>
-    );
-  }
-
-  const copy = ONBOARDING_COPY.biometric;
-  return (
-    <StepShell
-      {...props}
-      title={copy.headline}
-      nextLabel={copy.cta}
-      secondaryLabel={copy.secondary}
-      hideBack
-    >
-      <p>{copy.body}</p>
-    </StepShell>
-  );
-}
-
 function StepSuccess(props: OnboardingStepProps) {
   // "I'll do this later" opens an empty dashboard. onSecondary defaults to
   // onNext, and this is the last step, so it completes the wizard either way.
@@ -812,7 +774,6 @@ export function buildOnboardingSteps(mode: RecoveryVerifyMode): OnboardingStep[]
     ...(mode === "reentry"
       ? [{ id: "verify-recovery-code", title: "Confirm recovery kit", Component: StepVerify }]
       : []),
-    { id: "biometric", title: "Biometric unlock", Component: StepBiometric },
     { id: "success", title: "You are all set", Component: StepSuccess },
   ];
 }
