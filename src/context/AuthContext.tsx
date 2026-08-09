@@ -28,6 +28,13 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
   /** Same captcha contract as signUp. */
   resetPassword: (email: string, captchaToken: string | null) => Promise<{ error: Error | null }>;
+  /**
+   * Send a sign-in OTP to an existing account. Never creates a new user
+   * (shouldCreateUser: false). Same captcha contract as signIn.
+   */
+  sendOtp: (email: string, captchaToken: string | null) => Promise<{ error: Error | null }>;
+  /** Verify the 6-digit OTP token delivered by sendOtp. */
+  verifyOtp: (email: string, token: string) => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -125,6 +132,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
+  const sendOtp: AuthContextValue["sendOtp"] = async (email, captchaToken) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false,
+        ...(captchaToken ? { captchaToken } : {}),
+      },
+    });
+    return { error: error as Error | null };
+  };
+
+  const verifyOtp: AuthContextValue["verifyOtp"] = async (email, token) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: "email",
+    });
+    return { error: error as Error | null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -139,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user, loading, signUp, signIn, signOut, resetPassword }}
+      value={{ session, user, loading, signUp, signIn, signOut, resetPassword, sendOtp, verifyOtp }}
     >
       {children}
     </AuthContext.Provider>
