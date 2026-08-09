@@ -168,13 +168,17 @@ function passwordScore(value: string) {
 }
 
 /**
- * Capability probe for Step 6. The parent never chooses between biometric and
- * password mode; the device decides which screen renders.
+ * Capability probe kept for when biometrics return (DL-0414). StepBiometric
+ * was removed per DL-0714 (DEC-0285): PRF enrolment is not yet wired up and
+ * the screen was a dead-end offer the user could not complete.
  *
- * TODO(DL-0414): a platform authenticator is necessary but not sufficient for
- * PRF. The real probe creates a credential and reads the prf extension
- * result. Until that exists this is the documented proxy, and it can only
- * over-offer, never dead-end, because the fallback stays reachable.
+ * The probe, ONBOARDING_COPY.biometric/biometricFallback, and the logic below
+ * are preserved intact so the step can be re-added without a rewrite once the
+ * full implementation lands (DL-0414 §6.1, founder-gated).
+ *
+ * TODO(DL-0414): the real probe creates a credential and reads the PRF
+ * extension result. Until then this is the documented proxy (can only
+ * over-offer, never dead-end, because the fallback stays reachable).
  */
 function useHasPlatformAuthenticator() {
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -710,45 +714,6 @@ function StepVerify(props: OnboardingStepProps) {
   );
 }
 
-function StepBiometric(props: OnboardingStepProps) {
-  const available = useHasPlatformAuthenticator();
-
-  // hideBack on every branch. Back from here lands on the recovery screen,
-  // whose effect sees a code already in state and so re-renders the same words
-  // without re-creating anything. But the vault row now exists, the code has
-  // been confirmed, and offering a way back into "write these down" reads as
-  // if something is still pending. Everything from step 5 on is one-way.
-
-  // Probe still running. Show the headline with the CTA held shut rather than
-  // flashing the fallback copy at a device that does support this.
-  if (available === null) {
-    return (
-      <StepShell {...props} title={ONBOARDING_COPY.biometric.headline} nextDisabled hideBack />
-    );
-  }
-
-  if (!available) {
-    const fallback = ONBOARDING_COPY.biometricFallback;
-    return (
-      <StepShell {...props} title={fallback.headline} nextLabel={fallback.cta} hideBack>
-        <p>{fallback.body}</p>
-      </StepShell>
-    );
-  }
-
-  const copy = ONBOARDING_COPY.biometric;
-  return (
-    <StepShell
-      {...props}
-      title={copy.headline}
-      nextLabel={copy.cta}
-      secondaryLabel={copy.secondary}
-      hideBack
-    >
-      <p>{copy.body}</p>
-    </StepShell>
-  );
-}
 
 function StepSuccess(props: OnboardingStepProps) {
   // "I'll do this later" opens an empty dashboard. onSecondary defaults to
@@ -811,7 +776,6 @@ export function buildOnboardingSteps(mode: RecoveryVerifyMode): OnboardingStep[]
     ...(mode === "reentry"
       ? [{ id: "verify-recovery-code", title: "Confirm recovery kit", Component: StepVerify }]
       : []),
-    { id: "biometric", title: "Biometric unlock", Component: StepBiometric },
     { id: "success", title: "You are all set", Component: StepSuccess },
   ];
 }
