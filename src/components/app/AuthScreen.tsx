@@ -202,7 +202,9 @@ export function AuthScreen() {
                   */}
                   {otpStage === "email" ? (
                     <form onSubmit={sendOtpCode} className="space-y-4">
-                      <p className="text-lg font-semibold leading-none tracking-tight">{welcomeTitle}</p>
+                      <p className="text-lg font-semibold leading-none tracking-tight">
+                        {welcomeTitle}
+                      </p>
                       <div className="space-y-2">
                         <Label htmlFor="si-email">Email</Label>
                         <Input
