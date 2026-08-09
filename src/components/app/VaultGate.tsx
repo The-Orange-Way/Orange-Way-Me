@@ -27,13 +27,7 @@ export function VaultGate() {
                 : "Set up your vault"}
           </h1>
         </div>
-        {vaultCheckError ? (
-          <VaultCheckError />
-        ) : hasVault ? (
-          <UnlockForm />
-        ) : (
-          <CreateVaultFlow />
-        )}
+        {vaultCheckError ? <VaultCheckError /> : hasVault ? <UnlockForm /> : <CreateVaultFlow />}
       </div>
     </div>
   );
@@ -50,8 +44,8 @@ function VaultCheckError() {
       <CardHeader className="pb-4">
         <CardTitle className="text-lg">We couldn't verify your vault</CardTitle>
         <CardDescription>
-          We couldn't confirm whether you already have a vault, so we won't risk
-          creating a second one. Check your connection and try again.
+          We couldn't confirm whether you already have a vault, so we won't risk creating a second
+          one. Check your connection and try again.
         </CardDescription>
       </CardHeader>
       <CardContent>
