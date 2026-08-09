@@ -250,14 +250,21 @@ function StepEmail(props: OnboardingStepProps) {
   const [token, setToken] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [resendDisabled, setResendDisabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const captchaRef = useRef<TurnstileInstance>(null);
   const copy = ONBOARDING_COPY.email;
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  // Advances to the code screen immediately and fires the OTP send in the
+  // background. The 5-10 second SMTP round trip is invisible to the user:
+  // they see "Check your inbox." at once and any error surfaces there.
   const sendCode = async () => {
-    setBusy(true);
     setError(null);
+    setStage("code"); // non-blocking: advance before the network call
+    setSendBusy(true);
+    setResendDisabled(true);
     try {
       const { error: sendError } = await supabase.auth.signInWithOtp({
         email: email.trim(),
@@ -268,23 +275,18 @@ function StepEmail(props: OnboardingStepProps) {
       });
       if (sendError) {
         setError(humanizeError(sendError, "Could not send the code. Please try again."));
-        // A Turnstile token is single-use and Supabase has now spent it, so
-        // without this the retry fails on the captcha rather than on whatever
-        // actually went wrong, and the person is stuck on a button that will
-        // never work again.
-        setCaptchaToken(null);
-        captchaRef.current?.reset();
-        return;
       }
-      setStage("code");
     } catch (err) {
-      // Covers thrown exceptions (network drop mid-flight, etc.) that would
-      // otherwise leave the captcha spent with no reset and busy stuck true.
+      // Covers thrown exceptions (network drop mid-flight, etc.).
       setError(humanizeError(err, "Could not send the code. Please try again."));
+    } finally {
+      // A Turnstile token is single-use; reset whether the send succeeded or
+      // failed so that a resend attempt can acquire a fresh one.
       setCaptchaToken(null);
       captchaRef.current?.reset();
-    } finally {
-      setBusy(false);
+      setSendBusy(false);
+      // 5-second cooldown before resend is available.
+      setTimeout(() => setResendDisabled(false), 5_000);
     }
   };
 
@@ -314,7 +316,7 @@ function StepEmail(props: OnboardingStepProps) {
         onNext={() => void confirmCode()}
         title="Check your inbox."
         nextLabel="Confirm"
-        nextDisabled={token.trim().length < 6}
+        nextDisabled={token.trim().length < 6 || sendBusy}
         busy={busy}
         busyLabel="Checking..."
         error={error}
@@ -326,7 +328,11 @@ function StepEmail(props: OnboardingStepProps) {
         }}
         hideBack
       >
-        <p>We sent a 6 digit code to {email.trim()}. It expires in a few minutes.</p>
+        <p>
+          {sendBusy
+            ? `Sending your code to ${email.trim()}...`
+            : `We sent a 6-digit code to ${email.trim()}. It expires in a few minutes.`}
+        </p>
         <input
           type="text"
           inputMode="numeric"
@@ -337,6 +343,24 @@ function StepEmail(props: OnboardingStepProps) {
           aria-label="One-time code"
           className={FIELD_CLASS + " tracking-[0.4em]"}
         />
+        <button
+          type="button"
+          disabled={resendDisabled}
+          className="mt-3 text-sm text-muted-foreground disabled:opacity-40"
+          onClick={() => {
+            setToken("");
+            setError(null);
+            if (CAPTCHA_REQUIRED) {
+              // The captcha widget only exists on the address stage;
+              // go back so a fresh token can be acquired.
+              setStage("address");
+            } else {
+              void sendCode();
+            }
+          }}
+        >
+          Resend code
+        </button>
       </StepShell>
     );
   }
