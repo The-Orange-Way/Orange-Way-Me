@@ -1,5 +1,5 @@
 /**
- * owm-or-discover-quiltt — post-link bank account discovery.
+ * owm-or-discover-quiltt -- post-link bank account discovery.
  *
  * After the Quiltt popup closes with OR_QUILTT_LINK_COMPLETE, the browser
  * holds a quilttConnectionId but doesn't yet know what accounts exist
@@ -10,7 +10,7 @@
  * review-accounts step.
  *
  * Returned account fields are plaintext-OK (institution name, account
- * mask, currency, kind) — these match what the user already sees in
+ * mask, currency, kind) -- these match what the user already sees in
  * the bank's own UI. The ZKA-encrypted columns on the accounts table
  * are NOT populated here; that happens client-side when the user clicks
  * Save in the review step.
@@ -155,17 +155,17 @@ Deno.serve(async (req: Request) => {
       lastError = result.error;
 
       if (!result.ok && result.status >= 500) {
-        // Upstream 5xx is treated as transient — fall through to next retry.
+        // Upstream 5xx is treated as transient -- fall through to next retry.
         continue;
       }
       if (!result.ok) {
-        // 4xx is terminal (auth, bad request) — surface immediately.
+        // 4xx is terminal (auth, bad request) -- surface immediately.
         return jsonResponse({ error: result.error ?? `OR returned ${result.status}` }, 502, cors);
       }
       if (result.accounts.length > 0) {
         return jsonResponse({ accounts: result.accounts }, 200, cors);
       }
-      // Zero accounts: retry — Quiltt's GraphQL hasn't populated yet.
+      // Zero accounts: retry -- Quiltt's GraphQL hasn't populated yet.
     }
 
     // Exhausted retries with no accounts
