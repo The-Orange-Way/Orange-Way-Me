@@ -245,7 +245,7 @@ function StepName(props: OnboardingStepProps) {
  * the device.
  */
 function StepEmail(props: OnboardingStepProps) {
-  const { email, setEmail, setEmailVerified } = useOnboardingState();
+  const { name, email, setEmail, setEmailVerified } = useOnboardingState();
   const [stage, setStage] = useState<"address" | "code">("address");
   const [token, setToken] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -255,6 +255,8 @@ function StepEmail(props: OnboardingStepProps) {
   const [error, setError] = useState<string | null>(null);
   const captchaRef = useRef<TurnstileInstance>(null);
   const copy = ONBOARDING_COPY.email;
+  // DL-0716: personalise when a name was given; fall back silently.
+  const headline = name.trim() ? `${name.trim()}, what's your email?` : copy.headline;
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   // Advances to the code screen immediately and fires the OTP send in the
@@ -369,7 +371,7 @@ function StepEmail(props: OnboardingStepProps) {
     <StepShell
       {...props}
       onNext={() => void sendCode()}
-      title={copy.headline}
+      title={headline}
       nextLabel={copy.cta}
       nextDisabled={!looksLikeEmail || (CAPTCHA_REQUIRED && !captchaToken)}
       busy={busy}
@@ -777,6 +779,10 @@ function StepSuccess(props: OnboardingStepProps) {
     if (committed.current || !recoveryCode) return;
     committed.current = true;
     finalizeVaultSetup();
+    // DL-0717: signal to VaultGate that the very next unlock follows onboarding.
+    // The key's presence (even with empty value) enables the welcome-back line;
+    // VaultGate clears it after reading so routine unlocks never see it.
+    sessionStorage.setItem("ow_from_onboarding", name.trim());
     const displayName = name.trim();
     if (!displayName) return;
     // Deliberately not surfaced or awaited. The account, the vault and the
