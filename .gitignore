@@ -58,3 +58,6 @@ tests/e2e/screenshots/
 test-results/
 playwright-report/
 .reserved-terms
+
+# Local tooling state, generated per clone. Not part of the app.
+.mcp/
