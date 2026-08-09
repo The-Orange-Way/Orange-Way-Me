@@ -245,7 +245,7 @@ function StepName(props: OnboardingStepProps) {
  * the device.
  */
 function StepEmail(props: OnboardingStepProps) {
-  const { email, setEmail, setEmailVerified } = useOnboardingState();
+  const { name, email, setEmail, setEmailVerified } = useOnboardingState();
   const [stage, setStage] = useState<"address" | "code">("address");
   const [token, setToken] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -255,6 +255,7 @@ function StepEmail(props: OnboardingStepProps) {
   const [error, setError] = useState<string | null>(null);
   const captchaRef = useRef<TurnstileInstance>(null);
   const copy = ONBOARDING_COPY.email;
+  const headline = name.trim() ? `${name.trim()}, what's your email?` : copy.headline;
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   // Advances to the code screen immediately and fires the OTP send in the
@@ -369,7 +370,7 @@ function StepEmail(props: OnboardingStepProps) {
     <StepShell
       {...props}
       onNext={() => void sendCode()}
-      title={copy.headline}
+      title={headline}
       nextLabel={copy.cta}
       nextDisabled={!looksLikeEmail || (CAPTCHA_REQUIRED && !captchaToken)}
       busy={busy}
