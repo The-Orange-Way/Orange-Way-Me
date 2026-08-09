@@ -140,14 +140,10 @@ export function AuthScreen() {
         },
       });
       if (sendError) {
-        toastError(sendError);
-        setOtpStage("email");
+        toast.error("Unable to send the code. Please try again.");
       }
     } catch (err) {
-      toastError(
-        err instanceof Error ? err : new Error("Could not send the code. Please try again."),
-      );
-      setOtpStage("email");
+      toast.error("Unable to send the code. Please try again.");
     } finally {
       resetCaptcha();
       setBusy(false);
