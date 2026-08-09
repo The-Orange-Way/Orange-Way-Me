@@ -28,6 +28,11 @@ function OnboardingRoute() {
   const navigate = useNavigate();
   const { hasVault, loading } = useVault();
   const [decision, setDecision] = useState<"pending" | "resume" | "redirect">("pending");
+  // Latch: once OnboardingFlow has mounted, keep it in the tree even when
+  // decision resets to "pending" during a re-check (e.g. in-flow OTP triggers
+  // SIGNED_IN -> checkVault -> loading cycle). Without this latch the Loading
+  // screen would unmount the flow and wipe step index, name, email, and code.
+  const [flowMounted, setFlowMounted] = useState(false);
 
   // Auth hydration fires checkVault(true) which cycles loading true->false.
   // Reset the snapshot so the settled post-auth result wins over the pre-auth
@@ -43,12 +48,16 @@ function OnboardingRoute() {
   }, [loading, hasVault, decision]);
 
   useEffect(() => {
+    if (decision === "resume" && !flowMounted) setFlowMounted(true);
+  }, [decision, flowMounted]);
+
+  useEffect(() => {
     if (decision === "redirect") {
       void navigate({ to: "/dashboard", replace: true });
     }
   }, [decision, navigate]);
 
-  if (decision === "pending") {
+  if (decision === "pending" && !flowMounted) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
         Loading...
