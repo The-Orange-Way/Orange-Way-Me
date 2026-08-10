@@ -38,8 +38,8 @@ export function AuthScreen() {
    * value = first name (may be empty if user skipped the name step).
    * Null means the key was never set - first visit or different device.
    */
-  const [greetingName, setGreetingName] = useState<string | null>(
-    () => localStorage.getItem("ow_greeting_name"),
+  const [greetingName, setGreetingName] = useState<string | null>(() =>
+    localStorage.getItem("ow_greeting_name"),
   );
   const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
