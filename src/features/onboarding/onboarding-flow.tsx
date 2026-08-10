@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { OnboardingStateContext } from "./onboarding-state";
 import type { OnboardingStateValue } from "./onboarding-state";
@@ -18,6 +18,13 @@ export interface OnboardingStep {
   id: string;
   title: string;
   Component: ComponentType<OnboardingStepProps>;
+  // When true, the browser Back button must not leave this step. Everything
+  // from the recovery-code screen on is one-way: the vault row exists and the
+  // recovery words have been shown, so walking back would either re-derive the
+  // key or re-open a screen that reads as still-pending. The in-app Back is
+  // already hidden on these steps; oneWay closes the same door for the
+  // browser's own Back button.
+  oneWay?: boolean;
 }
 
 /**
@@ -147,17 +154,29 @@ export function OnboardingFlow({
     window.history.pushState({ owStep: 0 }, "");
   }, []);
 
-  // Mirror browser back/forward into the React step index. Each onNext
-  // call pushes an entry; popstate fires when the user navigates them.
+  // A live mirror of the current index for the popstate handler below, which
+  // binds once and would otherwise close over the initial index forever.
+  const indexRef = useRef(index);
+  indexRef.current = index;
+
+  // Mirror browser back/forward into the React step index. Each onNext call
+  // pushes an entry; popstate fires when the user navigates them. A one-way
+  // step refuses the move: we re-push a forward entry and stay put, so the
+  // browser Back button cannot unwind vault creation. This mirrors the hidden
+  // in-app Back on those same steps, which the history.back() delegation had
+  // otherwise let the browser button bypass.
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      if (event.state && typeof event.state.owStep === "number") {
-        setIndex(event.state.owStep);
+      if (!event.state || typeof event.state.owStep !== "number") return;
+      if (steps[indexRef.current]?.oneWay) {
+        window.history.pushState({ owStep: indexRef.current }, "");
+        return;
       }
+      setIndex(event.state.owStep);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [steps]);
 
   const state = useMemo<OnboardingStateValue>(
     () => ({
