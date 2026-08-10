@@ -32,6 +32,13 @@ const V2 = ONBOARDING_V2_ENABLED;
 
 export function AuthScreen() {
   const { signUp, signIn, resetPassword } = useAuth();
+  /**
+   * Returning-user greeting (DL-0717). Written to localStorage by
+   * StepSuccess at the end of onboarding. Presence = has been here before;
+   * value = first name (may be empty if user skipped the name step).
+   * Null means the key was never set - first visit or different device.
+   */
+  const greetingName = localStorage.getItem("ow_greeting_name");
   const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -201,6 +208,13 @@ export function AuthScreen() {
                   */}
                   {otpStage === "email" ? (
                     <form onSubmit={sendOtpCode} className="space-y-4">
+                      {greetingName !== null && (
+                        <p className="text-center text-sm font-medium text-foreground">
+                          {greetingName
+                            ? `Welcome back, ${greetingName}. Sign in to reach your vault.`
+                            : "Welcome back. Sign in to reach your vault."}
+                        </p>
+                      )}
                       <div className="space-y-2">
                         <Label htmlFor="si-email">Email</Label>
                         <Input

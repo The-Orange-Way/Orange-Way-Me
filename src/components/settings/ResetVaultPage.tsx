@@ -52,6 +52,11 @@ export function ResetVaultPage() {
 
       // Wipe in-memory MEK so the rest of this session cannot encrypt.
       lock();
+      try {
+        localStorage.removeItem("ow_greeting_name");
+      } catch {
+        /* localStorage blocked: non-fatal */
+      }
       toast.success("Vault reset. Create a new vault password to continue.");
       // Hard reload so VaultContext re-runs its vault check and
       // AppGate shows CreateVaultFlow (setHasVault is not exposed).
