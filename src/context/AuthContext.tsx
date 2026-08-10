@@ -68,8 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!newSession?.user) {
         posthog.reset();
         // Clear the welcome-back greeting key on every sign-out path
-        // (sign out, session expiry, account switch). Vault reset also
-        // routes through here because there is no separate code path for it.
+        // (sign out, session expiry, account switch).
         // Privacy ruling (DL-0717): this key must not survive sign-out.
         try {
           localStorage.removeItem("ow_greeting_name");
