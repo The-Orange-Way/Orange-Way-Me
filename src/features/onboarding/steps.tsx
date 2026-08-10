@@ -741,6 +741,11 @@ function StepSuccess(props: OnboardingStepProps) {
     committed.current = true;
     finalizeVaultSetup();
     const displayName = name.trim();
+    // Mark this device as having completed onboarding. The auth screen reads
+    // this key: presence = returning user (show welcome-back), value = name
+    // to personalise the greeting. Written even when empty so a user who
+    // skipped the name field still gets the generic "Welcome back." greeting.
+    localStorage.setItem("ow_greeting_name", displayName);
     if (!displayName) return;
     // Deliberately not surfaced or awaited. The account, the vault and the
     // recovery code are all already durable at this point; a failed profile
