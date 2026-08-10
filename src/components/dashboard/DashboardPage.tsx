@@ -116,10 +116,10 @@ export function DashboardPage() {
         </div>
 
         {/* Row 4: Recent transactions (wide) + Upcoming bills */}
-        <div data-tour="transactions" className="lg:col-span-2">
+        <div className="lg:col-span-2">
           <RecentTransactions />
         </div>
-        <div>
+        <div data-tour="upcoming-bills">
           <UpcomingBills />
         </div>
       </div>
