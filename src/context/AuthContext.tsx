@@ -67,6 +67,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(newSession?.user ?? null);
       if (!newSession?.user) {
         posthog.reset();
+        // Clear the welcome-back greeting key on every sign-out path
+        // (sign out, session expiry, account switch). Vault reset also
+        // routes through here because there is no separate code path for it.
+        // Privacy ruling (DL-0717): this key must not survive sign-out.
+        try {
+          localStorage.removeItem("ow_greeting_name");
+        } catch {
+          /* localStorage blocked: non-fatal */
+        }
       }
 
       // Consume a pending invite code once the session is first established.
