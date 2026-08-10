@@ -72,8 +72,8 @@ export const ONBOARDING_COPY = {
   success: {
     headline: "You're all set.",
     body: "Your wallet is protected and ready. Connect your Bitcoin wallet to see your balance.",
-    cta: "Connect my wallet",
-    secondary: "I'll do this later",
+    cta: "Show me around",
+    secondary: "Skip",
   },
 } as const;
 
