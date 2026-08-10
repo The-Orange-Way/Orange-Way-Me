@@ -144,19 +144,19 @@ export function OnboardingFlow({
   // step 0 rather than exiting /onboarding immediately. Empty URL string
   // keeps the current href so TanStack Router sees no route change.
   useEffect(() => {
-    window.history.pushState({ owStep: 0 }, '');
+    window.history.pushState({ owStep: 0 }, "");
   }, []);
 
   // Mirror browser back/forward into the React step index. Each onNext
   // call pushes an entry; popstate fires when the user navigates them.
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      if (event.state && typeof event.state.owStep === 'number') {
+      if (event.state && typeof event.state.owStep === "number") {
         setIndex(event.state.owStep);
       }
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   const state = useMemo<OnboardingStateValue>(
@@ -191,7 +191,7 @@ export function OnboardingFlow({
       return;
     }
     const nextIndex = Math.min(index + 1, total - 1);
-    window.history.pushState({ owStep: nextIndex }, '');
+    window.history.pushState({ owStep: nextIndex }, "");
     setIndex(nextIndex);
   };
 
