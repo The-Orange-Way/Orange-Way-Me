@@ -38,7 +38,9 @@ export function AuthScreen() {
    * value = first name (may be empty if user skipped the name step).
    * Null means the key was never set - first visit or different device.
    */
-  const greetingName = localStorage.getItem("ow_greeting_name");
+  const [greetingName, setGreetingName] = useState<string | null>(
+    () => localStorage.getItem("ow_greeting_name"),
+  );
   const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -209,11 +211,23 @@ export function AuthScreen() {
                   {otpStage === "email" ? (
                     <form onSubmit={sendOtpCode} className="space-y-4">
                       {greetingName !== null && (
-                        <p className="text-center text-sm font-medium text-foreground">
-                          {greetingName
-                            ? `Welcome back, ${greetingName}. Sign in to reach your vault.`
-                            : "Welcome back. Sign in to reach your vault."}
-                        </p>
+                        <div className="space-y-1 text-center">
+                          <p className="text-sm font-medium text-foreground">
+                            {greetingName
+                              ? `Welcome back, ${greetingName}. Sign in to reach your vault.`
+                              : "Welcome back. Sign in to reach your vault."}
+                          </p>
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              localStorage.removeItem("ow_greeting_name");
+                              setGreetingName(null);
+                            }}
+                          >
+                            Not you?
+                          </button>
+                        </div>
                       )}
                       <div className="space-y-2">
                         <Label htmlFor="si-email">Email</Label>
