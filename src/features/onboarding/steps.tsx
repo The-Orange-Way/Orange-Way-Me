@@ -71,7 +71,7 @@ export const ONBOARDING_COPY = {
   },
   success: {
     headline: "You're all set.",
-    body: "Your wallet is protected and ready. Connect your Bitcoin wallet to see your balance.",
+    body: "Your account and vault are ready.",
     cta: "Show me around",
     secondary: "Skip",
   },
@@ -714,7 +714,7 @@ function StepVerify(props: OnboardingStepProps) {
 }
 
 function StepSuccess(props: OnboardingStepProps) {
-  // "I'll do this later" opens an empty dashboard. onSecondary defaults to
+  // "Skip" opens an empty dashboard. onSecondary defaults to
   // onNext, and this is the last step, so it completes the wizard either way.
   // Per spec: acceptable, the aha moment was offered. Do not block on it.
   const copy = ONBOARDING_COPY.success;
