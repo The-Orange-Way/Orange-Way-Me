@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { StepShell } from "./onboarding-flow";
 import type { OnboardingStep, OnboardingStepProps } from "./onboarding-flow";
-import { useOnboardingState, verifyRecoveryWords } from "./onboarding-state";
+import { useOnboardingState, verifyRecoveryKitWords } from "./onboarding-state";
 import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,9 +25,10 @@ import { humanizeError } from "@/lib/friendly-error";
  * This file was presentation only up to 2026-07-31; the steps now talk to
  * Supabase auth and to VaultContext. What is real: the one-time code creates
  * the account, step 5 runs Argon2id and writes the vault row, and the words
- * shown are the ones that wrap the MEK. What is still a no-op: the biometric
- * step, which offers WebAuthn PRF enrolment it cannot yet perform (DL-0414
- * §6.1, founder-gated) and simply advances.
+ * shown are the ones that wrap the MEK. The biometric step has been removed
+ * per DL-0714 (founder ruling DEC-0285); PRF enrolment is not yet implemented.
+ * The capability probe and copy are kept as WebAuthn groundwork for when the
+ * step returns (DL-0414 §6.1, founder-gated).
  */
 export const ONBOARDING_COPY = {
   name: {
@@ -70,9 +71,9 @@ export const ONBOARDING_COPY = {
   },
   success: {
     headline: "You're all set.",
-    body: "Your wallet is protected and ready. Connect your Bitcoin wallet to see your balance.",
-    cta: "Connect my wallet",
-    secondary: "I'll do this later",
+    body: "Your account and vault are ready.",
+    cta: "Show me around",
+    secondary: "Skip",
   },
 } as const;
 
@@ -168,8 +169,9 @@ function passwordScore(value: string) {
 }
 
 /**
- * Capability probe for Step 6. The parent never chooses between biometric and
- * password mode; the device decides which screen renders.
+ * Capability probe for the biometric step, kept as WebAuthn groundwork for
+ * when PRF enrolment is implemented (DL-0414 §6.1). The parent never chooses
+ * between biometric and password mode; the device decides which screen renders.
  *
  * TODO(DL-0414): a platform authenticator is necessary but not sufficient for
  * PRF. The real probe creates a credential and reads the prf extension
@@ -245,7 +247,7 @@ function StepName(props: OnboardingStepProps) {
  * the device.
  */
 function StepEmail(props: OnboardingStepProps) {
-  const { email, setEmail, setEmailVerified } = useOnboardingState();
+  const { name, email, setEmail, setEmailVerified } = useOnboardingState();
   const [stage, setStage] = useState<"address" | "code">("address");
   const [token, setToken] = useState("");
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -255,6 +257,7 @@ function StepEmail(props: OnboardingStepProps) {
   const [error, setError] = useState<string | null>(null);
   const captchaRef = useRef<TurnstileInstance>(null);
   const copy = ONBOARDING_COPY.email;
+  const headline = name.trim() ? `${name.trim()}, what's your email?` : copy.headline;
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   // Advances to the code screen immediately and fires the OTP send in the
@@ -369,7 +372,7 @@ function StepEmail(props: OnboardingStepProps) {
     <StepShell
       {...props}
       onNext={() => void sendCode()}
-      title={copy.headline}
+      title={headline}
       nextLabel={copy.cta}
       nextDisabled={!looksLikeEmail || (CAPTCHA_REQUIRED && !captchaToken)}
       busy={busy}
@@ -533,20 +536,20 @@ function StepRecovery(props: OnboardingStepProps) {
   // false but nothing in the effect's deps changes, so it never fires again
   // and the person is stranded: hideBack, no recovery code, Continue disabled.
   const [retryToken, setRetryToken] = useState(0);
-  const { vaultPassword, recoveryCode, setRecoveryCode } = useOnboardingState();
+  const { vaultPassword, recoveryKit, setRecoveryKit } = useOnboardingState();
   const { createVault } = useVault();
   const copy = ONBOARDING_COPY.recovery;
   const staged = RECOVERY_VERIFY_MODE === "staged";
 
   // Only reachable by deep-linking past step 4 or by a bug in the step order.
   // Says so rather than showing a grid of skeletons that will never fill in.
-  const missingPassword = !recoveryCode && !vaultPassword;
+  const missingPassword = !recoveryKit && !vaultPassword;
 
   // Arriving on this step is what creates the vault. createVault generates the
   // MEK, wraps it under Argon2id with the step 4 password AND under the
   // recovery code, writes the row, and hands back the words rendered below.
   //
-  // Guarded by a ref rather than by `recoveryCode` alone: React 19 strict mode
+  // Guarded by a ref rather than by `recoveryKit` alone: React 19 strict mode
   // mounts effects twice in development, and a second createVault would try to
   // insert a second vault row for the same user and fail the unique
   // constraint, which would look like a real error to whoever is testing.
@@ -555,13 +558,13 @@ function StepRecovery(props: OnboardingStepProps) {
     // The no-password case is reported from render (missingPassword below)
     // rather than by setting state here, so the effect only ever writes state
     // asynchronously, after the promise settles.
-    if (recoveryCode || creating.current || !vaultPassword) return;
+    if (recoveryKit || creating.current || !vaultPassword) return;
     creating.current = true;
     let cancelled = false;
 
     void createVault(vaultPassword)
       .then((result) => {
-        if (!cancelled) setRecoveryCode(result.recoveryCode);
+        if (!cancelled) setRecoveryKit(result.recoveryCode);
       })
       .catch((cause: unknown) => {
         creating.current = false;
@@ -573,7 +576,7 @@ function StepRecovery(props: OnboardingStepProps) {
     return () => {
       cancelled = true;
     };
-  }, [recoveryCode, vaultPassword, createVault, setRecoveryCode, retryToken]);
+  }, [recoveryKit, vaultPassword, createVault, setRecoveryKit, retryToken]);
 
   // Clears the error and re-arms the create-vault effect. On the common
   // failure the insert is what throws, so no vault row was written and the
@@ -597,7 +600,7 @@ function StepRecovery(props: OnboardingStepProps) {
   // wrong answer draws a fresh triple: re-asking the same three would let
   // someone brute-force three known slots by repetition.
   const submitVerify = () => {
-    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+    if (verifyRecoveryKitWords(recoveryKit, positions, answers)) {
       props.onNext();
       return;
     }
@@ -639,7 +642,7 @@ function StepRecovery(props: OnboardingStepProps) {
       // Not just "did they tick the box": the code has to exist. Advancing
       // past a grid that is still loading would mean confirming words nobody
       // has been shown.
-      nextDisabled={!confirmed || !recoveryCode}
+      nextDisabled={!confirmed || !recoveryKit}
       error={createError ?? (missingPassword ? "Go back and set a vault password first." : null)}
       // Vault creation can fail (network, RLS, a transient). Without a way to
       // retry, the failure is a dead end: Back is hidden and Continue stays
@@ -650,7 +653,7 @@ function StepRecovery(props: OnboardingStepProps) {
       hideBack
     >
       <p>{copy.body}</p>
-      <RecoveryCodeSlots code={recoveryCode} />
+      <RecoveryCodeSlots code={recoveryKit} />
       <p className="mt-4 text-sm">{copy.instruction}</p>
       <label className="mt-4 flex items-center gap-3 text-sm">
         <input
@@ -668,7 +671,7 @@ function StepRecovery(props: OnboardingStepProps) {
 // Only mounted when RECOVERY_VERIFY_MODE is "reentry", the reading that makes
 // the flow 8 steps.
 function StepVerify(props: OnboardingStepProps) {
-  const { recoveryCode } = useOnboardingState();
+  const { recoveryKit } = useOnboardingState();
   const [positions, setPositions] = useState(pickVerifyPositions);
   const [answers, setAnswers] = useState<string[]>(() =>
     Array.from({ length: VERIFY_WORD_COUNT }, () => ""),
@@ -685,7 +688,7 @@ function StepVerify(props: OnboardingStepProps) {
   // attack the cooldown was there to slow, so this is a rate-limit refinement
   // rather than a hole.
   const submit = () => {
-    if (verifyRecoveryWords(recoveryCode, positions, answers)) {
+    if (verifyRecoveryKitWords(recoveryKit, positions, answers)) {
       props.onNext();
       return;
     }
@@ -710,52 +713,12 @@ function StepVerify(props: OnboardingStepProps) {
   );
 }
 
-function StepBiometric(props: OnboardingStepProps) {
-  const available = useHasPlatformAuthenticator();
-
-  // hideBack on every branch. Back from here lands on the recovery screen,
-  // whose effect sees a code already in state and so re-renders the same words
-  // without re-creating anything. But the vault row now exists, the code has
-  // been confirmed, and offering a way back into "write these down" reads as
-  // if something is still pending. Everything from step 5 on is one-way.
-
-  // Probe still running. Show the headline with the CTA held shut rather than
-  // flashing the fallback copy at a device that does support this.
-  if (available === null) {
-    return (
-      <StepShell {...props} title={ONBOARDING_COPY.biometric.headline} nextDisabled hideBack />
-    );
-  }
-
-  if (!available) {
-    const fallback = ONBOARDING_COPY.biometricFallback;
-    return (
-      <StepShell {...props} title={fallback.headline} nextLabel={fallback.cta} hideBack>
-        <p>{fallback.body}</p>
-      </StepShell>
-    );
-  }
-
-  const copy = ONBOARDING_COPY.biometric;
-  return (
-    <StepShell
-      {...props}
-      title={copy.headline}
-      nextLabel={copy.cta}
-      secondaryLabel={copy.secondary}
-      hideBack
-    >
-      <p>{copy.body}</p>
-    </StepShell>
-  );
-}
-
 function StepSuccess(props: OnboardingStepProps) {
-  // "I'll do this later" opens an empty dashboard. onSecondary defaults to
+  // "Skip" opens an empty dashboard. onSecondary defaults to
   // onNext, and this is the last step, so it completes the wizard either way.
   // Per spec: acceptable, the aha moment was offered. Do not block on it.
   const copy = ONBOARDING_COPY.success;
-  const { name, recoveryCode } = useOnboardingState();
+  const { name, recoveryKit } = useOnboardingState();
   const { finalizeVaultSetup } = useVault();
   const { updateDisplayName } = useProfile();
 
@@ -770,21 +733,26 @@ function StepSuccess(props: OnboardingStepProps) {
   // enc_display_name, same column and same helper the settings page uses.
   //
   // Ref-guarded for the same strict-mode reason as createVault, and gated on
-  // recoveryCode so that a flow which somehow arrived here without a vault
+  // recoveryKit so that a flow which somehow arrived here without a vault
   // does not claim an unlocked one.
   const committed = useRef(false);
   useEffect(() => {
-    if (committed.current || !recoveryCode) return;
+    if (committed.current || !recoveryKit) return;
     committed.current = true;
     finalizeVaultSetup();
     const displayName = name.trim();
+    // Mark this device as having completed onboarding. The auth screen reads
+    // this key: presence = returning user (show welcome-back), value = name
+    // to personalise the greeting. Written even when empty so a user who
+    // skipped the name field still gets the generic "Welcome back." greeting.
+    localStorage.setItem("ow_greeting_name", displayName);
     if (!displayName) return;
     // Deliberately not surfaced or awaited. The account, the vault and the
     // recovery code are all already durable at this point; a failed profile
     // write costs a greeting, and the name is editable in settings. Blocking
     // the last screen of onboarding on it would be the wrong trade.
     void updateDisplayName(displayName).catch(() => {});
-  }, [recoveryCode, name, finalizeVaultSetup, updateDisplayName]);
+  }, [recoveryKit, name, finalizeVaultSetup, updateDisplayName]);
 
   const headline = name.trim() ? `You're all set, ${name.trim()}.` : copy.headline;
 
@@ -811,7 +779,6 @@ export function buildOnboardingSteps(mode: RecoveryVerifyMode): OnboardingStep[]
     ...(mode === "reentry"
       ? [{ id: "verify-recovery-code", title: "Confirm recovery kit", Component: StepVerify }]
       : []),
-    { id: "biometric", title: "Biometric unlock", Component: StepBiometric },
     { id: "success", title: "You are all set", Component: StepSuccess },
   ];
 }
