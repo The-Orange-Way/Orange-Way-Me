@@ -14,12 +14,8 @@
  * dispatcher for the four fn slugs is a separate module.
  */
 
-import {
-  STEALTH_MESSAGE,
-  STEALTH_PROTOCOL_VERSION,
-  type StealthMessageType,
-} from './protocol';
-import { OR_CONNECT_BASE, OR_CONNECT_URL_RAW } from '../or/widget';
+import { STEALTH_MESSAGE, STEALTH_PROTOCOL_VERSION, type StealthMessageType } from "./protocol";
+import { OR_CONNECT_BASE, OR_CONNECT_URL_RAW } from "../or/widget";
 
 /** Types the widget sends to the platform. Anything else inbound is dropped. */
 const INBOUND_TYPES: ReadonlySet<string> = new Set<StealthMessageType>([
@@ -75,24 +71,24 @@ export class StealthChannel {
   start(popup: Window, handler: StealthInboundHandler): void {
     if (!this.configuredRawUrl) {
       throw new Error(
-        'Stealth transport requires VITE_OR_CONNECT_URL. Refusing to start without an exact configured widget origin.',
+        "Stealth transport requires VITE_OR_CONNECT_URL. Refusing to start without an exact configured widget origin.",
       );
     }
     if (this.listening) {
       throw new Error(
-        'Stealth transport already started. Call stop() before starting a new popup.',
+        "Stealth transport already started. Call stop() before starting a new popup.",
       );
     }
     this.popup = popup;
     this.handler = handler;
-    window.addEventListener('message', this.onMessage);
+    window.addEventListener("message", this.onMessage);
     this.listening = true;
   }
 
   /** Stop listening and drop all state, so the transport never outlives the popup. */
   stop(): void {
     if (!this.listening) return;
-    window.removeEventListener('message', this.onMessage);
+    window.removeEventListener("message", this.onMessage);
     this.listening = false;
     this.popup = null;
     this.handler = null;
@@ -140,7 +136,7 @@ export class StealthChannel {
     if (this.popup === null || event.source !== this.popup) return;
 
     const data = event.data;
-    if (data === null || typeof data !== 'object') return;
+    if (data === null || typeof data !== "object") return;
 
     // 3. Version, exact, never coerced.
     if ((data as { version?: unknown }).version !== STEALTH_PROTOCOL_VERSION) {
@@ -149,12 +145,12 @@ export class StealthChannel {
 
     // 4. Type must be a known inbound type. Unknown is dropped, not thrown.
     const type = (data as { type?: unknown }).type;
-    if (typeof type !== 'string' || !INBOUND_TYPES.has(type)) return;
+    if (typeof type !== "string" || !INBOUND_TYPES.has(type)) return;
 
     // 5. Record the id of a proxy request so a later response can be matched.
     if (type === STEALTH_MESSAGE.PROXY_REQUEST) {
       const requestId = (data as { request_id?: unknown }).request_id;
-      if (typeof requestId !== 'string') return;
+      if (typeof requestId !== "string") return;
       // Bound inFlight: evict the oldest id at capacity so an unanswered stream
       // of requests cannot grow it for the life of the popup.
       if (this.inFlight.size >= MAX_INFLIGHT) {
