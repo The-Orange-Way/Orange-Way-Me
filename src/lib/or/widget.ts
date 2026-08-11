@@ -36,9 +36,11 @@ import { supabase } from "@/integrations/supabase/client";
 // `||` and not `??` on purpose. A workflow that sets this var to an
 // empty string produces `""` here, which is not nullish, so `??` would
 // keep it and `new URL("")` would throw. Treat empty as unset.
-const OR_CONNECT_BASE =
-  (import.meta.env.VITE_OR_CONNECT_URL as string | undefined) ||
-  "https://connect.orangerails.com/connect";
+export const OR_CONNECT_URL_RAW = import.meta.env.VITE_OR_CONNECT_URL as
+  | string
+  | undefined;
+export const OR_CONNECT_BASE =
+  OR_CONNECT_URL_RAW || "https://connect.orangerails.com/connect";
 
 // The platform slug OR resolves this app by. It MUST name the same
 // platform row that this environment's OR_PLATFORM_API_KEY
