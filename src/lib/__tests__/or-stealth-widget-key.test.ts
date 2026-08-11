@@ -44,7 +44,7 @@ async function aesGcmEncrypt(key: CryptoKey, plaintext: string) {
   return { iv, ct };
 }
 
-async function aesGcmDecrypt(key: CryptoKey, iv: Uint8Array, ct: ArrayBuffer) {
+async function aesGcmDecrypt(key: CryptoKey, iv: Uint8Array<ArrayBuffer>, ct: ArrayBuffer) {
   const pt = await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
   return new TextDecoder().decode(pt);
 }
