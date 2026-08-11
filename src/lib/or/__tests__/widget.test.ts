@@ -68,10 +68,13 @@ function installWindowShim(): { popup: MockPopup; openedUrls: string[]; restore:
       openedUrls.push(String(url));
       return popup;
     }),
-    setInterval: globalThis.setInterval.bind(globalThis),
-    clearInterval: globalThis.clearInterval.bind(globalThis),
-    setTimeout: globalThis.setTimeout.bind(globalThis),
-    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    // Resolve globalThis lazily so vi.useFakeTimers(), installed by a case
+    // AFTER this shim, is the timer the widget actually calls. Binding here
+    // would capture the real timer and defeat advanceTimersByTimeAsync.
+    setInterval: (...a: Parameters<typeof setInterval>) => globalThis.setInterval(...a),
+    clearInterval: (...a: Parameters<typeof clearInterval>) => globalThis.clearInterval(...a),
+    setTimeout: (...a: Parameters<typeof setTimeout>) => globalThis.setTimeout(...a),
+    clearTimeout: (...a: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...a),
     location: { origin: "https://orangeway.local" },
   };
 
