@@ -116,13 +116,15 @@ jobs:
           #
           # Branch-derived rather than repo-variable, matching
           # VITE_DEV_SIGNUP_OPEN directly above, so no env-var typo can
-          # turn it on in prod. The prod bundle never contains the flag-on
-          # branch of the code at all.
+          # flip it by accident. The onboarding screens are ALREADY in the
+          # prod bundle regardless of this flag; the variable only controls
+          # whether the /onboarding route is reachable. Enabled on both dev
+          # and prod as of DL-0728 (founder GO 2026-08-11).
           #
           # Flow is wired to real auth, vault generation, and recovery-kit
-          # creation as of 615d1b51. This flag controls which branches
-          # serve /onboarding; the prod arm always resolves to false.
-          VITE_ONBOARDING_V2: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          # creation as of 615d1b51. Owner and removal plan for this flag
+          # are recorded on DL-0728 per DEC-0295.
+          VITE_ONBOARDING_V2: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
           # Cloudflare Turnstile captcha widget. Build-time inlined
           # public site key; the matching SECRET key lives in the
           # Supabase Auth project config (Studio: Auth -> Bot and
