@@ -148,8 +148,13 @@ export function AuthScreen() {
           ...(captchaToken ? { captchaToken } : {}),
         },
       });
+      if (sendError) {
+        toast.error("Unable to send the code. Please try again.");
+        setOtpStage("email");
+      }
     } catch (err) {
       toast.error("Unable to send the code. Please try again.");
+      setOtpStage("email");
     } finally {
       resetCaptcha();
       setBusy(false);
