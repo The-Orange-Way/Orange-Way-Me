@@ -27,22 +27,21 @@ export const STEALTH_PROTOCOL_VERSION = 1 as const;
  */
 export const STEALTH_MESSAGE = {
   // Platform to widget.
-  INIT: 'OR_STEALTH_INIT',
-  PROXY_RESPONSE: 'OR_STEALTH_PROXY_RESPONSE',
+  INIT: "OR_STEALTH_INIT",
+  PROXY_RESPONSE: "OR_STEALTH_PROXY_RESPONSE",
   // Widget to platform.
-  READY: 'OR_STEALTH_READY',
-  PROGRESS: 'OR_STEALTH_PROGRESS',
-  PROXY_REQUEST: 'OR_STEALTH_PROXY_REQUEST',
+  READY: "OR_STEALTH_READY",
+  PROGRESS: "OR_STEALTH_PROGRESS",
+  PROXY_REQUEST: "OR_STEALTH_PROXY_REQUEST",
   // Completions (five, not four): the widget ends every flow with one of these.
-  ADD_COMPLETE: 'OR_STEALTH_ADD_COMPLETE',
-  SYNC_COMPLETE: 'OR_STEALTH_SYNC_COMPLETE',
-  LIST_RESULT: 'OR_STEALTH_LIST_RESULT',
-  DELETE_COMPLETE: 'OR_STEALTH_DELETE_COMPLETE',
-  ERROR: 'OR_STEALTH_ERROR',
+  ADD_COMPLETE: "OR_STEALTH_ADD_COMPLETE",
+  SYNC_COMPLETE: "OR_STEALTH_SYNC_COMPLETE",
+  LIST_RESULT: "OR_STEALTH_LIST_RESULT",
+  DELETE_COMPLETE: "OR_STEALTH_DELETE_COMPLETE",
+  ERROR: "OR_STEALTH_ERROR",
 } as const;
 
-export type StealthMessageType =
-  (typeof STEALTH_MESSAGE)[keyof typeof STEALTH_MESSAGE];
+export type StealthMessageType = (typeof STEALTH_MESSAGE)[keyof typeof STEALTH_MESSAGE];
 
 /**
  * The complete set of edge function slugs the widget dispatches through a
@@ -51,14 +50,13 @@ export type StealthMessageType =
  * refused, never forwarded.
  */
 export const STEALTH_PROXY_FN = {
-  CONNECTION_CREATE: 'or-stealth-connection-create',
-  ENVELOPE_FETCH: 'or-stealth-envelope-fetch',
-  TRANSACTIONS_STORE: 'or-stealth-transactions-store',
-  ENVELOPE_UPDATE: 'or-stealth-envelope-update',
+  CONNECTION_CREATE: "or-stealth-connection-create",
+  ENVELOPE_FETCH: "or-stealth-envelope-fetch",
+  TRANSACTIONS_STORE: "or-stealth-transactions-store",
+  ENVELOPE_UPDATE: "or-stealth-envelope-update",
 } as const;
 
-export type StealthProxyFn =
-  (typeof STEALTH_PROXY_FN)[keyof typeof STEALTH_PROXY_FN];
+export type StealthProxyFn = (typeof STEALTH_PROXY_FN)[keyof typeof STEALTH_PROXY_FN];
 
 /** The allowed proxy fn slugs as a Set, for a cheap membership check on inbound requests. */
 export const STEALTH_PROXY_FN_ALLOWED: ReadonlySet<StealthProxyFn> = new Set(
