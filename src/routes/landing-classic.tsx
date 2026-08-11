@@ -1003,12 +1003,7 @@ const PRIVACY_FAQ: { q: string; a: React.ReactNode }[] = [
         <p>{"No. We never see your private keys, your xpub, or your transactions on chain."}</p>
         <p className="mt-3">
           {
-            "To track your Bitcoin we use Stealth Sync, built by our sister project Orange Rails. It runs entirely in your browser. Your xpub stays on your device. The math derives your wallet addresses locally and asks the Bitcoin network for matching blocks using BIP 158 compact filters, the same protocol Sparrow Wallet and Wasabi Wallet use on the desktop."
-          }
-        </p>
-        <p className="mt-3">
-          {
-            "In plain English: instead of giving a company the keys to your wallet, you keep them. Stealth Sync does the work to find your transactions on chain without telling anyone which addresses are yours. Our server holds sealed envelopes it cannot open. Block data comes from our own Bitcoin Core node, not a public Electrum or Mempool.space that might log requests."
+            "Direct Bitcoin wallet tracking is on the way. When it lands, address matching will run entirely in your browser using Stealth Sync from our sister project Orange Rails, so no server ever learns which addresses are yours. Until then, we hold nothing that could reveal your on chain activity."
           }
         </p>
         <p className="mt-3">{"The privacy is done in math, not in a privacy policy."}</p>
