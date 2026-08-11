@@ -15,7 +15,7 @@
  */
 
 import { STEALTH_MESSAGE, STEALTH_PROTOCOL_VERSION, type StealthMessageType } from "./protocol";
-import { OR_CONNECT_BASE, OR_CONNECT_URL_RAW } from "../or/widget";
+import { OR_CONNECT_URL_RAW } from "../or/widget";
 
 /** Types the widget sends to the platform. Anything else inbound is dropped. */
 const INBOUND_TYPES: ReadonlySet<string> = new Set<StealthMessageType>([
@@ -47,23 +47,21 @@ export type StealthInboundHandler = (message: StealthInboundMessage) => void;
 const MAX_INFLIGHT = 64;
 
 export class StealthChannel {
-  private readonly allowedOrigin: string;
+  private allowedOrigin = "";
   private readonly configuredRawUrl: string | undefined;
   private popup: Window | null = null;
   private handler: StealthInboundHandler | null = null;
   private listening = false;
   private readonly inFlight = new Set<string>();
 
-  // allowedOrigin defaults to the exact origin of the one configured widget
-  // URL (VITE_OR_CONNECT_URL), so there is a single source of truth for the
-  // origin and no second env var to drift. rawUrl is the UNresolved value:
-  // start() refuses when it is empty or unset, so a build that never set
-  // VITE_OR_CONNECT_URL cannot run against the hardcoded fallback origin.
-  constructor(
-    allowedOrigin: string = new URL(OR_CONNECT_BASE).origin,
-    rawUrl: string | undefined = OR_CONNECT_URL_RAW,
-  ) {
-    this.allowedOrigin = allowedOrigin;
+  // The allowed origin is derived inside start(), never in the constructor,
+  // and only from this one raw value. There is no allowedOrigin parameter to
+  // override it, so the origin has a single source of truth by construction.
+  // rawUrl is the UNresolved value: start() refuses when it is empty or unset
+  // BEFORE it parses, so a build that never set VITE_OR_CONNECT_URL can never
+  // run against the hardcoded fallback origin, and a malformed value refuses
+  // instead of throwing an uncaught URL error.
+  constructor(rawUrl: string | undefined = OR_CONNECT_URL_RAW) {
     this.configuredRawUrl = rawUrl;
   }
 
@@ -79,6 +77,19 @@ export class StealthChannel {
         "Stealth transport already started. Call stop() before starting a new popup.",
       );
     }
+    // Refuse first, parse second: the raw value is proven non-empty above, so
+    // the only remaining failure is a malformed URL, which refuses cleanly
+    // here instead of throwing an uncaught error at construction time. This is
+    // the one and only origin derivation; post() and onMessage both read it.
+    let derivedOrigin: string;
+    try {
+      derivedOrigin = new URL(this.configuredRawUrl).origin;
+    } catch {
+      throw new Error(
+        "Stealth transport requires a valid VITE_OR_CONNECT_URL. Refusing to start: the configured widget URL is not a valid URL.",
+      );
+    }
+    this.allowedOrigin = derivedOrigin;
     this.popup = popup;
     this.handler = handler;
     window.addEventListener("message", this.onMessage);
