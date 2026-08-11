@@ -7,15 +7,21 @@ const noopHandler = () => {};
 
 describe("StealthChannel config guard", () => {
   it("start() refuses when the configured widget URL is an empty string", () => {
-    const channel = new StealthChannel(new URL(OR_CONNECT_BASE).origin, "");
+    const channel = new StealthChannel("");
     const popup = {} as Window;
     expect(() => channel.start(popup, noopHandler)).toThrow(/VITE_OR_CONNECT_URL/);
   });
 
   it("start() refuses when the configured widget URL is unset", () => {
-    const channel = new StealthChannel(new URL(OR_CONNECT_BASE).origin, undefined);
+    const channel = new StealthChannel(undefined);
     const popup = {} as Window;
     expect(() => channel.start(popup, noopHandler)).toThrow(/VITE_OR_CONNECT_URL/);
+  });
+
+  it("start() refuses when the configured widget URL is not a valid URL", () => {
+    const channel = new StealthChannel("not a url");
+    const popup = {} as Window;
+    expect(() => channel.start(popup, noopHandler)).toThrow(/valid VITE_OR_CONNECT_URL/);
   });
 });
 
@@ -39,9 +45,9 @@ describe("StealthChannel allowed origin", () => {
       postMessage: (message: unknown, target: string) => posts.push({ message, target }),
     } as unknown as Window;
 
-    // undefined allowedOrigin exercises the default; a non-empty raw URL clears
-    // the config guard so start() proceeds.
-    const channel = new StealthChannel(undefined, "https://connect.orangerails.com/connect");
+    // A non-empty raw URL clears the config guard, so start() proceeds and
+    // derives the outbound target origin from that one value.
+    const channel = new StealthChannel("https://connect.orangerails.com/connect");
     channel.start(popup, noopHandler);
     channel.sendInit({ hello: "world" });
 
