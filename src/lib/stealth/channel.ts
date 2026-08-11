@@ -19,6 +19,7 @@ import {
   STEALTH_PROTOCOL_VERSION,
   type StealthMessageType,
 } from './protocol';
+import { OR_CONNECT_BASE, OR_CONNECT_URL_RAW } from '../or/widget';
 
 /** Types the widget sends to the platform. Anything else inbound is dropped. */
 const INBOUND_TYPES: ReadonlySet<string> = new Set<StealthMessageType>([
@@ -43,14 +44,6 @@ export interface StealthInboundMessage {
 export type StealthInboundHandler = (message: StealthInboundMessage) => void;
 
 /**
- * The allowed widget origin, read once from config. A build with no value here
- * makes the transport throw at construction rather than run permissively.
- */
-const CONFIGURED_ORIGIN = import.meta.env.VITE_OR_ALLOWED_ORIGIN as
-  | string
-  | undefined;
-
-/**
  * Upper bound on outstanding proxy request ids. An id is only meaningful for
  * the life of one request, so a widget that opens requests we never answer
  * cannot grow inFlight without bound: at capacity the oldest id is evicted.
@@ -59,22 +52,32 @@ const MAX_INFLIGHT = 64;
 
 export class StealthChannel {
   private readonly allowedOrigin: string;
+  private readonly configuredRawUrl: string | undefined;
   private popup: Window | null = null;
   private handler: StealthInboundHandler | null = null;
   private listening = false;
   private readonly inFlight = new Set<string>();
 
-  constructor(allowedOrigin: string | undefined = CONFIGURED_ORIGIN) {
-    if (!allowedOrigin) {
-      throw new Error(
-        'Stealth transport requires VITE_OR_ALLOWED_ORIGIN. Refusing to start without an exact allowed origin.',
-      );
-    }
+  // allowedOrigin defaults to the exact origin of the one configured widget
+  // URL (VITE_OR_CONNECT_URL), so there is a single source of truth for the
+  // origin and no second env var to drift. rawUrl is the UNresolved value:
+  // start() refuses when it is empty or unset, so a build that never set
+  // VITE_OR_CONNECT_URL cannot run against the hardcoded fallback origin.
+  constructor(
+    allowedOrigin: string = new URL(OR_CONNECT_BASE).origin,
+    rawUrl: string | undefined = OR_CONNECT_URL_RAW,
+  ) {
     this.allowedOrigin = allowedOrigin;
+    this.configuredRawUrl = rawUrl;
   }
 
   /** Begin listening for messages from `popup`, routing valid ones to `handler`. */
   start(popup: Window, handler: StealthInboundHandler): void {
+    if (!this.configuredRawUrl) {
+      throw new Error(
+        'Stealth transport requires VITE_OR_CONNECT_URL. Refusing to start without an exact configured widget origin.',
+      );
+    }
     if (this.listening) {
       throw new Error(
         'Stealth transport already started. Call stop() before starting a new popup.',
