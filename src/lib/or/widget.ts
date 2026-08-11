@@ -61,6 +61,19 @@ export const OR_CONNECT_BASE = OR_CONNECT_URL_RAW || "https://connect.orangerail
 const OR_PLATFORM_SLUG =
   (import.meta.env.VITE_OR_PLATFORM_SLUG as string | undefined) || "orangeway-me";
 
+// Client-side hang guard for a link session (ms).
+//
+// OR's proxy runs its own 120s timeout and, when it fires, posts a
+// terminal message back to this window. This guard sits STRICTLY above
+// that 120s so the proxy's own terminal message always wins in the
+// ordinary timeout case; the client guard only fires when even that
+// never arrived, e.g. the popup wedged, a cross-origin bank redirect
+// severed window.opener, or the message was dropped. Without it a
+// wedged session leaves the returned promise pending forever. There is
+// deliberately no shorter fallback: a 15s guard would race and kill
+// slow-but-live sessions that are still linking.
+const STEALTH_SESSION_TIMEOUT_MS = 150000;
+
 /** Source wallets returned by the widget after the user picks them. */
 export interface OrLinkSourceWallet {
   id: string;
@@ -107,6 +120,16 @@ export async function openOrConnect(args: {
     const expectedOrigin = new URL(OR_CONNECT_BASE).origin;
     let settled = false;
 
+    // See STEALTH_SESSION_TIMEOUT_MS: reject if no terminal message and
+    // no popup-close ever arrive, so a wedged session cannot leave this
+    // promise pending forever.
+    const hangGuard = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Link session timed out with no response from the widget"));
+    }, STEALTH_SESSION_TIMEOUT_MS);
+
     function handle(event: MessageEvent) {
       if (event.origin !== expectedOrigin) return;
       const data = event.data as { type?: string };
@@ -131,6 +154,7 @@ export async function openOrConnect(args: {
     function cleanup() {
       window.removeEventListener("message", handle);
       window.clearInterval(poll);
+      window.clearTimeout(hangGuard);
       try {
         popupRef.close();
       } catch {
