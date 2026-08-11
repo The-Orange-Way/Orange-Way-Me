@@ -1001,6 +1001,7 @@ const PRIVACY_FAQ: { q: string; a: React.ReactNode }[] = [
     a: (
       <>
         <p>{"No. We never see your private keys, your xpub, or your transactions on chain."}</p>
+        <p className="mt-3">{"The privacy is done in math, not in a privacy policy."}</p>
       </>
     ),
   },
