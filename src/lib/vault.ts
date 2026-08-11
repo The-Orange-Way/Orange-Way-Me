@@ -614,6 +614,43 @@ export async function deriveOrOpkSeedFromMek(
   return new Uint8Array(rawBits);
 }
 
+/**
+ * Derive the AES-GCM key that re-seals synced data for the stealth-sync
+ * widget, which runs in a cross-origin iframe. Same OR-subkey HKDF family
+ * as creds / txns / opk-seed (IKM = OR MEK, salt "ow-or:" + userVaultSaltB64)
+ * with a distinct HKDF info label, so it regenerates deterministically on
+ * every unlock with no separate storage and can never collide with a sibling.
+ *
+ * Deliberately NON-EXTRACTABLE (extractable = false), unlike the three
+ * sibling subkeys which are extractable. The widget's cross-origin iframe is
+ * a broader threat surface, so the raw key bytes must never be exportable
+ * from that context. This divergence is intentional hardening, not drift.
+ */
+export async function deriveOrStealthWidgetKeyFromMek(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const saltBytes = encoder.encode("ow-or:" + userVaultSaltB64);
+  const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
+    "deriveBits",
+  ]);
+  const rawBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBytes as BufferSource,
+      info: encoder.encode("orangerails-stealth-widget-v1") as BufferSource,
+    },
+    mekAsHkdf,
+    256,
+  );
+  return crypto.subtle.importKey("raw", rawBits, { name: "AES-GCM" }, /* extractable */ false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
 // ---------- KDF strategy map (Open/Closed Principle extension point) ----------
 //
 // STABILITY RULE: a strategy entry MUST never be removed from
