@@ -167,8 +167,9 @@ function PrivacyPage() {
           Marketing-site analytics. Enabled on <code>orangeway.app</code>. Disabled by default on
           self-hosted builds. Anonymous events only; no cross-site cookies, no profiles. Sees: page
           views and aggregate clicks, with URL query strings and known sensitive field names
-          stripped before send. The actual retention is the value the operator has configured on the
-          PostHog project; our target is 90 days.{" "}
+          stripped before send. Events are sent to PostHog's EU Cloud, so analytics data is ingested
+          and stored in the European Union. The actual retention is the value the operator has
+          configured on the PostHog project; our target is 90 days.{" "}
           <a
             href="https://posthog.com/dpa"
             className="underline"
@@ -205,9 +206,12 @@ function PrivacyPage() {
             encrypted store.
           </li>
           <li>
-            <strong>PostHog (US).</strong> SCCs. Quebec Law 25 §17 implication: anonymous
-            event-level analytics; no profile, no cross-site identifier. Disabled entirely on
-            self-hosted builds.
+            <strong>PostHog (EU-hosted; US company).</strong> Our PostHog project runs on PostHog's
+            EU Cloud, so analytics events are ingested and stored in the European Union, not
+            transferred to the United States in the ordinary course. PostHog Inc. is a US company;
+            the SCCs in its DPA cover any residual access from the US. Quebec Law 25 §17
+            implication: anonymous event-level analytics; no profile, no cross-site identifier.
+            Disabled entirely on self-hosted builds.
           </li>
           <li>
             <strong>Quiltt (US).</strong> Applies only if you link a bank account. Quebec Law 25 §17
