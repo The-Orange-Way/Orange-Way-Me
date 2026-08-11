@@ -50,6 +50,13 @@ const CONFIGURED_ORIGIN = import.meta.env.VITE_OR_ALLOWED_ORIGIN as
   | string
   | undefined;
 
+/**
+ * Upper bound on outstanding proxy request ids. An id is only meaningful for
+ * the life of one request, so a widget that opens requests we never answer
+ * cannot grow inFlight without bound: at capacity the oldest id is evicted.
+ */
+const MAX_INFLIGHT = 64;
+
 export class StealthChannel {
   private readonly allowedOrigin: string;
   private popup: Window | null = null;
@@ -68,7 +75,11 @@ export class StealthChannel {
 
   /** Begin listening for messages from `popup`, routing valid ones to `handler`. */
   start(popup: Window, handler: StealthInboundHandler): void {
-    if (this.listening) return;
+    if (this.listening) {
+      throw new Error(
+        'Stealth transport already started. Call stop() before starting a new popup.',
+      );
+    }
     this.popup = popup;
     this.handler = handler;
     window.addEventListener('message', this.onMessage);
@@ -87,10 +98,12 @@ export class StealthChannel {
 
   /** Send OR_STEALTH_INIT to the widget. The caller owns the payload; this adds no keys. */
   sendInit(payload: Record<string, unknown>): void {
+    // Spread payload FIRST so a caller can never override the protocol fields
+    // we validate on inbound (type, version). Protocol fields always win.
     this.post({
+      ...payload,
       type: STEALTH_MESSAGE.INIT,
       version: STEALTH_PROTOCOL_VERSION,
-      ...payload,
     });
   }
 
@@ -101,11 +114,13 @@ export class StealthChannel {
   respondToProxy(requestId: string, payload: Record<string, unknown>): void {
     if (!this.inFlight.has(requestId)) return;
     this.inFlight.delete(requestId);
+    // Spread payload FIRST so a caller cannot override type, version, or the
+    // request_id we are answering. Protocol fields always win.
     this.post({
+      ...payload,
       type: STEALTH_MESSAGE.PROXY_RESPONSE,
       version: STEALTH_PROTOCOL_VERSION,
       request_id: requestId,
-      ...payload,
     });
   }
 
@@ -137,6 +152,12 @@ export class StealthChannel {
     if (type === STEALTH_MESSAGE.PROXY_REQUEST) {
       const requestId = (data as { request_id?: unknown }).request_id;
       if (typeof requestId !== 'string') return;
+      // Bound inFlight: evict the oldest id at capacity so an unanswered stream
+      // of requests cannot grow it for the life of the popup.
+      if (this.inFlight.size >= MAX_INFLIGHT) {
+        const oldest = this.inFlight.values().next().value;
+        if (oldest !== undefined) this.inFlight.delete(oldest);
+      }
       this.inFlight.add(requestId);
     }
 
