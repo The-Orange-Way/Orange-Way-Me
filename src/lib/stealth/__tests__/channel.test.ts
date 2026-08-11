@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { StealthChannel } from "../channel";
-import { OR_CONNECT_BASE } from "../../or/widget";
 
 const noopHandler = () => {};
 
@@ -39,7 +38,7 @@ describe("StealthChannel allowed origin", () => {
     (globalThis as unknown as { window: unknown }).window = realWindow;
   });
 
-  it("defaults the outbound target origin to the exact origin of OR_CONNECT_BASE", () => {
+  it("derives the outbound target origin from the configured widget URL", () => {
     const posts: Array<{ message: unknown; target: string }> = [];
     const popup = {
       postMessage: (message: unknown, target: string) => posts.push({ message, target }),
@@ -52,7 +51,7 @@ describe("StealthChannel allowed origin", () => {
     channel.sendInit({ hello: "world" });
 
     expect(posts).toHaveLength(1);
-    expect(posts[0].target).toBe(new URL(OR_CONNECT_BASE).origin);
+    expect(posts[0].target).toBe("https://connect.orangerails.com");
 
     channel.stop();
   });
