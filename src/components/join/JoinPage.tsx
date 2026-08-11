@@ -80,7 +80,9 @@ export function JoinPage({ code }: { code: string }) {
       /* localStorage blocked: redemption falls back to auth hook enforcement */
     }
 
-    const { error, isNew } = await signUp(email, password, captchaToken);
+    // Also pass the code as user metadata so the Before-User-Created auth
+    // hook can validate the signup server-side once it is enabled.
+    const { error, isNew } = await signUp(email, password, captchaToken, { invite_code: code });
     if (error) {
       // Clear the stashed code so a retry starts clean.
       try {
