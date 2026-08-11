@@ -55,4 +55,22 @@ describe("StealthChannel allowed origin", () => {
 
     channel.stop();
   });
+
+  it("derives the target origin from a different host, so a hardcoded literal cannot pass", () => {
+    const posts: Array<{ message: unknown; target: string }> = [];
+    const popup = {
+      postMessage: (message: unknown, target: string) => posts.push({ message, target }),
+    } as unknown as Window;
+
+    // A host other than the production widget proves the origin is derived
+    // from the configured URL, not a constant that only happens to match.
+    const channel = new StealthChannel("https://widget.example.test/x");
+    channel.start(popup, noopHandler);
+    channel.sendInit({ hello: "world" });
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].target).toBe("https://widget.example.test");
+
+    channel.stop();
+  });
 });
