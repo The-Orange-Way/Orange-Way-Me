@@ -1001,12 +1001,6 @@ const PRIVACY_FAQ: { q: string; a: React.ReactNode }[] = [
     a: (
       <>
         <p>{"No. We never see your private keys, your xpub, or your transactions on chain."}</p>
-        <p className="mt-3">
-          {
-            "Direct Bitcoin wallet tracking is on the way. When it lands, address matching will run entirely in your browser using Stealth Sync from our sister project Orange Rails, so no server ever learns which addresses are yours. Until then, we hold nothing that could reveal your on chain activity."
-          }
-        </p>
-        <p className="mt-3">{"The privacy is done in math, not in a privacy policy."}</p>
       </>
     ),
   },
