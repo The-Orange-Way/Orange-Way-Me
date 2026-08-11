@@ -70,6 +70,8 @@ function installWindowShim(): { popup: MockPopup; openedUrls: string[]; restore:
     }),
     setInterval: globalThis.setInterval.bind(globalThis),
     clearInterval: globalThis.clearInterval.bind(globalThis),
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
     location: { origin: "https://orangeway.local" },
   };
 
@@ -241,6 +243,49 @@ describe("openOrConnect", () => {
     // Promise still pending. Mark popup closed; poll loop will reject.
     shim.popup.closed = true;
     await expect(pending).rejects.toThrow(/closed before completion/i);
+  });
+
+  it("rejects after the hang guard when no terminal message ever arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const { openOrConnect } = await import("../widget");
+      const pending = openOrConnect({
+        orgId: ORG_ID,
+        credKeyB64: CRED_KEY,
+        txnKeyB64: TXN_KEY,
+      });
+
+      // Track settlement without leaving an unhandled rejection when the
+      // guard fires below.
+      let state: "pending" | "resolved" | "rejected" = "pending";
+      let error: unknown;
+      pending.then(
+        () => {
+          state = "resolved";
+        },
+        (e) => {
+          state = "rejected";
+          error = e;
+        },
+      );
+
+      // Flush the mint fetch + window.open chain.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shim.openedUrls).toHaveLength(1);
+
+      // 1s short of the guard: no terminal message, popup still open,
+      // promise still pending. This is the hang the guard has to catch.
+      await vi.advanceTimersByTimeAsync(149000);
+      expect(state).toBe("pending");
+
+      // Crossing 150s the guard rejects and closes the popup.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(state).toBe("rejected");
+      expect((error as Error).message).toMatch(/timed out/i);
+      expect(shim.popup.close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Kept last: it stubs an env var the other cases read as unset.
