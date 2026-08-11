@@ -18,6 +18,14 @@ interface AuthContextValue {
     email: string,
     password: string,
     captchaToken: string | null,
+    /**
+     * Optional user metadata stored as `raw_user_meta_data`. The invite
+     * flow passes `{ invite_code }` here so the Before-User-Created auth
+     * hook can authorize the signup server-side. Client-supplied and not
+     * trusted for anything but the hook's own validity check against the
+     * database.
+     */
+    metadata?: Record<string, unknown>,
   ) => Promise<{ error: Error | null; isNew: boolean }>;
   /** Same captcha contract as signUp. */
   signIn: (
@@ -108,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const signUp: AuthContextValue["signUp"] = async (email, password, captchaToken) => {
+  const signUp: AuthContextValue["signUp"] = async (email, password, captchaToken, metadata) => {
     const redirectUrl = `${window.location.origin}/`;
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -116,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: {
         emailRedirectTo: redirectUrl,
         ...(captchaToken ? { captchaToken } : {}),
+        ...(metadata ? { data: metadata } : {}),
       },
     });
     return {
