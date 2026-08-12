@@ -126,6 +126,43 @@ export function StepShell({
 }
 
 /**
+ * Resolves a popstate event to an action without touching the DOM or React.
+ * Extracted so the guard ordering and index clamp are unit-testable in node.
+ *
+ * Returns:
+ *   { type: "stay"; pushStep: number } -- step is one-way; caller re-pushes
+ *   { type: "move"; index: number }   -- move to a clamped registry index
+ *   null                              -- event carries no owStep; ignore
+ *
+ * oneWay MUST be evaluated before the state-shape check: a popstate with
+ * null or foreign state (a browser-native entry from before the wizard
+ * opened) must still be refused when the current step is one-way.
+ */
+export function resolvePopState(
+  eventState: unknown,
+  currentIndex: number,
+  steps: readonly { oneWay?: boolean }[],
+): { type: "stay"; pushStep: number } | { type: "move"; index: number } | null {
+  if (steps[currentIndex]?.oneWay) {
+    return { type: "stay", pushStep: currentIndex };
+  }
+  if (
+    !eventState ||
+    typeof (eventState as Record<string, unknown>).owStep !== "number"
+  ) {
+    return null;
+  }
+  // Clamp to the live registry length. A step can be removed between the
+  // history push and the popstate fire (e.g. biometric removal, DL-0714);
+  // an out-of-range index makes `active` undefined at render, blank screen.
+  const target = Math.max(
+    0,
+    Math.min((eventState as { owStep: number }).owStep, steps.length - 1),
+  );
+  return { type: "move", index: target };
+}
+
+/**
  * OnboardingFlow is the container/router for the whole flow. It walks the
  * ordered step registry, tracks the active index, and hands each step its
  * navigation callbacks. onComplete fires once the last step calls onNext.
@@ -167,21 +204,13 @@ export function OnboardingFlow({
   // otherwise let the browser button bypass.
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      // Guard one-way steps before checking state shape. A popstate with
-      // null or foreign state (e.g. an entry from before the wizard opened)
-      // must still be refused when we are on a one-way step, so the browser
-      // Back button cannot unwind vault creation.
-      if (steps[indexRef.current]?.oneWay) {
-        window.history.pushState({ owStep: indexRef.current }, "");
+      const result = resolvePopState(event.state, indexRef.current, steps);
+      if (result === null) return;
+      if (result.type === "stay") {
+        window.history.pushState({ owStep: result.pushStep }, "");
         return;
       }
-      if (!event.state || typeof event.state.owStep !== "number") return;
-      // Clamp the stored index to the current registry length. A step can be
-      // removed between history push and popstate fire (e.g. biometric removal,
-      // DL-0714); an out-of-range index makes `active` undefined and renders a
-      // blank screen with no in-app recovery.
-      const target = Math.max(0, Math.min(event.state.owStep, steps.length - 1));
-      setIndex(target);
+      setIndex(result.index);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
