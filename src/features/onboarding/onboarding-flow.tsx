@@ -167,12 +167,21 @@ export function OnboardingFlow({
   // otherwise let the browser button bypass.
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      if (!event.state || typeof event.state.owStep !== "number") return;
+      // Guard one-way steps before checking state shape. A popstate with
+      // null or foreign state (e.g. an entry from before the wizard opened)
+      // must still be refused when we are on a one-way step, so the browser
+      // Back button cannot unwind vault creation.
       if (steps[indexRef.current]?.oneWay) {
         window.history.pushState({ owStep: indexRef.current }, "");
         return;
       }
-      setIndex(event.state.owStep);
+      if (!event.state || typeof event.state.owStep !== "number") return;
+      // Clamp the stored index to the current registry length. A step can be
+      // removed between history push and popstate fire (e.g. biometric removal,
+      // DL-0714); an out-of-range index makes `active` undefined and renders a
+      // blank screen with no in-app recovery.
+      const target = Math.max(0, Math.min(event.state.owStep, steps.length - 1));
+      setIndex(target);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
