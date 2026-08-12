@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StealthChannel, type StealthInboundHandler, type StealthInboundMessage } from "../channel";
 import { STEALTH_MESSAGE, STEALTH_PROTOCOL_VERSION } from "../protocol";
@@ -184,5 +184,57 @@ describe("StealthChannel inbound version narrowing", () => {
     expect(received).toHaveLength(0);
 
     channel.stop();
+  });
+
+  // ----- INIT wiring slice, gate tests (regression lock + red-first) -----
+
+  // Regression lock, green from birth. sendInit already stamps protocol_version
+  // (shipped in the transport slice), so this locks the field name: a later
+  // change back to the legacy `version` name is caught. Not a gate. stop() sits
+  // in finally so a failing assertion cannot leak the window message listener.
+  it("regression lock: sendInit stamps the outbound INIT with protocol_version, never version", () => {
+    const posts: Array<{ message: Record<string, unknown>; target: string }> = [];
+    const popup = {
+      postMessage: (message: Record<string, unknown>, target: string) =>
+        posts.push({ message, target }),
+    } as unknown as Window;
+    const channel = new StealthChannel(ORIGIN_URL);
+    try {
+      channel.start(popup, noopHandler);
+      channel.sendInit({ hello: "world" });
+
+      expect(posts).toHaveLength(1);
+      expect(posts[0].message.type).toBe(STEALTH_MESSAGE.INIT);
+      expect(posts[0].message.protocol_version).toBe(STEALTH_PROTOCOL_VERSION);
+      expect(posts[0].message.version).toBeUndefined();
+    } finally {
+      channel.stop();
+    }
+  });
+
+  // Red-first, one named failure. A READY the receiver cannot accept must refuse
+  // OBSERVABLY, not vanish: a silent drop is indistinguishable from a hang. The
+  // missing version and the wrong version take the same silent return today, so
+  // this one test drives BOTH and the fix cannot satisfy only half of it. The
+  // observable signal names the message type only, never a payload field.
+  it("refuses an unacceptable READY observably, for both missing and wrong version", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const received: StealthInboundMessage[] = [];
+    const { channel, deliver } = startChannel((m) => received.push(m));
+    try {
+      deliver({ type: STEALTH_MESSAGE.READY });
+      deliver({ type: STEALTH_MESSAGE.READY, protocol_version: STEALTH_PROTOCOL_VERSION + 1 });
+
+      // Still refused: neither reaches the handler.
+      expect(received).toHaveLength(0);
+      // And the refusal is observable for BOTH, each naming the message type.
+      expect(warn).toHaveBeenCalledTimes(2);
+      for (const call of warn.mock.calls) {
+        expect(String(call[0])).toContain(STEALTH_MESSAGE.READY);
+      }
+    } finally {
+      warn.mockRestore();
+      channel.stop();
+    }
   });
 });
