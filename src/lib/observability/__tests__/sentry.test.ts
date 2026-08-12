@@ -120,4 +120,87 @@ describe("Sentry init no-PII contract", () => {
     mod.initSentry();
     expect(initMock).toHaveBeenCalledTimes(1);
   });
+
+  it("beforeSend drops CSP inline noise and passes through normal errors", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const beforeSend = cfg.beforeSend as (e: unknown) => unknown;
+
+    // CSP inline violation -- should be dropped.
+    expect(
+      beforeSend({
+        exception: {
+          values: [
+            {
+              value:
+                "Refused to execute inline script because it violates the following Content Security Policy directive",
+            },
+          ],
+        },
+      }),
+    ).toBeNull();
+
+    // Normal TypeError -- must pass through (truthy result).
+    expect(
+      beforeSend({
+        exception: { values: [{ value: "Cannot read properties of undefined (reading 'x')" }] },
+      }),
+    ).not.toBeNull();
+  });
+});
+
+describe("isCspInlineNoise", () => {
+  it("matches Chrome inline script block", () => {
+    expect(
+      isCspInlineNoise({
+        exception: {
+          values: [
+            {
+              value:
+                "Refused to execute inline script because it violates the following Content Security Policy directive: \"script-src 'self'\"",
+            },
+          ],
+        },
+      } as Parameters<typeof isCspInlineNoise>[0]),
+    ).toBe(true);
+  });
+
+  it("matches Chrome eval block", () => {
+    expect(
+      isCspInlineNoise({
+        exception: {
+          values: [
+            {
+              value:
+                "Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed source",
+            },
+          ],
+        },
+      } as Parameters<typeof isCspInlineNoise>[0]),
+    ).toBe(true);
+  });
+
+  it("matches Firefox CSP inline block via event.message", () => {
+    expect(
+      isCspInlineNoise({
+        message:
+          "Content Security Policy: The page's settings blocked the loading of a resource at inline",
+      } as Parameters<typeof isCspInlineNoise>[0]),
+    ).toBe(true);
+  });
+
+  it("does not match a normal TypeError", () => {
+    expect(
+      isCspInlineNoise({
+        exception: {
+          values: [{ value: "Cannot read properties of undefined (reading 'foo')" }],
+        },
+      } as Parameters<typeof isCspInlineNoise>[0]),
+    ).toBe(false);
+  });
+
+  it("does not match an empty event", () => {
+    expect(isCspInlineNoise({} as Parameters<typeof isCspInlineNoise>[0])).toBe(false);
+  });
 });
