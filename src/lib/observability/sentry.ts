@@ -138,6 +138,36 @@ export const DROPPED_INTEGRATIONS: ReadonlySet<string> = new Set([
   "HttpContext",
 ]);
 
+/**
+ * Returns true for events that are CSP inline/eval violation noise -- known,
+ * low-signal events that fire from the report-only CSP when an inline script
+ * or eval call is blocked (DL-0799).
+ *
+ * CSP violations reach GlitchTip via two paths:
+ *   1. Native browser report-uri POSTs (GlitchTip processes these server-side;
+ *      the client-side SDK cannot intercept them).
+ *   2. GlobalHandlers capturing window.onerror when the browser fires a
+ *      SecurityError for a blocked inline script or eval call -- these flow
+ *      through beforeSend and are what this filter targets.
+ *
+ * Exported so the companion test in __tests__/sentry.test.ts can assert
+ * against the same regex without re-encoding it.
+ */
+export function isCspInlineNoise(event: Sentry.ErrorEvent): boolean {
+  const msg =
+    event.exception?.values?.[0]?.value ??
+    (typeof event.message === "string" ? event.message : "") ??
+    "";
+  // Chrome/Edge: "Refused to execute inline script because it violates..."
+  // Chrome/Edge: "Refused to evaluate a string as JavaScript because..."
+  // Firefox:     "Content Security Policy: ... blocked ... inline (or eval)"
+  return (
+    /refused to execute inline/i.test(msg) ||
+    /refused to evaluate a string/i.test(msg) ||
+    (/content.security.policy/i.test(msg) && /\binline\b|\beval\b/i.test(msg))
+  );
+}
+
 function scrubString(s: string): string {
   let out = s;
   for (const [re, repl] of TOKEN_PATTERNS) {
