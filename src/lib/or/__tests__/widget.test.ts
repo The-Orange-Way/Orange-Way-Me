@@ -68,8 +68,13 @@ function installWindowShim(): { popup: MockPopup; openedUrls: string[]; restore:
       openedUrls.push(String(url));
       return popup;
     }),
-    setInterval: globalThis.setInterval.bind(globalThis),
-    clearInterval: globalThis.clearInterval.bind(globalThis),
+    // Resolve globalThis lazily so vi.useFakeTimers(), installed by a case
+    // AFTER this shim, is the timer the widget actually calls. Binding here
+    // would capture the real timer and defeat advanceTimersByTimeAsync.
+    setInterval: (...a: Parameters<typeof setInterval>) => globalThis.setInterval(...a),
+    clearInterval: (...a: Parameters<typeof clearInterval>) => globalThis.clearInterval(...a),
+    setTimeout: (...a: Parameters<typeof setTimeout>) => globalThis.setTimeout(...a),
+    clearTimeout: (...a: Parameters<typeof clearTimeout>) => globalThis.clearTimeout(...a),
     location: { origin: "https://orangeway.local" },
   };
 
@@ -241,6 +246,49 @@ describe("openOrConnect", () => {
     // Promise still pending. Mark popup closed; poll loop will reject.
     shim.popup.closed = true;
     await expect(pending).rejects.toThrow(/closed before completion/i);
+  });
+
+  it("rejects after the hang guard when no terminal message ever arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const { openOrConnect } = await import("../widget");
+      const pending = openOrConnect({
+        orgId: ORG_ID,
+        credKeyB64: CRED_KEY,
+        txnKeyB64: TXN_KEY,
+      });
+
+      // Track settlement without leaving an unhandled rejection when the
+      // guard fires below.
+      let state: "pending" | "resolved" | "rejected" = "pending";
+      let error: unknown;
+      pending.then(
+        () => {
+          state = "resolved";
+        },
+        (e) => {
+          state = "rejected";
+          error = e;
+        },
+      );
+
+      // Flush the mint fetch + window.open chain.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shim.openedUrls).toHaveLength(1);
+
+      // 1s short of the guard: no terminal message, popup still open,
+      // promise still pending. This is the hang the guard has to catch.
+      await vi.advanceTimersByTimeAsync(149000);
+      expect(state).toBe("pending");
+
+      // Crossing 150s the guard rejects and closes the popup.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(state).toBe("rejected");
+      expect((error as Error).message).toMatch(/timed out/i);
+      expect(shim.popup.close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Kept last: it stubs an env var the other cases read as unset.

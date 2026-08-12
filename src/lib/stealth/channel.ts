@@ -32,7 +32,11 @@ const INBOUND_TYPES: ReadonlySet<string> = new Set<StealthMessageType>([
 /** A validated inbound message. Fields beyond these are passed through untouched. */
 export interface StealthInboundMessage {
   type: StealthMessageType;
-  version: typeof STEALTH_PROTOCOL_VERSION;
+  // Version is present ONLY on READY. The receiver spells it protocol_version;
+  // the legacy `version` name is tolerated on read. Every other inbound frame
+  // carries no version field at all, so both are optional.
+  protocol_version?: typeof STEALTH_PROTOCOL_VERSION;
+  version?: typeof STEALTH_PROTOCOL_VERSION;
   request_id?: string;
   [key: string]: unknown;
 }
@@ -108,12 +112,13 @@ export class StealthChannel {
 
   /** Send OR_STEALTH_INIT to the widget. The caller owns the payload; this adds no keys. */
   sendInit(payload: Record<string, unknown>): void {
-    // Spread payload FIRST so a caller can never override the protocol fields
-    // we validate on inbound (type, version). Protocol fields always win.
+    // Spread payload FIRST so a caller can never override the protocol fields.
+    // We send protocol_version, the name the receiver reads. Protocol fields
+    // always win over the payload.
     this.post({
       ...payload,
       type: STEALTH_MESSAGE.INIT,
-      version: STEALTH_PROTOCOL_VERSION,
+      protocol_version: STEALTH_PROTOCOL_VERSION,
     });
   }
 
@@ -124,12 +129,12 @@ export class StealthChannel {
   respondToProxy(requestId: string, payload: Record<string, unknown>): void {
     if (!this.inFlight.has(requestId)) return;
     this.inFlight.delete(requestId);
-    // Spread payload FIRST so a caller cannot override type, version, or the
-    // request_id we are answering. Protocol fields always win.
+    // Spread payload FIRST so a caller cannot override type or the request_id
+    // we are answering. PROXY_RESPONSE carries no version field: the receiver
+    // does not read one on this frame, so sending it would be dead weight.
     this.post({
       ...payload,
       type: STEALTH_MESSAGE.PROXY_RESPONSE,
-      version: STEALTH_PROTOCOL_VERSION,
       request_id: requestId,
     });
   }
@@ -149,14 +154,20 @@ export class StealthChannel {
     const data = event.data;
     if (data === null || typeof data !== "object") return;
 
-    // 3. Version, exact, never coerced.
-    if ((data as { version?: unknown }).version !== STEALTH_PROTOCOL_VERSION) {
-      return;
-    }
-
-    // 4. Type must be a known inbound type. Unknown is dropped, not thrown.
+    // 3. Type must be a known inbound type. Unknown is dropped, not thrown.
     const type = (data as { type?: unknown }).type;
     if (typeof type !== "string" || !INBOUND_TYPES.has(type)) return;
+
+    // 4. Version is validated ONLY on READY, the one inbound frame that carries
+    //    it. Every other frame (PROGRESS, the completions, ERROR, PROXY_REQUEST)
+    //    has no version field, so a blanket check would silently drop all of
+    //    them and hang sync. The receiver spells it protocol_version; the legacy
+    //    `version` name is tolerated. The value itself is exact, never coerced.
+    if (type === STEALTH_MESSAGE.READY) {
+      const versioned = data as { protocol_version?: unknown; version?: unknown };
+      const version = versioned.protocol_version ?? versioned.version;
+      if (version !== STEALTH_PROTOCOL_VERSION) return;
+    }
 
     // 5. Record the id of a proxy request so a later response can be matched.
     if (type === STEALTH_MESSAGE.PROXY_REQUEST) {
