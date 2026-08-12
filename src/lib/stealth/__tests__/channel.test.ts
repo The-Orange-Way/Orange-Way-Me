@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { StealthChannel, type StealthInboundHandler } from "../channel";
+import { StealthChannel, type StealthInboundHandler, type StealthInboundMessage } from "../channel";
 import { STEALTH_MESSAGE, STEALTH_PROTOCOL_VERSION } from "../protocol";
 
 const noopHandler = () => {};
@@ -112,14 +112,16 @@ describe("StealthChannel inbound version narrowing", () => {
   }
 
   it("accepts a PROXY_REQUEST with no version field and registers its request_id", () => {
-    const received: Array<Record<string, unknown>> = [];
-    const { channel, posts, deliver } = startChannel((m) =>
-      received.push(m as Record<string, unknown>),
-    );
+    const received: StealthInboundMessage[] = [];
+    const { channel, posts, deliver } = startChannel((m) => received.push(m));
 
     // A PROXY_REQUEST carries no version field. The narrowed check must let it
     // through: the receiver's frames other than READY have no version at all.
-    deliver({ type: STEALTH_MESSAGE.PROXY_REQUEST, request_id: "req-1", fn: "or-stealth-envelope-fetch" });
+    deliver({
+      type: STEALTH_MESSAGE.PROXY_REQUEST,
+      request_id: "req-1",
+      fn: "or-stealth-envelope-fetch",
+    });
 
     expect(received).toHaveLength(1);
     expect(received[0].type).toBe(STEALTH_MESSAGE.PROXY_REQUEST);
@@ -138,8 +140,8 @@ describe("StealthChannel inbound version narrowing", () => {
   });
 
   it("accepts a non-READY completion with no version field", () => {
-    const received: Array<Record<string, unknown>> = [];
-    const { channel, deliver } = startChannel((m) => received.push(m as Record<string, unknown>));
+    const received: StealthInboundMessage[] = [];
+    const { channel, deliver } = startChannel((m) => received.push(m));
 
     deliver({ type: STEALTH_MESSAGE.SYNC_COMPLETE });
 
@@ -150,8 +152,8 @@ describe("StealthChannel inbound version narrowing", () => {
   });
 
   it("accepts a READY carrying the receiver's protocol_version", () => {
-    const received: Array<Record<string, unknown>> = [];
-    const { channel, deliver } = startChannel((m) => received.push(m as Record<string, unknown>));
+    const received: StealthInboundMessage[] = [];
+    const { channel, deliver } = startChannel((m) => received.push(m));
 
     deliver({ type: STEALTH_MESSAGE.READY, protocol_version: STEALTH_PROTOCOL_VERSION });
 
@@ -162,8 +164,8 @@ describe("StealthChannel inbound version narrowing", () => {
   });
 
   it("accepts a READY carrying the legacy version name", () => {
-    const received: Array<Record<string, unknown>> = [];
-    const { channel, deliver } = startChannel((m) => received.push(m as Record<string, unknown>));
+    const received: StealthInboundMessage[] = [];
+    const { channel, deliver } = startChannel((m) => received.push(m));
 
     deliver({ type: STEALTH_MESSAGE.READY, version: STEALTH_PROTOCOL_VERSION });
 
@@ -174,8 +176,8 @@ describe("StealthChannel inbound version narrowing", () => {
   });
 
   it("refuses a READY carrying the wrong version", () => {
-    const received: Array<Record<string, unknown>> = [];
-    const { channel, deliver } = startChannel((m) => received.push(m as Record<string, unknown>));
+    const received: StealthInboundMessage[] = [];
+    const { channel, deliver } = startChannel((m) => received.push(m));
 
     deliver({ type: STEALTH_MESSAGE.READY, protocol_version: STEALTH_PROTOCOL_VERSION + 1 });
 
