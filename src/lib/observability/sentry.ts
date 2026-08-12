@@ -271,7 +271,12 @@ export function initSentry(): void {
     // silently vacuous. The companion test asserts each name is
     // dropped against a synthetic defaults list.
     integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
-    beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
+    beforeSend: (event) => {
+      // Drop CSP inline/eval noise captured as SecurityErrors by GlobalHandlers.
+      // isCspInlineNoise() covers the JS-SDK path; report-uri POSTs bypass us.
+      if (isCspInlineNoise(event)) return null;
+      return scrubEventLoose(event) as Sentry.ErrorEvent;
+    },
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
       // BrowserClient grabs every console call by default. We only want
