@@ -18,6 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isCspInlineNoise } from "../sentry";
 
 const initMock = vi.fn();
 const captureExceptionMock = vi.fn();
