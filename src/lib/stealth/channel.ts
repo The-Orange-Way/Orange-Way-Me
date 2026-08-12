@@ -166,7 +166,13 @@ export class StealthChannel {
     if (type === STEALTH_MESSAGE.READY) {
       const versioned = data as { protocol_version?: unknown; version?: unknown };
       const version = versioned.protocol_version ?? versioned.version;
-      if (version !== STEALTH_PROTOCOL_VERSION) return;
+      if (version !== STEALTH_PROTOCOL_VERSION) {
+        // Refuse observably: name the message TYPE only, never a payload field,
+        // so a failed version handshake is diagnosable without leaking frame
+        // contents. Warn, do not throw: one bad frame must not kill the listener.
+        console.warn(`Stealth transport refused a ${type} frame: unacceptable protocol version.`);
+        return;
+      }
     }
 
     // 5. Record the id of a proxy request so a later response can be matched.
