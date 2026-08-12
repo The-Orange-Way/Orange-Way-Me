@@ -1,0 +1,38 @@
+-- Revoke all invite_codes table grants from anon and authenticated.
+--
+-- Why. The signup gate now lives entirely in the Before-User-Created hook,
+-- which reads and consumes invite codes only through SECURITY DEFINER
+-- functions (is_email_in_beta_allowlist, redeem_invite_code) running as
+-- supabase_auth_admin. No client path selects from or writes to
+-- public.invite_codes directly. The table still carried its default
+-- DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE grants to
+-- anon and authenticated, which is surplus privilege on a table nothing on
+-- the client should touch. RLS on the table has zero policies, so the only
+-- thing keeping those grants from being reachable is the absence of a code
+-- path, not the database. This removes the privilege itself.
+--
+-- Why REVOKE ALL and not just the writes. SELECT goes because no client
+-- reads the table (only the definer boolean path does), so nothing leans on
+-- RLS-with-zero-policies. REFERENCES and TRIGGER are privilege on a
+-- sensitive table with no caller, so they go too. There is no PUBLIC
+-- grantee row, so anon and authenticated is the complete revoke target.
+--
+-- What is left alone. postgres and service_role keep their grants. The hook
+-- runs as supabase_auth_admin on the definer functions, so the auth path is
+-- untouched.
+--
+-- Retry safety: REVOKE is idempotent, so running this twice is a no-op.
+-- A reversal path is written at the foot of this file.
+
+REVOKE ALL ON TABLE public.invite_codes FROM anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- DOWN PATH (reversal)
+--
+-- Restores the prior default grant state. Only run this if a future client
+-- path is deliberately given direct table access, which would itself need a
+-- security review since invite_codes is a consuming, sensitive table.
+--
+--   GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES, TRIGGER, TRUNCATE
+--     ON TABLE public.invite_codes TO anon, authenticated;
+-- ---------------------------------------------------------------------------
