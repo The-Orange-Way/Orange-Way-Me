@@ -92,8 +92,19 @@ function RootComponent() {
       // no session recording, no person profiles. Each page load is a
       // fresh anonymous event stream.
       // phc_ keys are PostHog "Project API Keys": write-only, public-safe.
+      // Pin analytics to the EU PostHog region by construction. An unset
+      // VITE_POSTHOG_HOST becomes "" at build time, which is not nullish, so a
+      // ?? fallback would not fire and posthog-js would default to its US host.
+      // Our privacy posture requires EU, so accept only a known EU PostHog
+      // origin and pin to EU otherwise. The env var cannot move the region.
+      const configuredPostHogHost = import.meta.env.VITE_POSTHOG_HOST;
+      const posthogHost =
+        configuredPostHogHost === "https://eu.i.posthog.com" ||
+        configuredPostHogHost === "https://eu.posthog.com"
+          ? configuredPostHogHost
+          : "https://eu.i.posthog.com";
       posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? "", {
-        api_host: import.meta.env.VITE_POSTHOG_HOST ?? "https://eu.i.posthog.com",
+        api_host: posthogHost,
         persistence: "memory",
         person_profiles: "never",
         // Explicit capture only. Automatic pageviews follow SPA navigation,
