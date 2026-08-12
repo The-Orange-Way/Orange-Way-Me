@@ -61,6 +61,11 @@ const service = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+// This receiver is server-to-server (OR's dispatcher, never a browser),
+// so it emits no CORS headers. jsonResponse still requires the header
+// bag argument, so we pass an explicit empty one at every call site.
+const NO_CORS: Record<string, string> = {};
+
 /**
  * Outcome of a subaccount to user lookup.
  *
@@ -100,17 +105,17 @@ Deno.serve(async (req: Request) => {
   // No CORS: this endpoint is called server-to-server, never from a
   // browser. Reject anything that isn't POST.
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse({ error: "Method not allowed" }, 405, NO_CORS);
   }
 
   if (!OR_WEBHOOK_SECRET) {
     // Misconfigured environment — 500 so OR retries until we notice.
-    return jsonResponse({ error: "OR_WEBHOOK_SECRET not configured" }, 500);
+    return jsonResponse({ error: "OR_WEBHOOK_SECRET not configured" }, 500, NO_CORS);
   }
 
   const body = await readBoundedText(req);
   if (body === null) {
-    return jsonResponse({ error: "Request body too large" }, 413);
+    return jsonResponse({ error: "Request body too large" }, 413, NO_CORS);
   }
 
   // Single verification + parse step via the SDK. The SDK prefers v2
@@ -137,12 +142,12 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     if (err instanceof SignatureVerificationError) {
       console.warn(`[or-webhook-receiver] verification failed (${err.code}): ${err.message}`);
-      return jsonResponse({ error: "Invalid signature" }, 401);
+      return jsonResponse({ error: "Invalid signature" }, 401, NO_CORS);
     }
     // Anything non-SignatureVerificationError is a bug in the SDK or
     // an unexpected runtime failure — surface as 500 so OR retries.
     console.error("[or-webhook-receiver] unexpected SDK error:", err);
-    return jsonResponse({ error: "Verification error" }, 500);
+    return jsonResponse({ error: "Verification error" }, 500, NO_CORS);
   }
 
   // Discriminated union on event.type — adding sync.failed etc. later
@@ -158,7 +163,7 @@ Deno.serve(async (req: Request) => {
         // here would tell OR the delivery succeeded and drop the event
         // for good. The upsert below is idempotent on or_event_id, so a
         // retry after a partial failure cannot double-apply.
-        return jsonResponse({ error: "User lookup failed" }, 500);
+        return jsonResponse({ error: "User lookup failed" }, 500, NO_CORS);
       }
 
       if (!lookup.userId) {
@@ -169,7 +174,7 @@ Deno.serve(async (req: Request) => {
         console.warn(
           `[or-webhook-receiver] unknown subaccount_id ${event.data.subaccount_id} — no user match`,
         );
-        return jsonResponse({ status: "accepted_no_user" }, 202);
+        return jsonResponse({ status: "accepted_no_user" }, 202, NO_CORS);
       }
 
       // Idempotent insert: or_event_id is stable across OR retries
@@ -191,10 +196,10 @@ Deno.serve(async (req: Request) => {
       if (insertErr) {
         console.error("[or-webhook-receiver] sync_events upsert failed:", insertErr.message);
         // 500 so OR retries with backoff.
-        return jsonResponse({ error: "Persist failed" }, 500);
+        return jsonResponse({ error: "Persist failed" }, 500, NO_CORS);
       }
 
-      return jsonResponse({ status: "ok" }, 200);
+      return jsonResponse({ status: "ok" }, 200, NO_CORS);
     }
     default: {
       // Exhaustiveness guard. The Event union has a single member today,
@@ -204,7 +209,7 @@ Deno.serve(async (req: Request) => {
       // handler. It also gives the handler a return on every path.
       const _unhandled: never = event.type;
       console.warn(`[or-webhook-receiver] unhandled event type: ${String(_unhandled)}`);
-      return jsonResponse({ status: "ignored" }, 202);
+      return jsonResponse({ status: "ignored" }, 202, NO_CORS);
     }
   }
 });
