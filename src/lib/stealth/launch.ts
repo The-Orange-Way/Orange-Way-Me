@@ -45,6 +45,14 @@ export interface StealthLaunchResult {
 export async function launchStealthConnect(args: {
   /** The widget URL to open. Built by the caller; this module adds no keys. */
   url: string;
+  /**
+   * Extra OR_STEALTH_INIT fields the caller owns: app_slug, app_user_id, mode
+   * and the optional gap_limit. This module still owns return_callback_origin
+   * and protocol_version and always applies them last, so a caller cannot
+   * point the widget's callbacks at another origin or claim a version we do
+   * not speak. No key material is read or added here.
+   */
+  init?: Record<string, unknown>;
   /** Optional handler for messages after READY (PROGRESS, completions, ERROR). */
   onMessage?: StealthInboundHandler;
   /** Injectable for tests; defaults to a fresh channel bound to the configured origin. */
@@ -106,9 +114,14 @@ export async function launchStealthConnect(args: {
         ready = true;
         settled = true;
         clearTimers();
-        // Send the one field this slice supplies: the origin the widget must
-        // address its callbacks to. No keys here by design.
-        channel.sendInit({ return_callback_origin: window.location.origin });
+        // The caller's fields first, then the origin the widget must address
+        // its callbacks to, which this module owns so a caller cannot move it.
+        // sendInit applies protocol_version last for the same reason. No keys
+        // here by design.
+        channel.sendInit({
+          ...(args.init ?? {}),
+          return_callback_origin: window.location.origin,
+        });
         resolve({ channel });
       }
       args.onMessage?.(message);
