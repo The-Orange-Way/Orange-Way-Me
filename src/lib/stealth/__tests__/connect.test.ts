@@ -45,38 +45,64 @@ describe("buildStealthConnectUrl", () => {
   });
 });
 
+// Built at runtime from a plain sentence rather than pasted as a base64
+// literal: a 44 character base64 blob in a test file reads as a real key to
+// both a scanner and a human, and neither should have to decide.
+const KEY_B64 = btoa("stand-in for the wrapping key, not a key");
+
 describe("buildStealthInit", () => {
-  it("supplies the identifiers the widget validates, and mode add", () => {
-    const init = buildStealthInit({ appSlug: "orangeway-me-dev", appUserId: "user-1" });
+  it("supplies the identifiers the widget validates, mode add, and the wrapping key", () => {
+    const init = buildStealthInit({
+      appSlug: "orangeway-me-dev",
+      appUserId: "user-1",
+      orStealthKeyB64: KEY_B64,
+    });
     expect(init).toEqual({
       app_slug: "orangeway-me-dev",
       app_user_id: "user-1",
       mode: "add",
+      or_stealth_key_b64: KEY_B64,
     });
+  });
+
+  it("refuses to build a message with no wrapping key", () => {
+    // The widget refuses a missing key with the same code it uses for its own
+    // faults, so a caller must never reach that state: failing here keeps the
+    // cause of the failure legible.
+    expect(() =>
+      buildStealthInit({ appSlug: "orangeway-me", appUserId: "user-1", orStealthKeyB64: "" }),
+    ).toThrow(/wrapping key/i);
   });
 
   it("includes gap_limit only when the caller asks for one", () => {
     const withGap = buildStealthInit({
       appSlug: "orangeway-me",
       appUserId: "user-1",
+      orStealthKeyB64: KEY_B64,
       gapLimit: STEALTH_GAP_LIMIT,
     });
     expect(withGap.gap_limit).toBe(STEALTH_GAP_LIMIT);
     expect(STEALTH_GAP_LIMIT).toBeGreaterThanOrEqual(1);
     expect(STEALTH_GAP_LIMIT).toBeLessThanOrEqual(1000);
 
-    const withoutGap = buildStealthInit({ appSlug: "orangeway-me", appUserId: "user-1" });
+    const withoutGap = buildStealthInit({
+      appSlug: "orangeway-me",
+      appUserId: "user-1",
+      orStealthKeyB64: KEY_B64,
+    });
     expect("gap_limit" in withoutGap).toBe(false);
   });
 
-  it("never carries key material or the fields the transport owns", () => {
-    const init = buildStealthInit({ appSlug: "orangeway-me", appUserId: "user-1", gapLimit: 250 });
-    for (const owned of [
-      "or_stealth_key_b64",
-      "access_token",
-      "return_callback_origin",
-      "protocol_version",
-    ]) {
+  it("carries no session token and none of the fields the transport owns", () => {
+    const init = buildStealthInit({
+      appSlug: "orangeway-me",
+      appUserId: "user-1",
+      orStealthKeyB64: KEY_B64,
+      gapLimit: 250,
+    });
+    // The wrapping key is the only key material on this path. A session token
+    // is not ours to send, and the origin and version belong to the transport.
+    for (const owned of ["access_token", "return_callback_origin", "protocol_version"]) {
       expect(owned in init).toBe(false);
     }
   });
