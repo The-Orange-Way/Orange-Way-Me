@@ -9,11 +9,12 @@
  * Add-connection flow (post-migration to the hosted widget):
  *   1. On first mount after unlock: call or-provision → cache
  *      subaccount_id in localStorage under `or_subaccount_id_for_user_<id>`.
- *   2. Add a Bitcoin source: open the OR Connect stealth widget
- *      (launchStealthConnect) and send OR_STEALTH_INIT once it is
- *      ready. The widget owns provider picking, credential entry and
- *      discovery, and reports back over postMessage. Bank connections
- *      keep their own dialog and their own route.
+ *   2. Add a Bitcoin source: open the hosted /connect route with no
+ *      provider named (openOrConnect), so its searchable source list
+ *      appears and the user finds their own source among the full
+ *      catalogue. The hosted side owns provider picking, credential
+ *      entry, discovery and Stealth Sync, and reports back over
+ *      postMessage. Bank connections keep their own dialog and route.
  *   3. Map destinations: present DestinationPickerDialog → encrypt
  *      each Personal account.id with the user vault MEK → write to
  *      connection_account_map.
@@ -59,15 +60,7 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { OR_PLATFORM_SLUG } from "@/lib/or/widget";
-import {
-  buildStealthConnectUrl,
-  buildStealthInit,
-  stealthErrorMessage,
-  STEALTH_GAP_LIMIT,
-} from "@/lib/stealth/connect";
-import { launchStealthConnect } from "@/lib/stealth/launch";
-import { STEALTH_MESSAGE } from "@/lib/stealth/protocol";
+import { openOrConnect, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
@@ -182,7 +175,6 @@ export function ConnectionsPage() {
     decryptOrTxnCipher,
     exportOrCredsKey,
     exportOrTxnsKey,
-    exportOrStealthKeyB64,
     buildHouseholdSignatureFields,
     getOpkKeypair,
   } = useVault();
@@ -395,25 +387,30 @@ export function ConnectionsPage() {
     void refreshList();
   }, [refreshList]);
 
-  // ─── Add-connection: open the stealth widget directly ────────────────
+  // ─── Add-connection: open the searchable source list ─────────────────
 
   /**
-   * Open the OR Connect stealth widget and complete the opening handshake.
+   * Open the connect provider's searchable source list.
    *
-   * The button used to open OR's hosted landing page, which then asked the
-   * user to click a second time and built its own INIT from an OR session
-   * our users do not have, so the flow could never complete from here. We
-   * now open the widget route itself and send the INIT, which is the only
-   * message that carries our identifiers: app_slug, app_user_id, mode and
-   * the address gap. The transport owns return_callback_origin and the
-   * protocol version.
+   * This button exists to let someone find THEIR source among the hundred or
+   * so we support (exchanges, Lightning services, Bitcoin wallets, xpub).
+   * Only the provider's hosted list has that catalogue and its search box, so
+   * we open it and let the user pick, exactly as this button did before.
    *
-   * The wrapping key the widget seals under travels in that message, in the
-   * only shape the widget's contract accepts. It is derived in the vault
-   * under its own label, so it unlocks nothing else we hold, and it goes to
-   * the widget's own origin over postMessage, never to a server and never in
-   * the URL. It is read here rather than held in component state so it lives
-   * only for the length of the call.
+   * Omitting `provider` is what makes the list appear. Naming one skips the
+   * list and jumps straight into a single source, which is what this button
+   * was briefly changed to do: that removed the catalogue, so anyone whose
+   * source was not the one hard-coded had no route in at all.
+   *
+   * Picking xpub or Sparrow from the list opens Stealth Sync on the
+   * provider's side. We do not drive that handshake from here; our part ends
+   * when the list posts the completed connection back to us.
+   *
+   * The two vault keys travel in the URL fragment, which is never sent to a
+   * server. They lock the stored credential and the per-wallet metadata, so
+   * the connect provider holds ciphertext and we hold the only keys that open
+   * it. Read immediately before the call so a vault that locked while this
+   * page sat open fails here rather than part-way through.
    */
   async function handleAddConnection() {
     if (!user) {
@@ -422,38 +419,35 @@ export function ConnectionsPage() {
     }
     setOpening(true);
     try {
-      // Read the wrapping key immediately before the launch, so a vault that
-      // locked while the page sat open fails here rather than opening a popup
-      // that cannot complete.
-      const orStealthKeyB64 = await exportOrStealthKeyB64();
-      await launchStealthConnect({
-        url: buildStealthConnectUrl(window.location.origin),
-        init: buildStealthInit({
-          appSlug: OR_PLATFORM_SLUG,
-          appUserId: user.id,
-          orStealthKeyB64,
-          gapLimit: STEALTH_GAP_LIMIT,
-        }),
-        onMessage: (message) => {
-          // `code` and every other field here arrive from another origin and
-          // are untrusted: stealthErrorMessage maps a known code to fixed
-          // local copy and everything else to one generic line.
-          if (message.type === STEALTH_MESSAGE.ERROR) {
-            toast.error(stealthErrorMessage(message));
-            return;
-          }
-          if (message.type === STEALTH_MESSAGE.ADD_COMPLETE) {
-            toast.success("Bitcoin source connected.");
-            void refreshList();
-          }
-        },
+      const credKeyB64 = await exportOrCredsKey();
+      const txnKeyB64 = await exportOrTxnsKey();
+      const result = await openOrConnect({
+        orgId: user.id,
+        credKeyB64,
+        txnKeyB64,
       });
+      toast.success("Connection added. Credentials stored as ciphertext only.");
+
+      await refreshList();
+
+      const syncedWallets: OrLinkSourceWallet[] = result.source_wallets ?? [];
+      if (syncedWallets.length > 0) {
+        setDestPicker({
+          kind: "open",
+          connectionId: result.connection_id,
+          wallets: syncedWallets.map((w) => ({
+            external_wallet_id: w.external_wallet_id,
+            currency: w.currency,
+            label: w.label ?? null,
+          })),
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg === "Widget closed before it became ready") {
+      if (msg === "User cancelled" || msg === "Widget closed before completion") {
         toast.info("Connection cancelled.");
       } else {
-        console.error("[Connections] launchStealthConnect failed", err);
+        console.error("[Connections] openOrConnect failed", err);
         toastError(err, "We couldn't open the connect window.");
       }
     } finally {
