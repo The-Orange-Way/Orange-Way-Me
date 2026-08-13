@@ -182,7 +182,7 @@ export function OnboardingFlow({
   const [email, setEmail] = useState("");
   const [emailVerified, setEmailVerified] = useState(false);
   const [vaultPassword, setVaultPassword] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoveryKit, setRecoveryKit] = useState<string | null>(null);
 
   // Seed one synthetic history entry on mount so browser-back steps to
   // step 0 rather than exiting /onboarding immediately. Empty URL string
@@ -222,14 +222,14 @@ export function OnboardingFlow({
       email,
       emailVerified,
       vaultPassword,
-      recoveryCode,
+      recoveryKit,
       setName,
       setEmail,
       setEmailVerified,
       setVaultPassword,
-      setRecoveryCode,
+      setRecoveryKit,
     }),
-    [name, email, emailVerified, vaultPassword, recoveryCode],
+    [name, email, emailVerified, vaultPassword, recoveryKit],
   );
 
   const total = steps.length;
