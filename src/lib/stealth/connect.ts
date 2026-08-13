@@ -26,19 +26,61 @@ export function buildStealthConnectUrl(origin: string): string {
 }
 
 /**
+ * Address gap the widget scans past the last used address before it stops.
+ * 250 matches what the widget itself uses, and it is well inside the 1..1000
+ * the widget accepts, so a caller never trips INVALID_GAP_LIMIT.
+ */
+export const STEALTH_GAP_LIMIT = 250;
+
+/**
+ * The INIT fields this slice supplies, minus the callback origin.
+ *
+ * The widget validates, in this order: sender origin on its allowlist,
+ * return_callback_origin equal to the sender origin, protocol_version, then
+ * app_slug and app_user_id as strings and mode as one of add / sync / list /
+ * delete. return_callback_origin and protocol_version are owned by the
+ * transport, never by this builder, so a caller cannot weaken either.
+ *
+ * or_stealth_key_b64 is deliberately absent. It is required for the widget to
+ * proceed past validation, and deriving it is a separate, reviewed change: no
+ * key leaves the vault through this path.
+ */
+export function buildStealthInit(args: {
+  appSlug: string;
+  appUserId: string;
+  gapLimit?: number;
+}): Record<string, unknown> {
+  const init: Record<string, unknown> = {
+    app_slug: args.appSlug,
+    app_user_id: args.appUserId,
+    mode: "add",
+  };
+  if (args.gapLimit !== undefined) init.gap_limit = args.gapLimit;
+  return init;
+}
+
+/**
  * Fixed, local, user-facing copy for a widget ERROR, keyed by its `code`.
  *
  * `code` arrives from another origin over postMessage and is UNTRUSTED, so we
  * never surface the widget's own strings. We look the code up here and fall
- * back to one generic line for anything not listed. The set is intentionally
- * empty until the canonical widget error-code contract is confirmed; adding a
- * code here is the only way a specific message ever reaches the user.
+ * back to one generic line for anything not listed. Adding a code here is the
+ * only way a specific message ever reaches the user.
+ *
+ * The two codes below are the ones a person can act on, and they are the two
+ * that tell us apart a rejected origin from a rejected request. Every other
+ * code the widget can raise stays on the generic line, including any code it
+ * adds later, which is what makes this fail safe.
  */
-export const STEALTH_ERROR_COPY: Readonly<Record<string, string>> = {};
+export const STEALTH_ERROR_COPY: Readonly<Record<string, string>> = {
+  ORIGIN_NOT_ALLOWED:
+    "This app is not yet authorised to connect Bitcoin sources. Nothing was sent. Please contact support.",
+  INTERNAL:
+    "The connection service could not start this session. Nothing was sent. Please try again shortly.",
+};
 
 /** One generic line for any unrecognised or missing error code. */
-export const STEALTH_ERROR_FALLBACK =
-  "Could not connect this Bitcoin source. Please try again.";
+export const STEALTH_ERROR_FALLBACK = "Could not connect this Bitcoin source. Please try again.";
 
 /**
  * Map an inbound OR_STEALTH_ERROR to fixed local copy.

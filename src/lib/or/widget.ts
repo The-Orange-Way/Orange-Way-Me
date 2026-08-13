@@ -58,7 +58,7 @@ export const OR_CONNECT_BASE = OR_CONNECT_URL_RAW || "https://connect.orangerail
 // quietly names the wrong platform again.
 //
 // `||` and not `??`, same reasoning as OR_CONNECT_BASE above.
-const OR_PLATFORM_SLUG =
+export const OR_PLATFORM_SLUG =
   (import.meta.env.VITE_OR_PLATFORM_SLUG as string | undefined) || "orangeway-me";
 
 // Client-side hang guard for a link session (ms).
