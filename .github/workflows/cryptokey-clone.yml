@@ -1,0 +1,59 @@
+# Cross-origin CryptoKey transfer proof, on all three engines.
+#
+# The deploy workflow runs Playwright on chromium only, so a design question
+# that turns on WebKit behaviour cannot be answered there. This job installs
+# chromium, firefox and webkit with their system libraries and runs the one
+# spec that asks whether a non-extractable CryptoKey survives a cross-origin
+# postMessage with its usage list intact.
+#
+# It is deliberately separate from deploy: it needs no deployment, no secrets
+# and no base URL, and it must be runnable on demand rather than only after a
+# merge. The per-engine result is printed by the spec itself, so the run log
+# is the evidence, not a summary of it.
+name: CryptoKey clone proof (3 engines)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests/e2e/stealth-cryptokey-clone.spec.ts"
+      - ".github/workflows/cryptokey-clone.yml"
+      - "playwright.config.ts"
+  push:
+    paths:
+      - "tests/e2e/stealth-cryptokey-clone.spec.ts"
+      - ".github/workflows/cryptokey-clone.yml"
+
+jobs:
+  three-engines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # WebKit is the engine this exists for. Its system libraries are not on
+      # the runner by default, which is exactly why this cannot be proven on a
+      # developer box and has to run here.
+      - name: Install browsers
+        run: bunx playwright install --with-deps chromium firefox webkit
+
+      - name: Run the proof on all three engines
+        run: |
+          bunx playwright test tests/e2e/stealth-cryptokey-clone.spec.ts \
+            --project=chromium --project=firefox --project=webkit \
+            --reporter=list
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cryptokey-clone-report
+          path: playwright-report/
+          retention-days: 7
