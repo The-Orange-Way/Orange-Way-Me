@@ -71,13 +71,23 @@ export function buildStealthInit(args: {
  * that tell us apart a rejected origin from a rejected request. Every other
  * code the widget can raise stays on the generic line, including any code it
  * adds later, which is what makes this fail safe.
+ *
+ * A Map, not an object literal, because the key is attacker-controlled: an
+ * object literal inherits from Object.prototype, so a code equal to an
+ * inherited member name (constructor, toString) would resolve to that member
+ * instead of falling through, and the lookup would yield something that is
+ * not a string. A Map only ever answers for keys put in it.
  */
-export const STEALTH_ERROR_COPY: Readonly<Record<string, string>> = {
-  ORIGIN_NOT_ALLOWED:
+export const STEALTH_ERROR_COPY: ReadonlyMap<string, string> = new Map([
+  [
+    "ORIGIN_NOT_ALLOWED",
     "This app is not yet authorised to connect Bitcoin sources. Nothing was sent. Please contact support.",
-  INTERNAL:
+  ],
+  [
+    "INTERNAL",
     "The connection service could not start this session. Nothing was sent. Please try again shortly.",
-};
+  ],
+]);
 
 /** One generic line for any unrecognised or missing error code. */
 export const STEALTH_ERROR_FALLBACK = "Could not connect this Bitcoin source. Please try again.";
@@ -91,5 +101,8 @@ export const STEALTH_ERROR_FALLBACK = "Could not connect this Bitcoin source. Pl
  */
 export function stealthErrorMessage(message: StealthInboundMessage): string {
   const code = typeof message.code === "string" ? message.code : "";
-  return STEALTH_ERROR_COPY[code] ?? STEALTH_ERROR_FALLBACK;
+  const copy = STEALTH_ERROR_COPY.get(code);
+  // The type check is belt and braces on top of the Map: whatever the widget
+  // sends, this function returns a string.
+  return typeof copy === "string" ? copy : STEALTH_ERROR_FALLBACK;
 }

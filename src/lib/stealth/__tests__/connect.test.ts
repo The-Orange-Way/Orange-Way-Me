@@ -102,6 +102,17 @@ describe("stealthErrorMessage", () => {
     );
   });
 
+  it("falls back for a code naming an inherited object member", () => {
+    // The code is attacker-controlled. Against an object literal, these names
+    // resolve to inherited members and the lookup yields a function rather
+    // than copy, so the lookup must not be a plain index.
+    for (const code of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+      const out = stealthErrorMessage({ type: "OR_STEALTH_ERROR", code } as never);
+      expect(typeof out).toBe("string");
+      expect(out).toBe(STEALTH_ERROR_FALLBACK);
+    }
+  });
+
   it("never surfaces a string supplied by the widget", () => {
     const hostile = stealthErrorMessage({
       type: "OR_STEALTH_ERROR",
