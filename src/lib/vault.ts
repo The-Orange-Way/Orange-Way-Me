@@ -616,15 +616,31 @@ export async function deriveOrOpkSeedFromMek(
 
 /**
  * Derive the AES-GCM key that re-seals synced data for the stealth-sync
- * widget, which runs in a cross-origin iframe. Same OR-subkey HKDF family
+ * widget, which runs in a cross-origin popup. Same OR-subkey HKDF family
  * as creds / txns / opk-seed (IKM = OR MEK, salt "ow-or:" + userVaultSaltB64)
  * with a distinct HKDF info label, so it regenerates deterministically on
  * every unlock with no separate storage and can never collide with a sibling.
  *
- * Deliberately NON-EXTRACTABLE (extractable = false), unlike the three
- * sibling subkeys which are extractable. The widget's cross-origin iframe is
- * a broader threat surface, so the raw key bytes must never be exportable
- * from that context. This divergence is intentional hardening, not drift.
+ * READ THIS BEFORE RELYING ON extractable = false HERE.
+ *
+ * This CryptoKey form is non-extractable, so the bytes cannot be read back
+ * out of THIS object. That is not, today, a guarantee about the widget: the
+ * widget's contract accepts the key only as base64, so the platform sends the
+ * raw bytes over postMessage via deriveOrStealthWidgetKeyBytesFromMek below.
+ * The receiving origin therefore holds usable key material and can both
+ * encrypt and decrypt with it, and nothing on this side can prevent it being
+ * forwarded once it is in that context.
+ *
+ * The scope that does hold is the HKDF label: this key opens only what was
+ * sealed under "orangerails-stealth-widget-v1", never the credentials,
+ * transactions or OPK siblings.
+ *
+ * The intended end state is to hand over this non-extractable CryptoKey by
+ * structured clone instead, so the far side can use the key without ever
+ * reading it. That needs a field on the widget side that does not exist yet
+ * and proof that a non-extractable key survives the clone in every browser we
+ * support. Until both land, treat the bytes as disclosed to that origin and
+ * do not write code whose safety depends on them being secret from it.
  */
 export async function deriveOrStealthWidgetKeyFromMek(
   mekRaw: Uint8Array,
