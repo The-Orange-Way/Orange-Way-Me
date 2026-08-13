@@ -38,22 +38,33 @@ export const STEALTH_GAP_LIMIT = 250;
  * The widget validates, in this order: sender origin on its allowlist,
  * return_callback_origin equal to the sender origin, protocol_version, then
  * app_slug and app_user_id as strings and mode as one of add / sync / list /
- * delete. return_callback_origin and protocol_version are owned by the
- * transport, never by this builder, so a caller cannot weaken either.
+ * delete, and in widget mode a non-empty or_stealth_key_b64.
+ * return_callback_origin and protocol_version are owned by the transport,
+ * never by this builder, so a caller cannot weaken either.
  *
- * or_stealth_key_b64 is deliberately absent. It is required for the widget to
- * proceed past validation, and deriving it is a separate, reviewed change: no
- * key leaves the vault through this path.
+ * or_stealth_key_b64 is the wrapping key the widget seals under, in the only
+ * shape the widget's contract accepts. It is derived in the vault under its
+ * own HKDF label, so it unlocks nothing else we hold, and it is handed to the
+ * widget's own origin over postMessage: it is never sent to a server, never
+ * put in the URL, and never persisted here. An empty value is rejected at
+ * this boundary rather than sent, because the widget's own refusal for a
+ * missing key is indistinguishable from an internal fault and would be shown
+ * to the user as one.
  */
 export function buildStealthInit(args: {
   appSlug: string;
   appUserId: string;
+  orStealthKeyB64: string;
   gapLimit?: number;
 }): Record<string, unknown> {
+  if (!args.orStealthKeyB64) {
+    throw new Error("Missing wrapping key, refusing to start a connect session");
+  }
   const init: Record<string, unknown> = {
     app_slug: args.appSlug,
     app_user_id: args.appUserId,
     mode: "add",
+    or_stealth_key_b64: args.orStealthKeyB64,
   };
   if (args.gapLimit !== undefined) init.gap_limit = args.gapLimit;
   return init;

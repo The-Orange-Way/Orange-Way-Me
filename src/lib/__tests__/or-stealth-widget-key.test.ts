@@ -24,8 +24,10 @@ if (typeof (globalThis as unknown as { window?: unknown }).window === "undefined
 
 import {
   deriveOrStealthWidgetKeyFromMek,
+  deriveOrStealthWidgetKeyBytesFromMek,
   deriveOrCredsKeyFromMek,
   deriveOrTxnsKeyFromMek,
+  deriveOrOpkSeedFromMek,
 } from "@/lib/vault";
 
 // A fixed, non-secret 32-byte "MEK" and a stored client salt. HKDF is
@@ -95,5 +97,50 @@ describe("OR stealth-sync widget key derivation", () => {
     const otherKey = await deriveOrStealthWidgetKeyFromMek(MEK, SALT_B64 + "x");
     const { iv, ct } = await aesGcmEncrypt(key, "user A");
     await expect(aesGcmDecrypt(otherKey, iv, ct)).rejects.toBeDefined();
+  });
+});
+
+/**
+ * The raw-bytes form of the same key.
+ *
+ * The widget's contract takes the wrapping key as base64, so the platform has
+ * to be able to produce the bytes. The property that matters is that they are
+ * the SAME key the CryptoKey form represents: if the two ever drift, data
+ * sealed by one side cannot be opened by the other and the failure appears
+ * much later, as unreadable data rather than as a failed connection.
+ */
+describe("OR stealth-sync widget key, raw bytes form", () => {
+  it("is 32 bytes and deterministic for the same MEK and salt", async () => {
+    const a = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64);
+    const b = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64);
+    expect(a.byteLength).toBe(32);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("is the same key as the CryptoKey form: it opens what that key sealed", async () => {
+    const cryptoKeyForm = await deriveOrStealthWidgetKeyFromMek(MEK, SALT_B64);
+    const { iv, ct } = await aesGcmEncrypt(cryptoKeyForm, "same key or the data is unreadable");
+
+    const bytes = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64);
+    const imported = await globalThis.crypto.subtle.importKey(
+      "raw",
+      bytes as BufferSource,
+      { name: "AES-GCM" },
+      false,
+      ["decrypt"],
+    );
+    expect(await aesGcmDecrypt(imported, iv, ct)).toBe("same key or the data is unreadable");
+  });
+
+  it("is domain-separated from the OPK seed sibling", async () => {
+    const widget = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64);
+    const opk = await deriveOrOpkSeedFromMek(MEK, SALT_B64);
+    expect(Array.from(widget)).not.toEqual(Array.from(opk));
+  });
+
+  it("changes with the salt, so one user's key is not another's", async () => {
+    const a = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64);
+    const b = await deriveOrStealthWidgetKeyBytesFromMek(MEK, SALT_B64 + "x");
+    expect(Array.from(a)).not.toEqual(Array.from(b));
   });
 });

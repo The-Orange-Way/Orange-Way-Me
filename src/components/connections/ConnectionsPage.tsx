@@ -182,6 +182,7 @@ export function ConnectionsPage() {
     decryptOrTxnCipher,
     exportOrCredsKey,
     exportOrTxnsKey,
+    exportOrStealthKeyB64,
     buildHouseholdSignatureFields,
     getOpkKeypair,
   } = useVault();
@@ -407,11 +408,12 @@ export function ConnectionsPage() {
    * the address gap. The transport owns return_callback_origin and the
    * protocol version.
    *
-   * No key material crosses this call. The widget also requires a wrapping
-   * key to get past its own validation, and deriving that key is a separate
-   * reviewed change, so until it lands the widget answers this handshake
-   * with an error and the user sees the mapped copy below rather than a
-   * silent dead end.
+   * The wrapping key the widget seals under travels in that message, in the
+   * only shape the widget's contract accepts. It is derived in the vault
+   * under its own label, so it unlocks nothing else we hold, and it goes to
+   * the widget's own origin over postMessage, never to a server and never in
+   * the URL. It is read here rather than held in component state so it lives
+   * only for the length of the call.
    */
   async function handleAddConnection() {
     if (!user) {
@@ -420,11 +422,16 @@ export function ConnectionsPage() {
     }
     setOpening(true);
     try {
+      // Read the wrapping key immediately before the launch, so a vault that
+      // locked while the page sat open fails here rather than opening a popup
+      // that cannot complete.
+      const orStealthKeyB64 = await exportOrStealthKeyB64();
       await launchStealthConnect({
         url: buildStealthConnectUrl(window.location.origin),
         init: buildStealthInit({
           appSlug: OR_PLATFORM_SLUG,
           appUserId: user.id,
+          orStealthKeyB64,
           gapLimit: STEALTH_GAP_LIMIT,
         }),
         onMessage: (message) => {

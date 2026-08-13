@@ -630,6 +630,34 @@ export async function deriveOrStealthWidgetKeyFromMek(
   mekRaw: Uint8Array,
   userVaultSaltB64: string,
 ): Promise<CryptoKey> {
+  const rawBits = await deriveOrStealthWidgetKeyBytesFromMek(mekRaw, userVaultSaltB64);
+  return crypto.subtle.importKey(
+    "raw",
+    rawBits as BufferSource,
+    { name: "AES-GCM" },
+    /* extractable */ false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
+ * The same 256 bits as deriveOrStealthWidgetKeyFromMek, as raw bytes.
+ *
+ * The widget's opening message takes the wrapping key as base64, which is
+ * the only shape its current contract accepts, so the platform has to be
+ * able to produce the bytes. Both functions read the same salt and the same
+ * HKDF info from this one place: the base64 the widget receives and the
+ * CryptoKey a caller derives locally are therefore provably the same key,
+ * and a later change to the label cannot move one without moving the other.
+ *
+ * The caller owns the lifetime of what this returns. It is raw key material:
+ * zero it when the vault locks, exactly as the OPK seed is handled, and
+ * never write it to storage, a log, or a network call.
+ */
+export async function deriveOrStealthWidgetKeyBytesFromMek(
+  mekRaw: Uint8Array,
+  userVaultSaltB64: string,
+): Promise<Uint8Array> {
   const encoder = new TextEncoder();
   const saltBytes = encoder.encode("ow-or:" + userVaultSaltB64);
   const mekAsHkdf = await crypto.subtle.importKey("raw", mekRaw as BufferSource, "HKDF", false, [
@@ -645,10 +673,7 @@ export async function deriveOrStealthWidgetKeyFromMek(
     mekAsHkdf,
     256,
   );
-  return crypto.subtle.importKey("raw", rawBits, { name: "AES-GCM" }, /* extractable */ false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  return new Uint8Array(rawBits);
 }
 
 // ---------- KDF strategy map (Open/Closed Principle extension point) ----------
