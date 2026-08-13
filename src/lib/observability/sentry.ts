@@ -156,8 +156,7 @@ export const DROPPED_INTEGRATIONS: ReadonlySet<string> = new Set([
 export function isCspInlineNoise(event: Sentry.ErrorEvent): boolean {
   const msg =
     event.exception?.values?.[0]?.value ??
-    (typeof event.message === "string" ? event.message : "") ??
-    "";
+    (typeof event.message === "string" ? event.message : "");
   // Chrome/Edge: "Refused to execute inline script because it violates..."
   // Chrome/Edge: "Refused to evaluate a string as JavaScript because..."
   // Firefox:     "Content Security Policy: ... blocked ... inline (or eval)"
