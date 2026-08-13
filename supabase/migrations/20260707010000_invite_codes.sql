@@ -1,19 +1,112 @@
--- SUPERSEDED, INTENTIONALLY EMPTY. Do not add statements to this file.
+-- Invite codes: a link + code lets a person join the private beta without
+-- the operator pre-collecting their email. The code is the invite; the user
+-- still sets their own email + password at signup (needed for vault-key
+-- derivation and recovery), so the operator never has to know it in advance.
 --
--- This version originally created public.invite_codes and the two invite
--- code functions. It was replaced before it was ever applied by
--- 20260709120000_invite_codes.sql, which is the recorded, authoritative
--- version of that schema. This file is not in any ledger.
+-- This composes with, and for code holders replaces, the email allowlist:
+-- signup is permitted when the email is on beta_allowlist OR a valid,
+-- unredeemed, unexpired code is presented. The authoritative, unbypassable
+-- enforcement is the Supabase Before-User-Created auth hook (see the
+-- companion migration 20260707020000). Authorizing an invite-code signup
+-- IS consuming it, and only the hook (running as supabase_auth_admin) may
+-- do so: the client never redeems.
 --
--- It is emptied rather than left in place because its final statement
--- granted execute on public.redeem_invite_code(text) to anon, and
--- 20260720000000_restrict_redeem_invite_code_to_authenticated.sql later
--- narrows that same function to authenticated only. Running this file
--- after that one would silently re-widen the grant, with nothing
--- afterwards to narrow it again.
---
--- Current source of truth for the invite code surface:
---   20260709120000_invite_codes.sql                          (table + functions)
---   20260720000000_restrict_redeem_invite_code_to_authenticated.sql  (grant)
---
--- End of file. Nothing below this line, deliberately.
+-- RLS denies all anon/authenticated access to the table itself. The only
+-- surfaces a caller touches are the two SECURITY DEFINER functions, each
+-- with search_path pinned to '' and every reference schema-qualified.
+
+CREATE TABLE IF NOT EXISTS public.invite_codes (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Stored as inserted; uniqueness + lookup are lowercase via the index
+    -- below, so a code is case-insensitive at redemption time.
+    code        text NOT NULL,
+    max_uses    integer NOT NULL DEFAULT 1 CHECK (max_uses >= 1),
+    uses        integer NOT NULL DEFAULT 0 CHECK (uses >= 0),
+    expires_at  timestamptz,
+    revoked     boolean NOT NULL DEFAULT false,
+    created_by  uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+    note        text,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS invite_codes_code_lower_uidx
+    ON public.invite_codes (lower(code));
+
+ALTER TABLE public.invite_codes ENABLE ROW LEVEL SECURITY;
+
+-- No SELECT/INSERT/UPDATE/DELETE policies for anon or authenticated: the
+-- table is fully closed to end users. service_role (operator scripts) and
+-- the SECURITY DEFINER functions below are the only ways in. Knowing whether
+-- a code exists is exposed only through the bool-returning validate function.
+COMMENT ON TABLE public.invite_codes IS
+    'Private-beta invite codes. RLS denies all anon/authenticated access. '
+    'Validate via public.is_invite_code_valid(); redeem via '
+    'public.redeem_invite_code() (auth hook only). Writes are service_role / migration-only.';
+
+-- Non-consuming validity check. Returns a bool only (safe public surface,
+-- mirrors is_email_in_beta_allowlist). Callable pre-auth (anon) because the
+-- signup form gates on it before the user has a session. Never raises, so a
+-- client can treat error as fail-closed.
+CREATE OR REPLACE FUNCTION public.is_invite_code_valid(p_code text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.invite_codes
+        WHERE lower(code) = lower(p_code)
+          AND NOT revoked
+          AND (expires_at IS NULL OR expires_at > now())
+          AND uses < max_uses
+    );
+$$;
+
+-- Atomic redemption. The single UPDATE ... WHERE uses < max_uses is the
+-- whole guard: two concurrent redemptions of a max_uses = 1 code cannot both
+-- succeed, because the row-level lock serializes them and the second sees
+-- uses = max_uses and matches no row. This is deliberately NOT a
+-- SELECT-then-UPDATE, which would race. Returns true iff a use was consumed.
+CREATE OR REPLACE FUNCTION public.redeem_invite_code(p_code text)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    consumed integer;
+BEGIN
+    IF p_code IS NULL OR length(p_code) = 0 THEN
+        RETURN false;
+    END IF;
+
+    UPDATE public.invite_codes
+       SET uses = uses + 1
+     WHERE lower(code) = lower(p_code)
+       AND NOT revoked
+       AND (expires_at IS NULL OR expires_at > now())
+       AND uses < max_uses;
+
+    GET DIAGNOSTICS consumed = ROW_COUNT;
+    RETURN consumed = 1;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.is_invite_code_valid(text) FROM public;
+GRANT  EXECUTE ON FUNCTION public.is_invite_code_valid(text) TO anon, authenticated;
+
+-- redeem_invite_code is consuming, and only the Before-User-Created hook
+-- (running as supabase_auth_admin) is allowed to consume. No client path
+-- calls it: the browser never redeems, so anon/authenticated get no execute.
+-- The hook is the single writer of uses, which closes the double-consume
+-- race by construction. The grant to supabase_auth_admin is what lets the
+-- INVOKER hook call it.
+REVOKE EXECUTE ON FUNCTION public.redeem_invite_code(text) FROM public, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.redeem_invite_code(text) TO supabase_auth_admin;
+
+COMMENT ON FUNCTION public.is_invite_code_valid(text) IS
+    'Non-consuming bool check that a private-beta invite code is currently redeemable.';
+COMMENT ON FUNCTION public.redeem_invite_code(text) IS
+    'Atomically consume one use of an invite code (single UPDATE guard, no race). Returns true iff consumed. Auth-hook only (supabase_auth_admin).';

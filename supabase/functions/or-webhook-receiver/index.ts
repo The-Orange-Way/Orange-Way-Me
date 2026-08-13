@@ -61,17 +61,34 @@ const service = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+// This receiver is server-to-server (OR's dispatcher, never a browser),
+// so it emits no CORS headers. jsonResponse still requires the header
+// bag argument, so we pass an explicit empty one at every call site.
+const NO_CORS: Record<string, string> = {};
+
+/**
+ * Outcome of a subaccount to user lookup.
+ *
+ * The two failure shapes are deliberately kept apart, because they must
+ * produce opposite responses to OR's dispatcher:
+ *   - ok: false          the lookup itself failed. We do not know whether
+ *                        a mapping exists. Caller answers 5xx so OR retries.
+ *   - ok: true, userId: null
+ *                        the lookup succeeded and there is no mapping.
+ *                        Caller answers 202 so OR stops retrying.
+ * Collapsing both into a bare null is what previously caused a transient
+ * database error to be reported to OR as a successful delivery, which
+ * discarded the event permanently.
+ */
+type UserLookup = { ok: false } | { ok: true; userId: string | null };
+
 /**
  * Resolve user_id from OR's subaccount_id. The mapping is owned by
  * ow-or-proxy: when a user first calls or-provision, the returned
  * subaccount_id is cached on user_profiles.or_subaccount_id (and in the
  * browser's localStorage). We read the server-side row here.
- *
- * If we can't resolve, the receiver returns 202 (accepted but skipped)
- * so OR's dispatcher considers the delivery successful and won't retry
- * forever on a permanent mapping gap.
  */
-async function resolveUserId(subaccountId: string): Promise<string | null> {
+async function resolveUserId(subaccountId: string): Promise<UserLookup> {
   const { data, error } = await service
     .from("user_profiles")
     .select("user_id")
@@ -79,26 +96,26 @@ async function resolveUserId(subaccountId: string): Promise<string | null> {
     .maybeSingle();
   if (error) {
     console.error("[or-webhook-receiver] user lookup error:", error.message);
-    return null;
+    return { ok: false };
   }
-  return (data?.user_id as string | undefined) ?? null;
+  return { ok: true, userId: (data?.user_id as string | undefined) ?? null };
 }
 
 Deno.serve(async (req: Request) => {
   // No CORS: this endpoint is called server-to-server, never from a
   // browser. Reject anything that isn't POST.
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse({ error: "Method not allowed" }, 405, NO_CORS);
   }
 
   if (!OR_WEBHOOK_SECRET) {
     // Misconfigured environment — 500 so OR retries until we notice.
-    return jsonResponse({ error: "OR_WEBHOOK_SECRET not configured" }, 500);
+    return jsonResponse({ error: "OR_WEBHOOK_SECRET not configured" }, 500, NO_CORS);
   }
 
   const body = await readBoundedText(req);
   if (body === null) {
-    return jsonResponse({ error: "Request body too large" }, 413);
+    return jsonResponse({ error: "Request body too large" }, 413, NO_CORS);
   }
 
   // Single verification + parse step via the SDK. The SDK prefers v2
@@ -125,20 +142,31 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     if (err instanceof SignatureVerificationError) {
       console.warn(`[or-webhook-receiver] verification failed (${err.code}): ${err.message}`);
-      return jsonResponse({ error: "Invalid signature" }, 401);
+      return jsonResponse({ error: "Invalid signature" }, 401, NO_CORS);
     }
     // Anything non-SignatureVerificationError is a bug in the SDK or
     // an unexpected runtime failure — surface as 500 so OR retries.
     console.error("[or-webhook-receiver] unexpected SDK error:", err);
-    return jsonResponse({ error: "Verification error" }, 500);
+    return jsonResponse({ error: "Verification error" }, 500, NO_CORS);
   }
 
   // Discriminated union on event.type — adding sync.failed etc. later
   // will surface as a TS error here, forcing a deliberate handler.
   switch (event.type) {
     case "sync.completed": {
-      const userId = await resolveUserId(event.data.subaccount_id);
-      if (!userId) {
+      const lookup = await resolveUserId(event.data.subaccount_id);
+
+      if (!lookup.ok) {
+        // The lookup failed, so we cannot tell a missing mapping from a
+        // database that is briefly unavailable. 500 hands the event back
+        // to OR's dispatcher, which retries with backoff. Answering 202
+        // here would tell OR the delivery succeeded and drop the event
+        // for good. The upsert below is idempotent on or_event_id, so a
+        // retry after a partial failure cannot double-apply.
+        return jsonResponse({ error: "User lookup failed" }, 500, NO_CORS);
+      }
+
+      if (!lookup.userId) {
         // We received a valid signed event for an unknown subaccount.
         // 202 = accepted but no action; tells OR's dispatcher to consider
         // the delivery successful and stop retrying (vs 5xx which would
@@ -146,7 +174,7 @@ Deno.serve(async (req: Request) => {
         console.warn(
           `[or-webhook-receiver] unknown subaccount_id ${event.data.subaccount_id} — no user match`,
         );
-        return jsonResponse({ status: "accepted_no_user" }, 202);
+        return jsonResponse({ status: "accepted_no_user" }, 202, NO_CORS);
       }
 
       // Idempotent insert: or_event_id is stable across OR retries
@@ -156,7 +184,7 @@ Deno.serve(async (req: Request) => {
       // second delivery returns 200 without an error path.
       const { error: insertErr } = await service.from("sync_events").upsert(
         {
-          user_id: userId,
+          user_id: lookup.userId,
           or_connection_id: event.data.connection_id,
           synced_count: event.data.synced_count,
           or_ts: event.data.ts,
@@ -168,10 +196,20 @@ Deno.serve(async (req: Request) => {
       if (insertErr) {
         console.error("[or-webhook-receiver] sync_events upsert failed:", insertErr.message);
         // 500 so OR retries with backoff.
-        return jsonResponse({ error: "Persist failed" }, 500);
+        return jsonResponse({ error: "Persist failed" }, 500, NO_CORS);
       }
 
-      return jsonResponse({ status: "ok" }, 200);
+      return jsonResponse({ status: "ok" }, 200, NO_CORS);
+    }
+    default: {
+      // Exhaustiveness guard. The Event union has a single member today,
+      // so event.type narrows to `never` here and this assignment compiles.
+      // When a new type (e.g. sync.failed) is added to the union without a
+      // matching case, this line fails to compile, forcing a deliberate
+      // handler. It also gives the handler a return on every path.
+      const _unhandled: never = event.type;
+      console.warn(`[or-webhook-receiver] unhandled event type: ${String(_unhandled)}`);
+      return jsonResponse({ status: "ignored" }, 202, NO_CORS);
     }
   }
 });
