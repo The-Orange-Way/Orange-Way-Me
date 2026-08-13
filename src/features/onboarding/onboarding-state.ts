@@ -10,7 +10,7 @@ import { createContext, useContext } from "react";
  * could use any of it, which is why the flow had no personalization and could
  * not create anything on finish.
  *
- * Deliberately not persisted anywhere. vaultPassword and recoveryCode are the
+ * Deliberately not persisted anywhere. vaultPassword and recoveryKit are the
  * two most sensitive strings the app ever holds, so they live in memory for
  * the duration of the wizard and go away with the tab. Do not move this into
  * localStorage, sessionStorage or a URL param to survive a reload.
@@ -33,7 +33,7 @@ export interface OnboardingData {
    * moment the vault row is written. Null until then. The verify stage
    * compares against this rather than merely checking the boxes are non-empty.
    */
-  recoveryCode: string | null;
+  recoveryKit: string | null;
 }
 
 export interface OnboardingStateValue extends OnboardingData {
@@ -41,7 +41,7 @@ export interface OnboardingStateValue extends OnboardingData {
   setEmail: (value: string) => void;
   setEmailVerified: (value: boolean) => void;
   setVaultPassword: (value: string) => void;
-  setRecoveryCode: (value: string) => void;
+  setRecoveryKit: (value: string) => void;
 }
 
 export const OnboardingStateContext = createContext<OnboardingStateValue | null>(null);
@@ -63,13 +63,13 @@ export function useOnboardingState(): OnboardingStateValue {
  * verify screen that accepts anything because generation failed upstream is
  * worse than one that refuses to advance.
  */
-export function verifyRecoveryWords(
-  recoveryCode: string | null,
+export function verifyRecoveryKitWords(
+  recoveryKit: string | null,
   positions: number[],
   answers: string[],
 ): boolean {
-  if (!recoveryCode) return false;
-  const words = recoveryCode.trim().split(/\s+/);
+  if (!recoveryKit) return false;
+  const words = recoveryKit.trim().split(/\s+/);
   if (positions.length === 0 || positions.length !== answers.length) return false;
   return positions.every((position, index) => {
     const expected = words[position];
