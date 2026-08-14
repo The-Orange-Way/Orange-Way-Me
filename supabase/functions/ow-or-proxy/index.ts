@@ -235,11 +235,9 @@ Deno.serve(async (req: Request) => {
       // one of these calls.
       //
       // app_user_id is forced to the authenticated user.id and never taken
-      // from the payload. This endpoint deletes a row by id, so trusting a
-      // client-supplied owner would let any signed-in caller delete another
-      // user's connection by guessing its id. OR scopes the delete by
-      // platform, id and app_user_id together, and this is the term that
-      // makes that scoping mean the caller.
+      // from the payload. OR scopes the delete by platform, connection id and
+      // app_user_id together, so forcing the owner here is the term that makes
+      // that scoping resolve to the authenticated caller.
       const p = payload as { connection_id?: unknown };
       if (typeof p.connection_id !== "string" || !p.connection_id) {
         return jsonResponse({ error: "connection_id required in payload" }, 400, cors);
