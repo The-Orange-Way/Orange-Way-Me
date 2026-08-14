@@ -62,6 +62,7 @@ import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { startStealthSync } from "@/lib/stealth/sync";
+import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -590,7 +591,13 @@ export function ConnectionsPage() {
     // { synced: 0 }. Routing them below would ask a function that cannot see
     // this row whether this row is up to date. Same shape as the quiltt branch
     // above: a provider whose sync lives somewhere else gets sent there.
-    if (conn.is_stealth) {
+    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is the
+    // OWM-owned kill switch (default off). While it is off, a stealth
+    // connection does NOT open the OR widget and falls through to the or-sync
+    // no-op path below, exactly as before this entry existed. Flipping it on
+    // is a separate one-line PR gated on the OR-side sync mode confirmed live
+    // plus a wire observation of is_stealth.
+    if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
       await handleStealthSync(conn);
       return;
     }
