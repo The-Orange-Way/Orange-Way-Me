@@ -248,7 +248,8 @@ function WalletDestinationRow({
     [accounts, selectedAccountId],
   );
 
-  const sourceLabel = wallet.label?.trim() || (wallet.currency ? `${wallet.currency} wallet` : "Wallet");
+  const sourceLabel =
+    wallet.label?.trim() || (wallet.currency ? `${wallet.currency} wallet` : "Wallet");
   const mismatch = selected ? isCurrencyMismatch(wallet.currency, selected.currency) : false;
 
   return (
