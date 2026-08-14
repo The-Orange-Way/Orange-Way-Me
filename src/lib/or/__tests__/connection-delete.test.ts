@@ -34,10 +34,9 @@ describe("buildDeletePlan", () => {
   });
 
   it("never sends an owner from the browser on either path", () => {
-    // app_user_id is forced to the authenticated user inside ow-or-proxy.
-    // The stealth endpoint deletes by row id, so a client-supplied owner would
-    // let any signed-in caller delete another user's connection by guessing an
-    // id. If this assertion ever fails, that hole is open.
+    // The owner (app_user_id) is resolved server side from the authenticated
+    // session inside ow-or-proxy and is never accepted from the client. This
+    // asserts the browser sends no owner field on either path.
     for (const isStealth of [true, false]) {
       const plan = buildDeletePlan({ ...BASE, isStealth });
       expect(plan.payload).not.toHaveProperty("app_user_id");
