@@ -105,8 +105,13 @@ export function useConnectionAccountMap() {
         }
       }
       if (decoded.length === 0 && (data?.length ?? 0) > 0) {
-        console.warn(`[CAM] cam-mapped-but-empty: ${data?.length ?? 0} row(s) in DB, all decrypt failed`);
+        console.warn(
+          `[CAM] cam-mapped-but-empty: ${data?.length ?? 0} row(s) in DB, all decrypt failed`,
+        );
       }
+      console.log(
+        `[CAM] cam-refresh-complete: returned=${data?.length ?? 0} decoded=${decoded.length}`,
+      );
       setRows(decoded);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load mapping");
