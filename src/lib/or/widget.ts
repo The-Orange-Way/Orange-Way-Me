@@ -166,7 +166,10 @@ export async function openOrConnect(args: {
   });
 }
 
-async function mintWidgetToken(orgId: string): Promise<string> {
+// Exported because the stealth sync flow mints its own token: it opens the
+// widget directly rather than through openOrConnect, and that token is the
+// widget's only means of authenticating to OR's edge functions.
+export async function mintWidgetToken(orgId: string): Promise<string> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
