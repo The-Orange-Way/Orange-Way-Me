@@ -57,10 +57,30 @@ export interface StealthSyncProgress {
 }
 
 export interface StealthSyncOutcome {
-  /** Transactions the widget stored this run. Absent when the widget did not say. */
-  storedTransactions?: number;
+  /**
+   * Transactions this run matched, read from the widget's `tx_count`.
+   *
+   * The field name is `tx_count` on the wire and nothing else: the widget's
+   * SYNC_COMPLETE has no `stored_transactions`. Reading a name the widget does
+   * not send yields undefined forever, which reads as "the widget did not say"
+   * and quietly hides every count. Verified against the canonical contract.
+   */
+  txCount?: number;
   /** Height the widget scanned to, written back as `last_block_scanned`. */
   lastBlockScanned?: number;
+  /**
+   * The widget could not persist its cursor. The scan itself was fine, but the
+   * next one rescans from the stored value. Surfaced rather than swallowed:
+   * a user who sees "scan finished" and then a full rescan deserves to know
+   * why.
+   */
+  cursorUpdateFailed?: boolean;
+  /**
+   * Matches landed at the edge of the derived address window, so history may
+   * be incomplete. The widget says so in its own UI; we carry it too because
+   * the popup closes and this app is what the user is left looking at.
+   */
+  addressWindowExhausted?: boolean;
 }
 
 /**
@@ -155,8 +175,10 @@ export async function startStealthSync(args: {
           break;
         case STEALTH_MESSAGE.SYNC_COMPLETE:
           args.onComplete?.({
-            storedTransactions: numberOrUndefined(message.stored_transactions),
+            txCount: numberOrUndefined(message.tx_count),
             lastBlockScanned: numberOrUndefined(message.last_block_scanned),
+            cursorUpdateFailed: message.cursor_update_failed === true,
+            addressWindowExhausted: message.address_window_exhausted === true,
           });
           break;
         case STEALTH_MESSAGE.ERROR:

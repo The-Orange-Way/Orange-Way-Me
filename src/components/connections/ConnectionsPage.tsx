@@ -541,17 +541,30 @@ export function ConnectionsPage() {
           channelRef.current?.stop();
           channelRef.current = null;
           setSyncingId(null);
-          const stored = outcome.storedTransactions;
+          const found = outcome.txCount;
           // Report the count when the widget gave one. When it did not, say
           // that the scan finished and nothing more: inventing "up to date"
           // from a missing number is how we got here.
           toast.success(
-            stored === undefined
+            found === undefined
               ? "Scan finished."
-              : stored === 0
+              : found === 0
                 ? "Scan finished. No new transactions."
-                : `Scan finished. ${stored} new ${stored === 1 ? "transaction" : "transactions"}.`,
+                : `Scan finished. ${found} new ${found === 1 ? "transaction" : "transactions"}.`,
           );
+          // Two honesty warnings the widget reports and this app would
+          // otherwise swallow when the popup closes. Neither makes the scan a
+          // failure, and neither may be hidden behind the success toast.
+          if (outcome.addressWindowExhausted) {
+            toast.warning(
+              "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
+            );
+          }
+          if (outcome.cursorUpdateFailed) {
+            toast.warning(
+              "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
+            );
+          }
           void refreshList();
         },
         onError: (message) => {
@@ -591,8 +604,8 @@ export function ConnectionsPage() {
     // { synced: 0 }. Routing them below would ask a function that cannot see
     // this row whether this row is up to date. Same shape as the quiltt branch
     // above: a provider whose sync lives somewhere else gets sent there.
-    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is the
-    // OWM-owned kill switch (default off). While it is off, a stealth
+    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is this
+    // app's own kill switch (default off). While it is off, a stealth
     // connection does NOT open the OR widget and falls through to the or-sync
     // no-op path below, exactly as before this entry existed. Flipping it on
     // is a separate one-line PR gated on the OR-side sync mode confirmed live

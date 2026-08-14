@@ -130,10 +130,46 @@ describe("startStealthSync", () => {
 
     emit({
       type: STEALTH_MESSAGE.SYNC_COMPLETE,
-      stored_transactions: 3,
+      tx_count: 3,
       last_block_scanned: 840000,
     });
-    expect(onComplete).toHaveBeenCalledWith({ storedTransactions: 3, lastBlockScanned: 840000 });
+    expect(onComplete).toHaveBeenCalledWith({
+      txCount: 3,
+      lastBlockScanned: 840000,
+      cursorUpdateFailed: false,
+      addressWindowExhausted: false,
+    });
+  });
+
+  it("reads tx_count, the name the widget actually sends", async () => {
+    const { launch, emit } = makeLaunch();
+    const onComplete = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onComplete });
+
+    // The widget's SYNC_COMPLETE has no `stored_transactions`. Reading that
+    // name returned undefined on every real sync and looked exactly like a
+    // widget that declined to say. Pin the real name.
+    emit({ type: STEALTH_MESSAGE.SYNC_COMPLETE, stored_transactions: 7, tx_count: 2 });
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ txCount: 2 }));
+  });
+
+  it("passes through the widget's two honesty warnings", async () => {
+    const { launch, emit } = makeLaunch();
+    const onComplete = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onComplete });
+
+    // A failed cursor write means the next sync rescans; an exhausted address
+    // window means history may be missing. Both arrive alongside a successful
+    // scan, and dropping them would turn a caveat into a clean success.
+    emit({
+      type: STEALTH_MESSAGE.SYNC_COMPLETE,
+      tx_count: 1,
+      cursor_update_failed: true,
+      address_window_exhausted: true,
+    });
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ cursorUpdateFailed: true, addressWindowExhausted: true }),
+    );
   });
 
   it("treats a malformed counter as absent rather than coercing it", async () => {
@@ -145,12 +181,14 @@ describe("startStealthSync", () => {
     // never as a number, so the UI cannot report a count that was never sent.
     emit({
       type: STEALTH_MESSAGE.SYNC_COMPLETE,
-      stored_transactions: "12",
+      tx_count: "12",
       last_block_scanned: Number.NaN,
     });
     expect(onComplete).toHaveBeenCalledWith({
-      storedTransactions: undefined,
+      txCount: undefined,
       lastBlockScanned: undefined,
+      cursorUpdateFailed: false,
+      addressWindowExhausted: false,
     });
   });
 
