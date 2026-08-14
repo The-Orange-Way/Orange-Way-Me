@@ -71,6 +71,8 @@ export function useConnectionAccountMap() {
 
   const refresh = useCallback(async () => {
     if (!user || !isUnlocked) {
+      if (!user) console.warn("[CAM] cam-resolve-skipped: no user");
+      else console.warn("[CAM] cam-resolve-skipped: locked vault");
       setRows([]);
       setLoading(false);
       return;
@@ -98,10 +100,18 @@ export function useConnectionAccountMap() {
             updated_at: raw.updated_at,
           });
         } catch {
-          // Row was encrypted with a different vault key — skip silently.
-          // Mirrors useAccounts' handling of orphan rows from older sessions.
+          // Row may have been encrypted with a different vault key; log for diagnostics.
+          console.warn(`[CAM] cam-decrypt-failed: row ${raw.id} skipped (decrypt failed)`);
         }
       }
+      if (decoded.length === 0 && (data?.length ?? 0) > 0) {
+        console.warn(
+          `[CAM] cam-mapped-but-empty: ${data?.length ?? 0} row(s) in DB, all decrypt failed`,
+        );
+      }
+      console.log(
+        `[CAM] cam-refresh-complete: returned=${data?.length ?? 0} decoded=${decoded.length}`,
+      );
       setRows(decoded);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load mapping");

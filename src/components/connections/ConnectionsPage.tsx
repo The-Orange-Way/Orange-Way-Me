@@ -353,7 +353,7 @@ export function ConnectionsPage() {
                 id: w.id,
                 external_wallet_id: w.external_wallet_id,
                 is_synced: w.is_synced,
-                currency: "—",
+                currency: "",
                 label: null,
               });
             }
