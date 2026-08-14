@@ -1,5 +1,5 @@
 /**
- * Kill switch for the stealth (private-connection) sync entry (DL-1047, PR #259).
+ * Kill switch for the stealth (private-connection) sync entry (DL-1047).
  *
  * The sync entry ships DARK. handleSync routes a stealth connection to the OR
  * widget only when this is true. Default off, so the merged code cannot open
