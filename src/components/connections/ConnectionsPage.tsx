@@ -215,6 +215,10 @@ export function ConnectionsPage() {
   // If OR rejects even a freshly provisioned id, clearing and re-provisioning
   // again would loop against OR for as long as the page stays open.
   const recoveredStaleSubaccountRef = useRef(false);
+  // Ids confirmed deleted in this session. Used in handleDeleteConfirmed
+  // to distinguish a 404 on a previously-confirmed delete (treat as success)
+  // from an unexpected 404 where the row may still exist server-side.
+  const deletedConnectionIdsRef = useRef<Set<string>>(new Set());
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -807,13 +811,25 @@ export function ConnectionsPage() {
         subaccount_id: subaccountId,
         connection_id: conn.id,
       });
+      // Confirmed deleted: record the id so a follow-up 404 (double-tap,
+      // retry) is correctly treated as "already gone, not an error".
+      deletedConnectionIdsRef.current.add(conn.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // 404 / not-found means it's already gone — that's success, not error
-      // (the double-click that caused this is exactly what we're fixing).
-      if (!/not.?found|404/i.test(msg)) {
+      if (/not.?found|404/i.test(msg)) {
+        // 404 is safe to treat as success only for ids we confirmed deleted
+        // earlier in this session. Any other 404 may mean the row still
+        // exists server-side: restore it and show an error.
+        if (!deletedConnectionIdsRef.current.has(conn.id)) {
+          console.error("[Connections] delete 404 on unrecognised id", err);
+          setConnections(snapshot);
+          toast.error("Couldn't disconnect. Give it a moment and try again.");
+          return;
+        }
+        // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
+      } else {
         console.error("[Connections] delete failed", err);
-        setConnections(snapshot); // restore the row — delete genuinely failed
+        setConnections(snapshot);
         toast.error("Couldn't disconnect. Give it a moment and try again.");
         return;
       }
