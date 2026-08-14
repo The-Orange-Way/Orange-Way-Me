@@ -60,7 +60,9 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { startStealthSync } from "@/lib/stealth/sync";
+import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
@@ -108,6 +110,14 @@ interface ConnectionRow {
   last_sync_at: string | null;
   encrypted_last_error: string | null;
   source_wallets?: RawSourceWallet[];
+  // Set by or-connection-list on rows that come from the stealth store rather
+  // than the `connections` table. Optional because a response predating the
+  // union omits it, and an absent flag must read as "not stealth" rather than
+  // throw. These rows are scanned by the OR widget, not by `or-sync`, so the
+  // flag is what routes Sync. `source_wallets` is always [] on them: the
+  // stealth store has no equivalent table, so anything gated on wallets being
+  // present is structurally false here and must branch on this instead.
+  is_stealth?: boolean;
   // Decrypted client-side after fetch.
   decrypted_label?: string | null;
   decrypted_last_error?: string | null;
@@ -219,6 +229,11 @@ export function ConnectionsPage() {
   // to distinguish a 404 on a previously-confirmed delete (treat as success)
   // from an unexpected 404 where the row may still exist server-side.
   const deletedConnectionIdsRef = useRef<Set<string>>(new Set());
+  // The live stealth transport, when a scan is running. Held in a ref rather
+  // than state because nothing renders from it and it must be stoppable from
+  // the widget's own callbacks. Stopped on unmount so its window message
+  // listener can never outlive this page.
+  const channelRef = useRef<StealthChannel | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -236,6 +251,16 @@ export function ConnectionsPage() {
   // The OR connection id the bank-sync dialog should pull. null = closed.
   const [bankSyncConnId, setBankSyncConnId] = useState<string | null>(null);
   const [txRefreshKey, setTxRefreshKey] = useState(0);
+
+  // Stop any live stealth transport when this page goes away. The channel adds
+  // a window message listener, so leaving it running would keep handling frames
+  // from a popup belonging to a page the user has already navigated off.
+  useEffect(() => {
+    return () => {
+      channelRef.current?.stop();
+      channelRef.current = null;
+    };
+  }, []);
 
   // Resolve cached subaccount on mount / when user changes.
   useEffect(() => {
@@ -481,6 +506,71 @@ export function ConnectionsPage() {
 
   // ─── Sync + Delete ────────────────────────────────────────────────────
 
+  /**
+   * Scan a stealth connection by re-opening the OR widget on its sync route.
+   *
+   * The widget is the scanner. It fetches the sealed envelope by id, reads
+   * `last_block_scanned` back and resumes from it, runs the filter scan in
+   * this browser, and posts sealed transactions back to OR. Nothing on our
+   * side scans, so this opens the widget and reports what the widget says.
+   *
+   * Every outcome below is reported from something the widget actually sent.
+   * There is no success toast on the launch path: launching is not scanning,
+   * and saying otherwise is the bug this ticket exists to fix.
+   */
+  async function handleStealthSync(conn: ConnectionRow) {
+    if (!user) {
+      toast.error("Please sign in first.");
+      return;
+    }
+    setSyncingId(conn.id);
+    try {
+      // Read the key immediately before use, like handleAddConnection does, so
+      // a vault that locked while this page sat open fails here rather than
+      // part-way through a scan.
+      const credKeyB64 = await exportOrCredsKey();
+      const widgetToken = await mintWidgetToken(user.id);
+
+      const { channel } = await startStealthSync({
+        connectionId: conn.id,
+        appUserId: user.id,
+        credKeyB64,
+        widgetToken,
+        onComplete: (outcome) => {
+          channelRef.current?.stop();
+          channelRef.current = null;
+          setSyncingId(null);
+          const stored = outcome.storedTransactions;
+          // Report the count when the widget gave one. When it did not, say
+          // that the scan finished and nothing more: inventing "up to date"
+          // from a missing number is how we got here.
+          toast.success(
+            stored === undefined
+              ? "Scan finished."
+              : stored === 0
+                ? "Scan finished. No new transactions."
+                : `Scan finished. ${stored} new ${stored === 1 ? "transaction" : "transactions"}.`,
+          );
+          void refreshList();
+        },
+        onError: (message) => {
+          channelRef.current?.stop();
+          channelRef.current = null;
+          setSyncingId(null);
+          toast.error(message);
+        },
+      });
+      channelRef.current = channel;
+    } catch (err) {
+      // Popup blocked, widget never ready, closed before load, or the token
+      // mint failed. All of these mean no scan was started, so say so.
+      setSyncingId(null);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Connections] stealth sync could not start", err);
+      toast.error(humanizeError(new Error(msg)));
+    }
+  }
+
   async function handleSync(conn: ConnectionRow) {
     if (!subaccountId) return;
 
@@ -491,6 +581,17 @@ export function ConnectionsPage() {
     // Bitcoin sources (Blink/Strike/etc.) only.
     if (conn.provider_type === "quiltt") {
       setBankSyncConnId(conn.id);
+      return;
+    }
+
+    // Stealth connections are scanned by the OR widget in this browser, never
+    // by or-sync: they live in the stealth store, and or-sync selects from the
+    // `connections` table, so it matches nothing and honestly returns
+    // { synced: 0 }. Routing them below would ask a function that cannot see
+    // this row whether this row is up to date. Same shape as the quiltt branch
+    // above: a provider whose sync lives somewhere else gets sent there.
+    if (conn.is_stealth) {
+      await handleStealthSync(conn);
       return;
     }
 
