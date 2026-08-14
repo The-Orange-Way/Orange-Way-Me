@@ -508,6 +508,20 @@ export function ConnectionsPage() {
         connections: Array<{ connection_id: string; synced: number; error?: string }>;
       };
 
+      // DL-1051: a status toast must be driven by positive evidence that this
+      // connection was actually processed. or-sync only returns an entry for a
+      // connection it attempted; if the id we requested is absent, the
+      // connection was never touched (for example a stealth connection with no
+      // resumable scan). Absence is the whole signal: do not infer stealth on
+      // the client, and do not claim "up to date" for work that never ran.
+      const attempted = res.connections.find((c) => c.connection_id === conn.id);
+      if (!attempted) {
+        toast.info("Nothing was synced for this connection yet.");
+        await refreshList();
+        setTxRefreshKey((k) => k + 1);
+        return;
+      }
+
       const errs = res.connections.filter((c) => c.error);
       if (errs.length > 0) {
         const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
