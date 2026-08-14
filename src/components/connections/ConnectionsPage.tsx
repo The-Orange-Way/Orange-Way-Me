@@ -826,7 +826,7 @@ export function ConnectionsPage() {
           toast.error("Couldn't disconnect. Give it a moment and try again.");
           return;
         }
-        // Known-deleted id: fall through to cleanup and success toast.
+        // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
       } else {
         console.error("[Connections] delete failed", err);
         setConnections(snapshot);
