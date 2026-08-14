@@ -61,6 +61,7 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { buildDeletePlan } from "@/lib/or/connection-delete";
 import { startStealthSync } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import type { StealthChannel } from "@/lib/stealth/channel";
@@ -393,6 +394,10 @@ export function ConnectionsPage() {
         }),
       );
       setConnections(decoded);
+      // Returned so a caller that just created something can check whether it
+      // is actually in the list, rather than assuming the refresh it awaited
+      // means the row arrived. Every existing caller ignores this.
+      return decoded;
     } catch (err) {
       // An id OR does not recognise is recoverable, so fix it rather than
       // report it. Dropping subaccountId re-runs the provision effect, which
@@ -456,9 +461,29 @@ export function ConnectionsPage() {
         credKeyB64,
         txnKeyB64,
       });
-      toast.success("Connection added. Credentials stored as ciphertext only.");
-
-      await refreshList();
+      // The widget posting a connection_id is evidence the connection was
+      // created. It is NOT evidence that it is in this list, and those came
+      // apart in practice: the toast fired while the refresh was still in
+      // flight, so a connection that never arrived looked exactly like one
+      // that had. Refresh first, then say only what the refreshed list shows.
+      const rows = await refreshList();
+      if (!rows) {
+        // The list itself did not load, so we know the connection was created
+        // and nothing about whether it is listed. Say both halves.
+        toast.success("Connection added. We couldn't refresh the list just now.");
+      } else if (rows.some((c) => c.id === result.connection_id)) {
+        toast.success("Connection added. Credentials stored as ciphertext only.");
+      } else {
+        // Created upstream, absent from the list. This is a real defect rather
+        // than a slow refresh, and it used to be invisible.
+        console.error("[Connections] added connection missing from list", {
+          connection_id: result.connection_id,
+          returned: rows.length,
+        });
+        toast.warning(
+          "Connection added, but it is not showing in your list yet. Reload the page, and tell us if it still is not there.",
+        );
+      }
 
       const syncedWallets: OrLinkSourceWallet[] = result.source_wallets ?? [];
       if (syncedWallets.length > 0) {
@@ -942,10 +967,19 @@ export function ConnectionsPage() {
     setConnections((prev) => prev.filter((c) => c.id !== conn.id));
 
     try {
-      await callProxy("or-connection-delete", {
-        subaccount_id: subaccountId,
-        connection_id: conn.id,
+      // Private connections live in their own store, scoped by app_user_id
+      // rather than by subaccount_id, so or-connection-delete looks in a table
+      // this row is not in and honestly answers 404 "Connection not found in
+      // this subaccount" for every one of them. Same shape as the sync branch
+      // above: a provider whose store lives somewhere else gets sent there.
+      // The owner is forced to the signed-in user inside ow-or-proxy, never
+      // sent from here.
+      const plan = buildDeletePlan({
+        isStealth: conn.is_stealth,
+        connectionId: conn.id,
+        subaccountId,
       });
+      await callProxy(plan.endpoint, plan.payload);
       // Confirmed deleted: record the id so a follow-up 404 (double-tap,
       // retry) is correctly treated as "already gone, not an error".
       deletedConnectionIdsRef.current.add(conn.id);
