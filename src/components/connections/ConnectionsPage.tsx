@@ -70,6 +70,7 @@ import {
   type StealthSyncProgress,
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -275,6 +276,10 @@ export function ConnectionsPage() {
    * list refreshes is worse than no progress at all.
    */
   const [stealthProgress, setStealthProgress] = useState<StealthSyncProgress | null>(null);
+  // DL-1113. or-connection-list reports a failed private-wallet arm as a 200
+  // with this flag set, not as an error, so without holding it here the rows
+  // simply vanish and the page looks like it belongs to someone who has none.
+  const [stealthUnavailable, setStealthUnavailable] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [expandedConnId, setExpandedConnId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConnectionRow | null>(null);
@@ -373,6 +378,9 @@ export function ConnectionsPage() {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
       };
+      // Read before decoding, so a decrypt problem further down cannot leave
+      // the page silently pretending the arm is healthy.
+      setStealthUnavailable(readStealthUnavailable(res));
       const decoded = await Promise.all(
         (res.connections ?? []).map(async (c): Promise<ConnectionRow> => {
           let decrypted_label: string | null = null;
@@ -441,6 +449,10 @@ export function ConnectionsPage() {
         return;
       }
       console.error("[Connections] list failed", err);
+      // The whole list call failed, which the toast already covers. Clear the
+      // partial-degradation notice rather than stacking two different
+      // explanations of the same blank page on top of each other.
+      setStealthUnavailable(false);
       toastError(err, "We couldn't load your connections.");
     } finally {
       if (!recovering) setLoading(false);
@@ -1148,6 +1160,12 @@ export function ConnectionsPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────
 
+  // DL-1113. Null in the ordinary case, so this renders unconditionally below.
+  const stealthNotice = describeStealthAvailability({
+    stealthUnavailable,
+    connectionCount: connections.length,
+  });
+
   if (!isUnlocked) {
     return (
       <div className="mx-auto max-w-3xl p-6">
@@ -1245,9 +1263,32 @@ export function ConnectionsPage() {
         </div>
       )}
 
+      {/* DL-1113. The private-wallet arm of or-connection-list failed and the
+          endpoint reported it in a 200 rather than an error, so those rows are
+          missing from the list below. Muted and not destructive on purpose:
+          nothing is lost, the wallets come back when the arm does, and red
+          "something failed" styling would push people toward the one recovery
+          they must not attempt (delete and re-add, which DL-1079 makes a
+          one-way door). aria-live so a screen reader hears the list it just
+          read out was incomplete. */}
+      {stealthNotice && (
+        <div
+          aria-live="polite"
+          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-medium">{stealthNotice.headline}</p>
+            <p className="text-xs text-muted-foreground">{stealthNotice.detail}</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => void refreshList()} disabled={loading}>
+            {stealthNotice.retryLabel}
+          </Button>
+        </div>
+      )}
+
       {loading && connections.length === 0 ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : connections.length === 0 ? (
+      ) : connections.length === 0 && !stealthNotice ? (
         <div className="space-y-2 rounded-md border border-dashed p-8 text-center">
           <Zap className="mx-auto h-8 w-8 text-orange-500" />
           <p className="text-sm font-medium">No connections yet</p>
