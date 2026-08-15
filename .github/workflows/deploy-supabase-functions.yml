@@ -79,7 +79,7 @@ jobs:
           # here in the run block. Both branch-specific secrets must be set
           # BEFORE this lands, or every push to that branch goes red.
           # We only reach here when REF is set, so secret_name is set too.
-          SUPABASE_ACCESS_TOKEN="$(printenv "${{ steps.target.outputs.secret_name }}")"
+          SUPABASE_ACCESS_TOKEN="$(printenv "${{ steps.target.outputs.secret_name }}" || true)"
           export SUPABASE_ACCESS_TOKEN
           if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
             echo "${{ steps.target.outputs.secret_name }} repository secret is not set -- cannot deploy edge functions." >&2
