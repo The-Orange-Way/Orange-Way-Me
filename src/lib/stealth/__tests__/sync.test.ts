@@ -13,6 +13,7 @@ import {
   buildStealthWidgetUrl,
   buildStealthSyncInit,
   startStealthSync,
+  describeStealthProgress,
   STEALTH_WIDGET_PATH,
 } from "../sync";
 import { STEALTH_MESSAGE } from "../protocol";
@@ -112,15 +113,100 @@ describe("startStealthSync", () => {
     expect(captured.url).not.toContain(ARGS.widgetToken);
   });
 
-  it("reports progress from the widget's own frames", async () => {
+  /**
+   * DL-1111. This test used to emit `scanned_blocks` / `total_blocks` and
+   * assert they came back, and it passed for as long as the feature was
+   * broken. Those two names were never on the wire. The frame recorded from a
+   * real scan on deployed dev carries exactly:
+   *
+   *     type, stage, percent, message, detail
+   *
+   * so the old test was asserting that the parser could echo back a field the
+   * widget has never sent, which every parser can. The lesson is worth keeping
+   * next to the fix: a contract test written from an assumed contract tests
+   * nothing at all. The payload below is the observed shape.
+   */
+  it("reports progress using the fields the widget actually sends", async () => {
     const { launch, emit } = makeLaunch();
     const onProgress = vi.fn();
     await startStealthSync({ ...ARGS, launch, onProgress });
 
+    emit({
+      type: STEALTH_MESSAGE.PROGRESS,
+      stage: "filters",
+      percent: 16,
+      message: "Downloading public filter files",
+      detail: "8,147 of 52,487 read, 224 files/sec, about 3 min left",
+    });
+
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "filters",
+        percent: 16,
+        message: "Downloading public filter files",
+        detail: "8,147 of 52,487 read, 224 files/sec, about 3 min left",
+      }),
+    );
+  });
+
+  it("still carries the legacy counters if a frame ever sends them", async () => {
+    const { launch, emit } = makeLaunch();
+    const onProgress = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onProgress });
+
+    // Kept deliberately: the counters are unobserved, not disproven, and
+    // dropping them would silently discard a future widget's richer frame.
     emit({ type: STEALTH_MESSAGE.PROGRESS, scanned_blocks: 10, total_blocks: 100 });
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ scanned_blocks: 10, total_blocks: 100 }),
     );
+  });
+
+  it("clamps a percent outside 0 to 100 instead of dropping it", async () => {
+    const { launch, emit } = makeLaunch();
+    const onProgress = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onProgress });
+
+    // A bar painted at 140% escapes its own track. The scan is plainly alive,
+    // so bound the number rather than hiding the progress line.
+    emit({ type: STEALTH_MESSAGE.PROGRESS, percent: 140 });
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ percent: 100 }));
+
+    emit({ type: STEALTH_MESSAGE.PROGRESS, percent: -3 });
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ percent: 0 }));
+
+    emit({ type: STEALTH_MESSAGE.PROGRESS, percent: Number.NaN });
+    expect(onProgress).toHaveBeenLastCalledWith(expect.objectContaining({ percent: undefined }));
+  });
+
+  describe("describeStealthProgress", () => {
+    it("says the first scan is slow when no frame has arrived yet", () => {
+      // The gap this fills: minutes of silence before the widget's first
+      // frame, during which the row otherwise reads as a dead button.
+      const line = describeStealthProgress(null);
+      expect(line.headline).toMatch(/first scan/i);
+      expect(line.percent).toBeUndefined();
+    });
+
+    it("passes the widget's own sentence through unedited", () => {
+      const line = describeStealthProgress({
+        stage: "filters",
+        percent: 16,
+        message: "Downloading public filter files",
+        detail: "8,147 of 52,487 read",
+      });
+      expect(line.headline).toBe("Downloading public filter files");
+      expect(line.detail).toBe("8,147 of 52,487 read");
+      expect(line.percent).toBe(16);
+    });
+
+    it("falls back to the stage name when the widget sent no sentence", () => {
+      expect(describeStealthProgress({ stage: "matching" }).headline).toContain("matching");
+    });
+
+    it("never renders an empty line, even from an empty frame", () => {
+      expect(describeStealthProgress({}).headline.length).toBeGreaterThan(0);
+    });
   });
 
   it("reports completion with the counts the widget sent", async () => {

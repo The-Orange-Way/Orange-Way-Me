@@ -48,8 +48,42 @@ export const STEALTH_WIDGET_PATH = "/stealth";
  * Progress as the widget reports it. Every field is optional because the
  * widget owns this shape and a missing counter must not break the UI: a
  * progress frame we cannot read is still evidence the scan is alive.
+ *
+ * THE FIELD NAMES BELOW WERE WRONG, and this is worth reading before touching
+ * them. The four legacy counters were written from an assumed contract and no
+ * frame has ever carried them. Recorded from a real scan on deployed dev,
+ * listening on the parent window for every inbound message:
+ *
+ *     OR_STEALTH_PROGRESS       keys: type, stage, percent, message, detail
+ *     OR_STEALTH_SYNC_COMPLETE  keys: type, connection_id, sealed_transactions,
+ *                                     last_block_scanned, tx_count,
+ *                                     bytes_downloaded, duration_seconds,
+ *                                     address_window_exhausted,
+ *                                     cursor_update_failed
+ *
+ * Sixteen PROGRESS frames arrived in a ten-second repeat sync, and this module
+ * turned every one of them into an object whose four properties were all
+ * undefined. The completion path was checked against the real contract when it
+ * was written and is correct; the progress path never was. The file header
+ * says a silent drift in one field name is the failure mode this whole ticket
+ * was, and it drifted anyway, because the unit test asserted the same invented
+ * names the code read.
+ *
+ * The legacy counters are kept, not deleted. They cost nothing, and if the
+ * widget ever does send a block count this starts reporting it with no change
+ * here. What must not happen again is a name being added from a type
+ * definition rather than from an observed frame.
  */
 export interface StealthSyncProgress {
+  /** Coarse phase, e.g. the widget's own stage identifier. Free-form. */
+  stage?: string;
+  /** 0 to 100 when the widget knows, absent when it does not. */
+  percent?: number;
+  /** The widget's own sentence. Displayed as-is; never rewritten. */
+  message?: string;
+  /** The widget's own second line, e.g. counts and a rate. */
+  detail?: string;
+  /** Legacy counters. Never observed on the wire. See the block above. */
   scanned_blocks?: number;
   total_blocks?: number;
   current_height?: number;
@@ -123,6 +157,55 @@ export function buildStealthSyncInit(args: {
   };
 }
 
+/** What the connection row should show while a stealth scan is running. */
+export interface StealthProgressLine {
+  /** One short sentence. Always present, so the row is never blank. */
+  headline: string;
+  /** The widget's second line, when it sent one. */
+  detail?: string;
+  /** 0 to 100 for a bar, or undefined for an indeterminate spinner. */
+  percent?: number;
+}
+
+/**
+ * Turn a progress frame into the line the connection row shows.
+ *
+ * Pure and exported so both the "widget told us something" and the "widget has
+ * told us nothing yet" branches are testable without a browser.
+ *
+ * WHY THIS EXISTS AT ALL. The row used to render the single word "Syncing" for
+ * the entire scan. A first sync downloads tens of thousands of filter files and
+ * takes minutes; every later one takes seconds. All the reassuring detail was
+ * inside a popup, so a user watching the app saw a spinner that never moved,
+ * and the honest conclusion from that is "this is broken". That is how
+ * DL-1111 came to be filed as "Sync does nothing" when the scan was running
+ * perfectly the whole time.
+ *
+ * The widget's own words are passed through unedited. We do not have a better
+ * description of what it is doing than it does, and paraphrasing a live
+ * progress string is how a UI ends up claiming a stage that already finished.
+ */
+export function describeStealthProgress(
+  progress?: StealthSyncProgress | null,
+): StealthProgressLine {
+  // Nothing has arrived yet. Say the two things the user cannot see for
+  // themselves: where the work is happening, and that slow is expected here.
+  if (!progress) {
+    return { headline: "Scanning. The first scan for a wallet can take a few minutes." };
+  }
+
+  const headline =
+    progress.message ??
+    // No sentence, but a stage name is still better than silence.
+    (progress.stage ? `Scanning: ${progress.stage}` : "Scanning.");
+
+  return {
+    headline,
+    detail: progress.detail,
+    percent: progress.percent,
+  };
+}
+
 export interface StealthSyncHandle {
   /** The live transport. The caller stops it when the flow ends. */
   channel: StealthChannel;
@@ -167,6 +250,12 @@ export async function startStealthSync(args: {
       switch (message.type) {
         case STEALTH_MESSAGE.PROGRESS:
           args.onProgress?.({
+            // The four the widget actually sends.
+            stage: stringOrUndefined(message.stage),
+            percent: percentOrUndefined(message.percent),
+            message: stringOrUndefined(message.message),
+            detail: stringOrUndefined(message.detail),
+            // The four it does not, kept so a future frame is not dropped.
             scanned_blocks: numberOrUndefined(message.scanned_blocks),
             total_blocks: numberOrUndefined(message.total_blocks),
             current_height: numberOrUndefined(message.current_height),
@@ -211,4 +300,18 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A percentage, or undefined.
+ *
+ * Clamped rather than trusted. This number drives a progress bar's width, and
+ * a widget that sends 140 or -3 during a retry would otherwise paint a bar
+ * outside its own track. Out-of-range is treated as a real reading that needs
+ * bounding, not as a malformed frame, because the scan is plainly alive either
+ * way and hiding the bar would be the worse answer.
+ */
+function percentOrUndefined(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(100, Math.max(0, value));
 }
