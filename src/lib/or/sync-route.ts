@@ -29,10 +29,7 @@ export interface SyncRouteCandidate {
 
 export type SyncRoute = "bank" | "stealth" | "orSync";
 
-export function resolveSyncRoute(
-  conn: SyncRouteCandidate,
-  stealthSyncEnabled: boolean,
-): SyncRoute {
+export function resolveSyncRoute(conn: SyncRouteCandidate, stealthSyncEnabled: boolean): SyncRoute {
   if (conn.provider_type === "quiltt") return "bank";
   if (stealthSyncEnabled && conn.is_stealth === true) return "stealth";
   return "orSync";
