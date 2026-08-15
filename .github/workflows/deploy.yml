@@ -136,7 +136,16 @@ jobs:
           # configured for the env yet; the SPA renders no widget and
           # submits without a token. Supabase Auth must also be
           # configured to skip captcha verification in that case.
-          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || vars.TURNSTILE_SITE_KEY_DEV }}
+          #
+          # Dev uses Cloudflare's published always-passes TEST sitekey
+          # (1x00000000000000000000AA) instead of a repository variable.
+          # It is a public documented value, not a secret. The widget it
+          # renders issues a token with no challenge, which is what lets
+          # an automated sign-in run on dev at all. The dev Auth project
+          # must carry the matching always-passes secret
+          # (1x0000000000000000000000000000000AA) or the server rejects
+          # the test token. Prod is unchanged and keeps its real key.
+          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || '1x00000000000000000000AA' }}
           # Release identifier -- paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
