@@ -63,7 +63,11 @@ import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBr
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { buildDeletePlan } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { startStealthSync } from "@/lib/stealth/sync";
+import {
+  startStealthSync,
+  describeStealthProgress,
+  type StealthSyncProgress,
+} from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
@@ -247,6 +251,17 @@ export function ConnectionsPage() {
   const [destPicker, setDestPicker] = useState<DestState>({ kind: "closed" });
   const [editMapping, setEditMapping] = useState<DestState>({ kind: "closed" });
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  /**
+   * DL-1111. The latest progress frame from the stealth widget, for whichever
+   * connection `syncingId` names. Only one stealth scan runs at a time (the
+   * transport keeps a single channel in `channelRef`), so a single slot is
+   * enough and a map would imply a concurrency we do not have.
+   *
+   * Held here rather than in the card because the card unmounts and remounts
+   * on every `refreshList`, and progress that resets to nothing each time the
+   * list refreshes is worse than no progress at all.
+   */
+  const [stealthProgress, setStealthProgress] = useState<StealthSyncProgress | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [expandedConnId, setExpandedConnId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConnectionRow | null>(null);
@@ -551,6 +566,10 @@ export function ConnectionsPage() {
       return;
     }
     setSyncingId(conn.id);
+    // Clear any line left over from the previous scan before this one starts.
+    // Showing the last run's "97%" while a fresh scan is at zero is a lie the
+    // user has no way to detect.
+    setStealthProgress(null);
     try {
       // Read the key immediately before use, like handleAddConnection does, so
       // a vault that locked while this page sat open fails here rather than
@@ -563,10 +582,24 @@ export function ConnectionsPage() {
         appUserId: user.id,
         credKeyB64,
         widgetToken,
+        /**
+         * DL-1111. The widget posts roughly one of these per second for the
+         * whole scan, and until now nobody passed this callback, so all of it
+         * was thrown away and the row said "Syncing" and nothing else for the
+         * several minutes a first scan takes. Mirror the widget's own words
+         * into the row the user is actually looking at.
+         *
+         * Deliberately not throttled. Each frame is a cheap state write on a
+         * page that is otherwise idle while the scan runs, and a throttle
+         * would make the last frame before completion arrive after the row is
+         * already gone.
+         */
+        onProgress: (progress) => setStealthProgress(progress),
         onComplete: (outcome) => {
           channelRef.current?.stop();
           channelRef.current = null;
           setSyncingId(null);
+          setStealthProgress(null);
           const found = outcome.txCount;
           // Report the count when the widget gave one. When it did not, say
           // that the scan finished and nothing more: inventing "up to date"
@@ -597,6 +630,7 @@ export function ConnectionsPage() {
           channelRef.current?.stop();
           channelRef.current = null;
           setSyncingId(null);
+          setStealthProgress(null);
           toast.error(message);
         },
       });
@@ -605,6 +639,7 @@ export function ConnectionsPage() {
       // Popup blocked, widget never ready, closed before load, or the token
       // mint failed. All of these mean no scan was started, so say so.
       setSyncingId(null);
+      setStealthProgress(null);
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
       toast.error(humanizeError(new Error(msg)));
@@ -1199,6 +1234,7 @@ export function ConnectionsPage() {
               conn={c}
               derivedInstitution={institutionByConn.get(c.id) ?? null}
               syncing={syncingId === c.id}
+              syncProgress={syncingId === c.id ? stealthProgress : null}
               expanded={expandedConnId === c.id}
               onToggleExpand={() => setExpandedConnId((prev) => (prev === c.id ? null : c.id))}
               onSync={() => handleSync(c)}
@@ -1356,6 +1392,7 @@ function ConnectionCard({
   conn,
   derivedInstitution,
   syncing,
+  syncProgress,
   expanded,
   onToggleExpand,
   onSync,
@@ -1373,6 +1410,10 @@ function ConnectionCard({
    *  when conn.decrypted_label is empty (e.g. Quiltt bank connections). */
   derivedInstitution: string | null;
   syncing: boolean;
+  /** Latest stealth-widget progress frame, or null when this card is not the
+   *  one syncing or the widget has not spoken yet. Only private (stealth)
+   *  connections ever get one; bank and or-sync paths leave this null. */
+  syncProgress: StealthSyncProgress | null;
   expanded: boolean;
   onToggleExpand: () => void;
   onSync: () => void;
@@ -1488,6 +1529,42 @@ function ConnectionCard({
               <div className="mt-1 flex items-start gap-1 truncate text-xs text-destructive">
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                 <span>{humanizeError(conn.decrypted_last_error)}</span>
+              </div>
+            )}
+            {/* DL-1111. Live scan progress, in the widget's own words.
+                Stealth only: no other sync path posts progress frames, so for
+                a bank or an or-sync connection this would render a permanent
+                "Scanning" line that never advances and never resolves.
+                aria-live so a screen reader hears the scan move rather than
+                being told "Syncing" once and then left in silence. */}
+            {syncing && conn.is_stealth && (
+              <div className="mt-1.5" aria-live="polite">
+                {(() => {
+                  const line = describeStealthProgress(syncProgress);
+                  return (
+                    <>
+                      <div className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+                        <span className="min-w-0 flex-1 truncate">{line.headline}</span>
+                        {line.percent !== undefined && (
+                          <span className="shrink-0 tabular-nums">{Math.round(line.percent)}%</span>
+                        )}
+                      </div>
+                      {line.detail && (
+                        <div className="truncate text-xs text-muted-foreground/80">
+                          {line.detail}
+                        </div>
+                      )}
+                      {line.percent !== undefined && (
+                        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${line.percent}%` }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>
