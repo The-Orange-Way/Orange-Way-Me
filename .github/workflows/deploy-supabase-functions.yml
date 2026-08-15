@@ -63,13 +63,19 @@ jobs:
             exit 1
           fi
           REF="${{ steps.target.outputs.ref }}"
-          # Unlike the token gate above, this skip is legitimate: workflow_dispatch
-          # can run this on any branch, and a manual run off dev/prod has no target
-          # ref by design. A push only ever hits dev or prod (see on:), so REF is
-          # always set on the automatic path.
+          # An empty REF means no project is mapped for this branch. Whether that
+          # is fine depends on HOW the run started (DL-1082, CTO ruling on #262):
+          # a manual workflow_dispatch off dev/prod legitimately has no target and
+          # skips; a push to dev or prod with no mapping means the deploy did not
+          # happen while the job goes green, the silent-success shape that produced
+          # DL-1079. That case must go RED.
           if [ -z "$REF" ]; then
-            echo "No project ref for ${{ github.ref_name }} -- skipping (manual run off dev/prod)."
-            exit 0
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "No project ref for ${{ github.ref_name }} -- no deploy was performed (manual run off dev/prod)." >&2
+              exit 0
+            fi
+            echo "No project ref for ${{ github.ref_name }} on a ${{ github.event_name }} event -- deploy did not happen. Failing loudly." >&2
+            exit 1
           fi
           # Deploys every function under supabase/functions, honouring the
           # per-function verify_jwt settings in supabase/config.toml. Source
