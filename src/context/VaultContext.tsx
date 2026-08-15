@@ -42,6 +42,7 @@ import {
   deriveOrMekBytes,
   deriveOrOpkSeedFromMek,
   deriveOrTxnsKeyFromMek,
+  deriveOrStealthWidgetKeyBytesFromMek,
   encryptBlob as cryptoEncryptBlob,
   encryptText as cryptoEncryptText,
   generateRecoveryCode,
@@ -278,6 +279,7 @@ interface VaultContextType {
   decryptOrTxnCipher: (ciphertext: string) => Promise<string>;
   exportOrCredsKey: () => Promise<string>;
   exportOrTxnsKey: () => Promise<string>;
+  exportOrStealthKeyB64: () => Promise<string>;
   /** Derive the OPK X25519 sealed-box keypair for the current unlock.
    *  Public half registers on OR; private half unseals synced bank txns. */
   getOpkKeypair: () => Promise<OpkKeypair>;
@@ -363,6 +365,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // opkKeypairFromSeed. Kept as the seed (not the keypair) so we don't have
   // to await libsodium at every unlock site; cleared on lock.
   const orOpkSeedRef = useRef<Uint8Array | null>(null);
+  // Raw 32 bytes of the OR stealth widget subkey (one per unlock). The connect
+  // widget's opening message takes this key as base64, which is the only shape
+  // its contract accepts today, so the platform has to hold the bytes. Same
+  // lifetime rules as the OPK seed: zeroed and nulled on lock, on sign-out and
+  // on no-user, and never written to storage or sent to any server.
+  const orStealthKeyBytesRef = useRef<Uint8Array | null>(null);
   // Phase 4.2: active household + unwrapped DEK. Populated on unlock
   // when the user has a membership row + a wrap we can open with their
   // private key. Stays null for solo users — all scope='household'
@@ -410,12 +418,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         // Zero raw key bytes before nulling refs — see lock() for rationale.
         mekBytesRef.current?.fill(0);
         orOpkSeedRef.current?.fill(0);
+        orStealthKeyBytesRef.current?.fill(0);
         mekRef.current = null;
         mekBytesRef.current = null;
         hmacRef.current = null;
         orCredsKeyRef.current = null;
         orTxnsKeyRef.current = null;
         orOpkSeedRef.current = null;
+        orStealthKeyBytesRef.current = null;
         currentHouseholdRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
@@ -467,12 +477,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         // Zero raw key bytes before nulling refs — see lock() for rationale.
         mekBytesRef.current?.fill(0);
         orOpkSeedRef.current?.fill(0);
+        orStealthKeyBytesRef.current?.fill(0);
         mekRef.current = null;
         mekBytesRef.current = null;
         hmacRef.current = null;
         orCredsKeyRef.current = null;
         orTxnsKeyRef.current = null;
         orOpkSeedRef.current = null;
+        orStealthKeyBytesRef.current = null;
         currentHouseholdRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
@@ -561,6 +573,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, kdfSalt);
     const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, kdfSalt);
     const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, kdfSalt);
+    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, kdfSalt);
 
     mekRef.current = mek;
     mekBytesRef.current = mekRawArr;
@@ -568,6 +581,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orCredsKeyRef.current = orCredsKey;
     orTxnsKeyRef.current = orTxnsKey;
     orOpkSeedRef.current = orOpkSeed;
+    orStealthKeyBytesRef.current = orStealthKeyBytes;
     kdfSaltRef.current = kdfSalt;
     setVaultKeyVersion(CURRENT_VAULT_KEY_VERSION);
 
@@ -781,6 +795,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, row.kdf_salt);
     const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, row.kdf_salt);
     const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, row.kdf_salt);
+    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, row.kdf_salt);
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -788,6 +803,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orCredsKeyRef.current = orCredsKey;
     orTxnsKeyRef.current = orTxnsKey;
     orOpkSeedRef.current = orOpkSeed;
+    orStealthKeyBytesRef.current = orStealthKeyBytes;
     kdfSaltRef.current = row.kdf_salt;
     setVaultKeyVersion(version);
     setIsUnlocked(true);
@@ -1079,6 +1095,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, newSalt);
     const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, newSalt);
     const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, newSalt);
+    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, newSalt);
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -1086,6 +1103,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orCredsKeyRef.current = orCredsKey;
     orTxnsKeyRef.current = orTxnsKey;
     orOpkSeedRef.current = orOpkSeed;
+    orStealthKeyBytesRef.current = orStealthKeyBytes;
     kdfSaltRef.current = newSalt;
     setVaultKeyVersion(CURRENT_VAULT_KEY_VERSION);
     setIsUnlocked(true);
@@ -1101,12 +1119,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // already gets below.
     mekBytesRef.current?.fill(0);
     orOpkSeedRef.current?.fill(0);
+    orStealthKeyBytesRef.current?.fill(0);
     mekRef.current = null;
     mekBytesRef.current = null;
     hmacRef.current = null;
     orCredsKeyRef.current = null;
     orTxnsKeyRef.current = null;
     orOpkSeedRef.current = null;
+    orStealthKeyBytesRef.current = null;
     currentHouseholdRef.current = null;
     // Phase 4.4: clear HSK cache + retained salt on lock.
     kdfSaltRef.current = null;
@@ -1231,6 +1251,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       console.log("[orangeway or-sync] transactionsKey fingerprint", await keyFingerprint(raw));
     }
     return arrayBufferToBase64(raw);
+  }, []);
+
+  /**
+   * The OR stealth widget subkey as base64, for the connect widget's opening
+   * message.
+   *
+   * This is raw key material leaving this module, which is why it is a named
+   * accessor rather than exposing the ref: the widget's contract accepts the
+   * wrapping key only as base64, and the value is handed to the widget's own
+   * origin over postMessage, never to a server and never over the network.
+   * It is derived from the vault MEK under its own HKDF label, so it unlocks
+   * nothing else we hold, and it exists only while the vault is unlocked.
+   *
+   * No fingerprint logging here, not even behind the DEV flag. The sibling
+   * accessors log an 8 hex character one way fingerprint to debug key
+   * mismatches; this key has no equivalent mismatch failure to chase, so the
+   * value never reaches a console surface at all.
+   */
+  const exportOrStealthKeyB64 = useCallback(async (): Promise<string> => {
+    const bytes = orStealthKeyBytesRef.current;
+    if (!bytes) throw new Error("Vault is locked");
+    return arrayBufferToBase64(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
   }, []);
 
   // OPK accessor — derives the X25519 sealed-box keypair from the current
@@ -1443,6 +1487,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         decryptOrTxnCipher,
         exportOrCredsKey,
         exportOrTxnsKey,
+        exportOrStealthKeyB64,
         getOpkKeypair,
         householdSigningKeyAvailable,
         loadHouseholdSigningKey,

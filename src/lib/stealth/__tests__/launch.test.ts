@@ -133,6 +133,38 @@ describe("launchStealthConnect", () => {
     });
   });
 
+  it("merges the caller's INIT fields and keeps ownership of the origin and version", async () => {
+    const { launchStealthConnect } = await import("../launch");
+
+    // A caller trying to move the callback origin or claim another protocol
+    // version must not win: the transport applies both last.
+    const pending = launchStealthConnect({
+      url: WIDGET_URL,
+      init: {
+        app_slug: "orangeway-me-dev",
+        app_user_id: "user-1",
+        mode: "add",
+        gap_limit: 250,
+        return_callback_origin: "https://attacker.example",
+        protocol_version: 99,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    postReady(shim.popup);
+    await pending;
+
+    expect(shim.posted).toHaveLength(1);
+    expect(shim.posted[0].message).toMatchObject({
+      type: "OR_STEALTH_INIT",
+      app_slug: "orangeway-me-dev",
+      app_user_id: "user-1",
+      mode: "add",
+      gap_limit: 250,
+      return_callback_origin: OWN_ORIGIN,
+      protocol_version: 1,
+    });
+  });
+
   it("throws when window.open returns null (popup blocked)", async () => {
     const win = (globalThis as unknown as { window: { open: ReturnType<typeof vi.fn> } }).window;
     win.open.mockReturnValueOnce(null);

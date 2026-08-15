@@ -69,6 +69,11 @@ const ALLOWED_ENDPOINTS = new Set([
   "or-provision",
   "or-connection-list",
   "or-connection-delete",
+  // Disconnect a private (stealth) connection. A separate endpoint because
+  // stealth connections live in their own store, scoped by app_user_id rather
+  // than by subaccount_id, so or-connection-delete cannot see them and answers
+  // 404 "Connection not found in this subaccount" for every one of them.
+  "or-stealth-connection-delete",
   "or-sync",
   "or-transactions-list",
   // Hosted Link widget -- OW mints a short-lived widget_token, then opens
@@ -224,6 +229,20 @@ Deno.serve(async (req: Request) => {
         ...(p.confirm_rotation === true ? { confirm_rotation: true } : {}),
         ...(typeof p.rotation_reason === "string" ? { rotation_reason: p.rotation_reason } : {}),
       };
+    } else if (endpoint === "or-stealth-connection-delete") {
+      // Private connections are scoped by app_user_id, not by subaccount_id,
+      // so the subaccount check below does not apply and would reject every
+      // one of these calls.
+      //
+      // app_user_id is forced to the authenticated user.id and never taken
+      // from the payload. OR scopes the delete by platform, connection id and
+      // app_user_id together, so forcing the owner here is the term that makes
+      // that scoping resolve to the authenticated caller.
+      const p = payload as { connection_id?: unknown };
+      if (typeof p.connection_id !== "string" || !p.connection_id) {
+        return jsonResponse({ error: "connection_id required in payload" }, 400, cors);
+      }
+      orBody = { app_user_id: user.id, connection_id: p.connection_id };
     } else {
       // For everything else, ensure subaccount_id is in the payload.
       // The browser passes it from localStorage; we additionally validate

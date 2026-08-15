@@ -9,11 +9,12 @@
  * Add-connection flow (post-migration to the hosted widget):
  *   1. On first mount after unlock: call or-provision → cache
  *      subaccount_id in localStorage under `or_subaccount_id_for_user_<id>`.
- *   2. Add connection: derive cred_key + txn_key from the vault MEK,
- *      open OR's hosted /connect widget (openOrConnect). The widget
- *      owns provider picking, credential entry, discovery, and
- *      source-wallet selection. It posts back the new connection_id
- *      plus the picked source_wallets via postMessage.
+ *   2. Add a Bitcoin source: open the hosted /connect route with no
+ *      provider named (openOrConnect), so its searchable source list
+ *      appears and the user finds their own source among the full
+ *      catalogue. The hosted side owns provider picking, credential
+ *      entry, discovery and Stealth Sync, and reports back over
+ *      postMessage. Bank connections keep their own dialog and route.
  *   3. Map destinations: present DestinationPickerDialog → encrypt
  *      each Personal account.id with the user vault MEK → write to
  *      connection_account_map.
@@ -59,7 +60,17 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { describeLinkResult } from "@/lib/or/link-result";
+import { buildDeletePlan } from "@/lib/or/connection-delete";
+import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import {
+  startStealthSync,
+  describeStealthProgress,
+  type StealthSyncProgress,
+} from "@/lib/stealth/sync";
+import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
@@ -107,6 +118,14 @@ interface ConnectionRow {
   last_sync_at: string | null;
   encrypted_last_error: string | null;
   source_wallets?: RawSourceWallet[];
+  // Set by or-connection-list on rows that come from the stealth store rather
+  // than the `connections` table. Optional because a response predating the
+  // union omits it, and an absent flag must read as "not stealth" rather than
+  // throw. These rows are scanned by the OR widget, not by `or-sync`, so the
+  // flag is what routes Sync. `source_wallets` is always [] on them: the
+  // stealth store has no equivalent table, so anything gated on wallets being
+  // present is structurally false here and must branch on this instead.
+  is_stealth?: boolean;
   // Decrypted client-side after fetch.
   decrypted_label?: string | null;
   decrypted_last_error?: string | null;
@@ -214,6 +233,15 @@ export function ConnectionsPage() {
   // If OR rejects even a freshly provisioned id, clearing and re-provisioning
   // again would loop against OR for as long as the page stays open.
   const recoveredStaleSubaccountRef = useRef(false);
+  // Ids confirmed deleted in this session. Used in handleDeleteConfirmed
+  // to distinguish a 404 on a previously-confirmed delete (treat as success)
+  // from an unexpected 404 where the row may still exist server-side.
+  const deletedConnectionIdsRef = useRef<Set<string>>(new Set());
+  // The live stealth transport, when a scan is running. Held in a ref rather
+  // than state because nothing renders from it and it must be stoppable from
+  // the widget's own callbacks. Stopped on unmount so its window message
+  // listener can never outlive this page.
+  const channelRef = useRef<StealthChannel | null>(null);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -221,9 +249,32 @@ export function ConnectionsPage() {
   const [opkRegistered, setOpkRegistered] = useState(false);
   const [opkRetryNonce, setOpkRetryNonce] = useState(0);
   const [opening, setOpening] = useState(false);
+  // Connection to ring and scroll to after the connect widget closes. The
+  // "you already have this" case has nothing new to show, so without this the
+  // toast points at a row the user then has to hunt for themselves.
+  const [highlightedConnId, setHighlightedConnId] = useState<string | null>(null);
+
+  // The ring is an answer to a question the user just asked, not permanent
+  // furniture. Drop it once it has been seen.
+  useEffect(() => {
+    if (!highlightedConnId) return;
+    const t = setTimeout(() => setHighlightedConnId(null), 6000);
+    return () => clearTimeout(t);
+  }, [highlightedConnId]);
   const [destPicker, setDestPicker] = useState<DestState>({ kind: "closed" });
   const [editMapping, setEditMapping] = useState<DestState>({ kind: "closed" });
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  /**
+   * DL-1111. The latest progress frame from the stealth widget, for whichever
+   * connection `syncingId` names. Only one stealth scan runs at a time (the
+   * transport keeps a single channel in `channelRef`), so a single slot is
+   * enough and a map would imply a concurrency we do not have.
+   *
+   * Held here rather than in the card because the card unmounts and remounts
+   * on every `refreshList`, and progress that resets to nothing each time the
+   * list refreshes is worse than no progress at all.
+   */
+  const [stealthProgress, setStealthProgress] = useState<StealthSyncProgress | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [expandedConnId, setExpandedConnId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConnectionRow | null>(null);
@@ -231,6 +282,16 @@ export function ConnectionsPage() {
   // The OR connection id the bank-sync dialog should pull. null = closed.
   const [bankSyncConnId, setBankSyncConnId] = useState<string | null>(null);
   const [txRefreshKey, setTxRefreshKey] = useState(0);
+
+  // Stop any live stealth transport when this page goes away. The channel adds
+  // a window message listener, so leaving it running would keep handling frames
+  // from a popup belonging to a page the user has already navigated off.
+  useEffect(() => {
+    return () => {
+      channelRef.current?.stop();
+      channelRef.current = null;
+    };
+  }, []);
 
   // Resolve cached subaccount on mount / when user changes.
   useEffect(() => {
@@ -352,7 +413,7 @@ export function ConnectionsPage() {
                 id: w.id,
                 external_wallet_id: w.external_wallet_id,
                 is_synced: w.is_synced,
-                currency: "—",
+                currency: "",
                 label: null,
               });
             }
@@ -362,6 +423,10 @@ export function ConnectionsPage() {
         }),
       );
       setConnections(decoded);
+      // Returned so a caller that just created something can check whether it
+      // is actually in the list, rather than assuming the refresh it awaited
+      // means the row arrived. Every existing caller ignores this.
+      return decoded;
     } catch (err) {
       // An id OR does not recognise is recoverable, so fix it rather than
       // report it. Dropping subaccountId re-runs the provision effect, which
@@ -386,16 +451,30 @@ export function ConnectionsPage() {
     void refreshList();
   }, [refreshList]);
 
-  // ─── Add-connection: hand off to OR's hosted widget ──────────────────
+  // ─── Add-connection: open the searchable source list ─────────────────
 
   /**
-   * Hand off to OR's hosted /connect widget. The widget owns the provider
-   * picker, credential form, discovery, and source-wallet picker; we just
-   * give it the locking keys (cred_key, txn_key) so the credential
-   * ciphertext OR stores stays decryptable only by this vault. On success
-   * it posts back the new connection_id plus the picked source_wallets —
-   * we refresh the list and open the OW-side destination picker so the
-   * user can route those wallets to their local chart of accounts.
+   * Open the connect provider's searchable source list.
+   *
+   * This button exists to let someone find THEIR source among the hundred or
+   * so we support (exchanges, Lightning services, Bitcoin wallets, xpub).
+   * Only the provider's hosted list has that catalogue and its search box, so
+   * we open it and let the user pick, exactly as this button did before.
+   *
+   * Omitting `provider` is what makes the list appear. Naming one skips the
+   * list and jumps straight into a single source, which is what this button
+   * was briefly changed to do: that removed the catalogue, so anyone whose
+   * source was not the one hard-coded had no route in at all.
+   *
+   * Picking xpub or Sparrow from the list opens Stealth Sync on the
+   * provider's side. We do not drive that handshake from here; our part ends
+   * when the list posts the completed connection back to us.
+   *
+   * The two vault keys travel in the URL fragment, which is never sent to a
+   * server. They lock the stored credential and the per-wallet metadata, so
+   * the connect provider holds ciphertext and we hold the only keys that open
+   * it. Read immediately before the call so a vault that locked while this
+   * page sat open fails here rather than part-way through.
    */
   async function handleAddConnection() {
     if (!user) {
@@ -403,6 +482,12 @@ export function ConnectionsPage() {
       return;
     }
     setOpening(true);
+    // Snapshot BEFORE the widget opens. This is the whole trick: OR answers a
+    // repeated xpub with the id of the connection the user already has, so the
+    // only way to tell "new" from "you already had this" is to know what was on
+    // screen a moment ago. Captured here rather than after the await, because
+    // by then the refresh has already folded the two cases together.
+    const knownConnectionIdsBefore = connections.map((c) => c.id);
     try {
       const credKeyB64 = await exportOrCredsKey();
       const txnKeyB64 = await exportOrTxnsKey();
@@ -411,9 +496,39 @@ export function ConnectionsPage() {
         credKeyB64,
         txnKeyB64,
       });
-      toast.success("Connection added. Credentials stored as ciphertext only.");
-
-      await refreshList();
+      // The widget posting a connection_id is evidence the connection was
+      // created. It is NOT evidence that it is in this list, and those came
+      // apart in practice: the toast fired while the refresh was still in
+      // flight, so a connection that never arrived looked exactly like one
+      // that had. Refresh first, then say only what the refreshed list shows.
+      const rows = await refreshList();
+      if (!rows) {
+        // The list itself did not load, so we know the connection was created
+        // and nothing about whether it is listed. Say both halves.
+        toast.success("Connection added. We couldn't refresh the list just now.");
+      } else {
+        const report = describeLinkResult({
+          result,
+          knownConnectionIdsBefore,
+          connectionIdsAfter: rows.map((c) => c.id),
+        });
+        if (report.outcome === "unknown") {
+          // Created upstream, absent from the list. This is a real defect
+          // rather than a slow refresh, and it used to be invisible.
+          console.error("[Connections] added connection missing from list", {
+            connection_id: result.connection_id,
+            returned: rows.length,
+          });
+        }
+        const say =
+          report.toast.level === "success"
+            ? toast.success
+            : report.toast.level === "warning"
+              ? toast.warning
+              : toast.info;
+        say(report.toast.message);
+        setHighlightedConnId(report.highlightConnectionId);
+      }
 
       const syncedWallets: OrLinkSourceWallet[] = result.source_wallets ?? [];
       if (syncedWallets.length > 0) {
@@ -462,8 +577,120 @@ export function ConnectionsPage() {
 
   // ─── Sync + Delete ────────────────────────────────────────────────────
 
+  /**
+   * Scan a stealth connection by re-opening the OR widget on its sync route.
+   *
+   * The widget is the scanner. It fetches the sealed envelope by id, reads
+   * `last_block_scanned` back and resumes from it, runs the filter scan in
+   * this browser, and posts sealed transactions back to OR. Nothing on our
+   * side scans, so this opens the widget and reports what the widget says.
+   *
+   * Every outcome below is reported from something the widget actually sent.
+   * There is no success toast on the launch path: launching is not scanning,
+   * and saying otherwise is the bug this ticket exists to fix.
+   */
+  async function handleStealthSync(conn: ConnectionRow) {
+    if (!user) {
+      toast.error("Please sign in first.");
+      return;
+    }
+    setSyncingId(conn.id);
+    // Clear any line left over from the previous scan before this one starts.
+    // Showing the last run's "97%" while a fresh scan is at zero is a lie the
+    // user has no way to detect.
+    setStealthProgress(null);
+    try {
+      // Read the key immediately before use, like handleAddConnection does, so
+      // a vault that locked while this page sat open fails here rather than
+      // part-way through a scan.
+      const credKeyB64 = await exportOrCredsKey();
+      const widgetToken = await mintWidgetToken(user.id);
+
+      const { channel } = await startStealthSync({
+        connectionId: conn.id,
+        appUserId: user.id,
+        credKeyB64,
+        widgetToken,
+        /**
+         * DL-1111. The widget posts roughly one of these per second for the
+         * whole scan, and until now nobody passed this callback, so all of it
+         * was thrown away and the row said "Syncing" and nothing else for the
+         * several minutes a first scan takes. Mirror the widget's own words
+         * into the row the user is actually looking at.
+         *
+         * Deliberately not throttled. Each frame is a cheap state write on a
+         * page that is otherwise idle while the scan runs, and a throttle
+         * would make the last frame before completion arrive after the row is
+         * already gone.
+         */
+        onProgress: (progress) => setStealthProgress(progress),
+        onComplete: (outcome) => {
+          channelRef.current?.stop();
+          channelRef.current = null;
+          setSyncingId(null);
+          setStealthProgress(null);
+          const found = outcome.txCount;
+          // Report the count when the widget gave one. When it did not, say
+          // that the scan finished and nothing more: inventing "up to date"
+          // from a missing number is how we got here.
+          toast.success(
+            found === undefined
+              ? "Scan finished."
+              : found === 0
+                ? "Scan finished. No new transactions."
+                : `Scan finished. ${found} new ${found === 1 ? "transaction" : "transactions"}.`,
+          );
+          // Two honesty warnings the widget reports and this app would
+          // otherwise swallow when the popup closes. Neither makes the scan a
+          // failure, and neither may be hidden behind the success toast.
+          if (outcome.addressWindowExhausted) {
+            toast.warning(
+              "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
+            );
+          }
+          if (outcome.cursorUpdateFailed) {
+            toast.warning(
+              "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
+            );
+          }
+          void refreshList();
+        },
+        onError: (message) => {
+          channelRef.current?.stop();
+          channelRef.current = null;
+          setSyncingId(null);
+          setStealthProgress(null);
+          toast.error(message);
+        },
+      });
+      channelRef.current = channel;
+    } catch (err) {
+      // Popup blocked, widget never ready, closed before load, or the token
+      // mint failed. All of these mean no scan was started, so say so.
+      setSyncingId(null);
+      setStealthProgress(null);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Connections] stealth sync could not start", err);
+      toast.error(humanizeError(new Error(msg)));
+    }
+  }
+
+  /**
+   * DL-1086. Every one of these handlers used to `return` here with no word to
+   * anyone: press Sync, press Sync all, confirm Disconnect, and the button
+   * just does nothing. `subaccountId` comes from or-provision on mount, so a
+   * missing one means provisioning has not finished or did not succeed, which
+   * is recoverable and worth saying. A user-initiated action that declines to
+   * act has to say so, or it reads as a dead button.
+   */
+  function requireSubaccount(): string | null {
+    if (subaccountId) return subaccountId;
+    toast.error("Your connection area is still being set up. Give it a moment, then reload.");
+    return null;
+  }
+
   async function handleSync(conn: ConnectionRow) {
-    if (!subaccountId) return;
+    if (!requireSubaccount()) return;
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
@@ -472,6 +699,23 @@ export function ConnectionsPage() {
     // Bitcoin sources (Blink/Strike/etc.) only.
     if (conn.provider_type === "quiltt") {
       setBankSyncConnId(conn.id);
+      return;
+    }
+
+    // Stealth connections are scanned by the OR widget in this browser, never
+    // by or-sync: they live in the stealth store, and or-sync selects from the
+    // `connections` table, so it matches nothing and honestly returns
+    // { synced: 0 }. Routing them below would ask a function that cannot see
+    // this row whether this row is up to date. Same shape as the quiltt branch
+    // above: a provider whose sync lives somewhere else gets sent there.
+    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is this
+    // app's own kill switch (default off). While it is off, a stealth
+    // connection does NOT open the OR widget and falls through to the or-sync
+    // no-op path below, exactly as before this entry existed. Flipping it on
+    // is a separate one-line PR gated on the OR-side sync mode confirmed live
+    // plus a wire observation of is_stealth.
+    if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
+      await handleStealthSync(conn);
       return;
     }
 
@@ -488,6 +732,20 @@ export function ConnectionsPage() {
         synced: number;
         connections: Array<{ connection_id: string; synced: number; error?: string }>;
       };
+
+      // DL-1051: a status toast must be driven by positive evidence that this
+      // connection was actually processed. or-sync only returns an entry for a
+      // connection it attempted; if the id we requested is absent, the
+      // connection was never touched (for example a stealth connection with no
+      // resumable scan). Absence is the whole signal: do not infer stealth on
+      // the client, and do not claim "up to date" for work that never ran.
+      const attempted = res.connections.find((c) => c.connection_id === conn.id);
+      if (!attempted) {
+        toast.info("Nothing was synced for this connection yet.");
+        await refreshList();
+        setTxRefreshKey((k) => k + 1);
+        return;
+      }
 
       const errs = res.connections.filter((c) => c.error);
       if (errs.length > 0) {
@@ -544,55 +802,79 @@ export function ConnectionsPage() {
   }
 
   async function handleSyncAll() {
-    if (!subaccountId) return;
-    if (connections.length === 0) return;
+    if (!requireSubaccount()) return;
+    // DL-1086. The button only renders above one connection, so an empty list
+    // means the list emptied between the render and the click, most likely a
+    // delete landing. Rare, but "nothing happened" is the worst possible
+    // answer to a press, so say which of the two it was.
+    if (connections.length === 0) {
+      toast.info("There is nothing to sync.");
+      return;
+    }
+
+    // DL-1058. Two things were wrong here and they compounded.
+    //
+    // Every id went to or-sync, private ones included. or-sync selects from
+    // the `connections` table and a private connection is not in it, so the id
+    // matched nothing and came back as no entry at all. The reporting then
+    // looked only at the total and at entries carrying an error, and an absent
+    // entry is neither, so it fell through to "no new transactions across any
+    // wallet". A user whose only connection was private pressed Sync all and
+    // was told they were up to date while nothing had run.
+    //
+    // planSyncAll holds the private ones back, reportSyncAll measures what came
+    // back against what was asked for, and both are tested.
+    const plan = planSyncAll(connections);
+
     setSyncingAll(true);
     try {
-      const credentials_key = await exportOrCredsKey();
-      const transactions_key = await exportOrTxnsKey();
-      const res = (await callProxy("or-sync", {
-        subaccount_id: subaccountId,
-        connection_ids: connections.map((c) => c.id),
-        credentials_key,
-        transactions_key,
-      })) as {
-        synced: number;
-        connections: Array<{ connection_id: string; synced: number; error?: string }>;
-      };
+      let synced = 0;
+      let returned: SyncAllResultEntry[] = [];
 
-      const errs = res.connections.filter((c) => c.error);
-      const okCount = res.connections.filter((c) => !c.error).length;
-      if (errs.length === 0) {
-        if (res.synced === 0) {
-          toast.info("Sync all: no new transactions across any wallet.");
-        } else {
-          toast.success(
-            `Sync all: ${res.synced} transaction${res.synced === 1 ? "" : "s"} across ${okCount} wallet${okCount === 1 ? "" : "s"}.`,
-          );
-        }
-      } else {
-        const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
-        const suffix =
-          errs.length > 1
-            ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
-            : "";
-        if (res.synced > 0) {
-          toast.warning(
-            `Synced ${res.synced} across ${okCount} wallet${okCount === 1 ? "" : "s"}; ${errs.length} had trouble: ${firstMsg}${suffix}`,
-          );
-        } else {
-          toast.error(
-            `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
-          );
-        }
+      // Skip the round trip entirely when nothing is syncable, rather than
+      // asking or-sync about an empty list and interpreting its answer.
+      if (plan.syncableIds.length > 0) {
+        const credentials_key = await exportOrCredsKey();
+        const transactions_key = await exportOrTxnsKey();
+        const res = (await callProxy("or-sync", {
+          subaccount_id: subaccountId,
+          connection_ids: plan.syncableIds,
+          credentials_key,
+          transactions_key,
+        })) as { synced: number; connections: SyncAllResultEntry[] };
+        synced = res.synced;
+        returned = res.connections;
+      }
+
+      const errs = returned.filter((c) => c.error);
+      const report = reportSyncAll({
+        requestedIds: plan.syncableIds,
+        returned,
+        synced,
+        skippedPrivateCount: plan.skippedPrivateIds.length,
+        stealthSyncEnabled: STEALTH_SYNC_ENABLED,
+        firstErrorMessage:
+          errs.length > 0
+            ? humanizeError(errs[0]?.error ?? "", "Something went wrong.")
+            : undefined,
+      });
+      for (const t of report.toasts) toast[t.level](t.message);
+
+      if (errs.length > 0) {
         console.warn(
           "[Connections] sync-all partial failures",
           errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
         );
       }
+      if (report.missingIds.length > 0) {
+        // Requested and never answered for. Logged separately from errors
+        // because it is a different failure: not "it went wrong" but "it never
+        // ran", and the two need different fixes.
+        console.warn("[Connections] sync-all: requested but never attempted", report.missingIds);
+      }
 
       if (user) {
-        const succeeded = res.connections.filter((c) => !c.error && c.synced > 0);
+        const succeeded = returned.filter((c) => !c.error && c.synced > 0);
         for (const succ of succeeded) {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
@@ -775,7 +1057,11 @@ export function ConnectionsPage() {
   }
 
   async function handleDeleteConfirmed(conn: ConnectionRow) {
-    if (!subaccountId) return;
+    // Bind the value rather than re-reading `subaccountId`: the guard is a
+    // call now, so the compiler cannot narrow the outer variable for us, and
+    // a non-null assertion here would be a claim rather than a check.
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
     const name =
       conn.decrypted_label ||
       institutionByConn.get(conn.id) ||
@@ -788,17 +1074,38 @@ export function ConnectionsPage() {
     setConnections((prev) => prev.filter((c) => c.id !== conn.id));
 
     try {
-      await callProxy("or-connection-delete", {
-        subaccount_id: subaccountId,
-        connection_id: conn.id,
+      // Private connections live in their own store, scoped by app_user_id
+      // rather than by subaccount_id, so or-connection-delete looks in a table
+      // this row is not in and honestly answers 404 "Connection not found in
+      // this subaccount" for every one of them. Same shape as the sync branch
+      // above: a provider whose store lives somewhere else gets sent there.
+      // The owner is forced to the signed-in user inside ow-or-proxy, never
+      // sent from here.
+      const plan = buildDeletePlan({
+        isStealth: conn.is_stealth,
+        connectionId: conn.id,
+        subaccountId: subaccount,
       });
+      await callProxy(plan.endpoint, plan.payload);
+      // Confirmed deleted: record the id so a follow-up 404 (double-tap,
+      // retry) is correctly treated as "already gone, not an error".
+      deletedConnectionIdsRef.current.add(conn.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // 404 / not-found means it's already gone — that's success, not error
-      // (the double-click that caused this is exactly what we're fixing).
-      if (!/not.?found|404/i.test(msg)) {
+      if (/not.?found|404/i.test(msg)) {
+        // 404 is safe to treat as success only for ids we confirmed deleted
+        // earlier in this session. Any other 404 may mean the row still
+        // exists server-side: restore it and show an error.
+        if (!deletedConnectionIdsRef.current.has(conn.id)) {
+          console.error("[Connections] delete 404 on unrecognised id", err);
+          setConnections(snapshot);
+          toast.error("Couldn't disconnect. Give it a moment and try again.");
+          return;
+        }
+        // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
+      } else {
         console.error("[Connections] delete failed", err);
-        setConnections(snapshot); // restore the row — delete genuinely failed
+        setConnections(snapshot);
         toast.error("Couldn't disconnect. Give it a moment and try again.");
         return;
       }
@@ -954,8 +1261,10 @@ export function ConnectionsPage() {
             <ConnectionCard
               key={c.id}
               conn={c}
+              highlighted={highlightedConnId === c.id}
               derivedInstitution={institutionByConn.get(c.id) ?? null}
               syncing={syncingId === c.id}
+              syncProgress={syncingId === c.id ? stealthProgress : null}
               expanded={expandedConnId === c.id}
               onToggleExpand={() => setExpandedConnId((prev) => (prev === c.id ? null : c.id))}
               onSync={() => handleSync(c)}
@@ -1111,8 +1420,10 @@ interface DestinationSummary {
 
 function ConnectionCard({
   conn,
+  highlighted,
   derivedInstitution,
   syncing,
+  syncProgress,
   expanded,
   onToggleExpand,
   onSync,
@@ -1126,10 +1437,16 @@ function ConnectionCard({
   refreshKey,
 }: {
   conn: ConnectionRow;
+  /** Ring and scroll to this card: the connect widget just pointed at it. */
+  highlighted: boolean;
   /** Institution name derived from the first linked Personal account, used
    *  when conn.decrypted_label is empty (e.g. Quiltt bank connections). */
   derivedInstitution: string | null;
   syncing: boolean;
+  /** Latest stealth-widget progress frame, or null when this card is not the
+   *  one syncing or the widget has not spoken yet. Only private (stealth)
+   *  connections ever get one; bank and or-sync paths leave this null. */
+  syncProgress: StealthSyncProgress | null;
   expanded: boolean;
   onToggleExpand: () => void;
   onSync: () => void;
@@ -1191,8 +1508,22 @@ function ConnectionCard({
     (s) => s.accountNames.length === 0,
   ).length;
 
+  // Scroll the highlighted card into view. Without this the "you already have
+  // this wallet" toast names a row that may be off screen, which is only
+  // marginally better than the silence it replaces.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!highlighted) return;
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlighted]);
+
   return (
-    <div className="rounded-lg border">
+    <div
+      ref={cardRef}
+      className={`rounded-lg border transition-shadow ${
+        highlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+      }`}
+    >
       <div className="flex items-center justify-between gap-4 p-4">
         <button
           type="button"
@@ -1245,6 +1576,42 @@ function ConnectionCard({
               <div className="mt-1 flex items-start gap-1 truncate text-xs text-destructive">
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                 <span>{humanizeError(conn.decrypted_last_error)}</span>
+              </div>
+            )}
+            {/* DL-1111. Live scan progress, in the widget's own words.
+                Stealth only: no other sync path posts progress frames, so for
+                a bank or an or-sync connection this would render a permanent
+                "Scanning" line that never advances and never resolves.
+                aria-live so a screen reader hears the scan move rather than
+                being told "Syncing" once and then left in silence. */}
+            {syncing && conn.is_stealth && (
+              <div className="mt-1.5" aria-live="polite">
+                {(() => {
+                  const line = describeStealthProgress(syncProgress);
+                  return (
+                    <>
+                      <div className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+                        <span className="min-w-0 flex-1 truncate">{line.headline}</span>
+                        {line.percent !== undefined && (
+                          <span className="shrink-0 tabular-nums">{Math.round(line.percent)}%</span>
+                        )}
+                      </div>
+                      {line.detail && (
+                        <div className="truncate text-xs text-muted-foreground/80">
+                          {line.detail}
+                        </div>
+                      )}
+                      {line.percent !== undefined && (
+                        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${line.percent}%` }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </div>

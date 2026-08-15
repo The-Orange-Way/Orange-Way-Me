@@ -189,6 +189,21 @@ jobs:
           # Flip prod on here (change the prod arm to 'true') once the OR
           # connector is live in prod.
           VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          # Stealth sync entry (DL-1047): Sync on a private connection opens
+          # the Orange Rails widget on its sync route instead of calling
+          # or-sync, which cannot see that row and honestly returns zero.
+          #
+          # Dev on, prod off. The Orange Rails sync route is verified live on
+          # dev.orangerails.com against the deployed chunk, so dev can be
+          # walked. Nobody has yet watched a scan complete end to end for a
+          # host-app user, so prod stays dark until someone has.
+          #
+          # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
+          # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
+          # empty value folds the compare to a constant false and the prod
+          # bundle never contains the widget branch. Flip prod on here (change
+          # the prod arm to 'true') once the dev walk passes.
+          VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors

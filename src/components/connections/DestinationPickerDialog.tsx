@@ -248,7 +248,8 @@ function WalletDestinationRow({
     [accounts, selectedAccountId],
   );
 
-  const sourceLabel = wallet.label?.trim() || `${wallet.currency} wallet`;
+  const sourceLabel =
+    wallet.label?.trim() || (wallet.currency ? `${wallet.currency} wallet` : "Wallet");
   const mismatch = selected ? isCurrencyMismatch(wallet.currency, selected.currency) : false;
 
   return (
@@ -261,7 +262,7 @@ function WalletDestinationRow({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{sourceLabel}</div>
         <div className="text-xs uppercase tracking-wide text-muted-foreground">
-          {wallet.currency}
+          {wallet.currency || "?"}
         </div>
         {mismatch && selected && (
           <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
