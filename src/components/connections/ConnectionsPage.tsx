@@ -611,8 +611,22 @@ export function ConnectionsPage() {
     }
   }
 
+  /**
+   * DL-1086. Every one of these handlers used to `return` here with no word to
+   * anyone: press Sync, press Sync all, confirm Disconnect, and the button
+   * just does nothing. `subaccountId` comes from or-provision on mount, so a
+   * missing one means provisioning has not finished or did not succeed, which
+   * is recoverable and worth saying. A user-initiated action that declines to
+   * act has to say so, or it reads as a dead button.
+   */
+  function requireSubaccount(): string | null {
+    if (subaccountId) return subaccountId;
+    toast.error("Your connection area is still being set up. Give it a moment, then reload.");
+    return null;
+  }
+
   async function handleSync(conn: ConnectionRow) {
-    if (!subaccountId) return;
+    if (!requireSubaccount()) return;
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
@@ -724,8 +738,15 @@ export function ConnectionsPage() {
   }
 
   async function handleSyncAll() {
-    if (!subaccountId) return;
-    if (connections.length === 0) return;
+    if (!requireSubaccount()) return;
+    // DL-1086. The button only renders above one connection, so an empty list
+    // means the list emptied between the render and the click, most likely a
+    // delete landing. Rare, but "nothing happened" is the worst possible
+    // answer to a press, so say which of the two it was.
+    if (connections.length === 0) {
+      toast.info("There is nothing to sync.");
+      return;
+    }
 
     // DL-1058. Two things were wrong here and they compounded.
     //
@@ -972,7 +993,11 @@ export function ConnectionsPage() {
   }
 
   async function handleDeleteConfirmed(conn: ConnectionRow) {
-    if (!subaccountId) return;
+    // Bind the value rather than re-reading `subaccountId`: the guard is a
+    // call now, so the compiler cannot narrow the outer variable for us, and
+    // a non-null assertion here would be a claim rather than a check.
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
     const name =
       conn.decrypted_label ||
       institutionByConn.get(conn.id) ||
@@ -995,7 +1020,7 @@ export function ConnectionsPage() {
       const plan = buildDeletePlan({
         isStealth: conn.is_stealth,
         connectionId: conn.id,
-        subaccountId,
+        subaccountId: subaccount,
       });
       await callProxy(plan.endpoint, plan.payload);
       // Confirmed deleted: record the id so a follow-up 404 (double-tap,
