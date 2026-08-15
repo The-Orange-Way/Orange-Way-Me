@@ -62,6 +62,7 @@ import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { buildDeletePlan } from "@/lib/or/connection-delete";
+import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { startStealthSync } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import type { StealthChannel } from "@/lib/stealth/channel";
@@ -725,53 +726,70 @@ export function ConnectionsPage() {
   async function handleSyncAll() {
     if (!subaccountId) return;
     if (connections.length === 0) return;
+
+    // DL-1058. Two things were wrong here and they compounded.
+    //
+    // Every id went to or-sync, private ones included. or-sync selects from
+    // the `connections` table and a private connection is not in it, so the id
+    // matched nothing and came back as no entry at all. The reporting then
+    // looked only at the total and at entries carrying an error, and an absent
+    // entry is neither, so it fell through to "no new transactions across any
+    // wallet". A user whose only connection was private pressed Sync all and
+    // was told they were up to date while nothing had run.
+    //
+    // planSyncAll holds the private ones back, reportSyncAll measures what came
+    // back against what was asked for, and both are tested.
+    const plan = planSyncAll(connections);
+
     setSyncingAll(true);
     try {
-      const credentials_key = await exportOrCredsKey();
-      const transactions_key = await exportOrTxnsKey();
-      const res = (await callProxy("or-sync", {
-        subaccount_id: subaccountId,
-        connection_ids: connections.map((c) => c.id),
-        credentials_key,
-        transactions_key,
-      })) as {
-        synced: number;
-        connections: Array<{ connection_id: string; synced: number; error?: string }>;
-      };
+      let synced = 0;
+      let returned: SyncAllResultEntry[] = [];
 
-      const errs = res.connections.filter((c) => c.error);
-      const okCount = res.connections.filter((c) => !c.error).length;
-      if (errs.length === 0) {
-        if (res.synced === 0) {
-          toast.info("Sync all: no new transactions across any wallet.");
-        } else {
-          toast.success(
-            `Sync all: ${res.synced} transaction${res.synced === 1 ? "" : "s"} across ${okCount} wallet${okCount === 1 ? "" : "s"}.`,
-          );
-        }
-      } else {
-        const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
-        const suffix =
-          errs.length > 1
-            ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
-            : "";
-        if (res.synced > 0) {
-          toast.warning(
-            `Synced ${res.synced} across ${okCount} wallet${okCount === 1 ? "" : "s"}; ${errs.length} had trouble: ${firstMsg}${suffix}`,
-          );
-        } else {
-          toast.error(
-            `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
-          );
-        }
+      // Skip the round trip entirely when nothing is syncable, rather than
+      // asking or-sync about an empty list and interpreting its answer.
+      if (plan.syncableIds.length > 0) {
+        const credentials_key = await exportOrCredsKey();
+        const transactions_key = await exportOrTxnsKey();
+        const res = (await callProxy("or-sync", {
+          subaccount_id: subaccountId,
+          connection_ids: plan.syncableIds,
+          credentials_key,
+          transactions_key,
+        })) as { synced: number; connections: SyncAllResultEntry[] };
+        synced = res.synced;
+        returned = res.connections;
+      }
+
+      const errs = returned.filter((c) => c.error);
+      const report = reportSyncAll({
+        requestedIds: plan.syncableIds,
+        returned,
+        synced,
+        skippedPrivateCount: plan.skippedPrivateIds.length,
+        stealthSyncEnabled: STEALTH_SYNC_ENABLED,
+        firstErrorMessage:
+          errs.length > 0
+            ? humanizeError(errs[0]?.error ?? "", "Something went wrong.")
+            : undefined,
+      });
+      for (const t of report.toasts) toast[t.level](t.message);
+
+      if (errs.length > 0) {
         console.warn(
           "[Connections] sync-all partial failures",
           errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
         );
       }
+      if (report.missingIds.length > 0) {
+        // Requested and never answered for. Logged separately from errors
+        // because it is a different failure: not "it went wrong" but "it never
+        // ran", and the two need different fixes.
+        console.warn("[Connections] sync-all: requested but never attempted", report.missingIds);
+      }
 
       if (user) {
-        const succeeded = res.connections.filter((c) => !c.error && c.synced > 0);
+        const succeeded = returned.filter((c) => !c.error && c.synced > 0);
         for (const succ of succeeded) {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
