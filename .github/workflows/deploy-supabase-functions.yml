@@ -52,18 +52,23 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
-          # Ship dark until the access token exists. Checking secrets.* in an
-          # if: expression fails workflow validation in 0s (see the GlitchTip
-          # step in deploy.yml), so the gate lives here in the run block, the
-          # same pattern that file uses. Until SUPABASE_ACCESS_TOKEN is set as
-          # a repo secret this step no-ops and CI stays green.
+          # A deploy step that cannot do its job must FAIL, not skip: a green
+          # run that deployed nothing is the silent-success shape (DL-1082).
+          # Checking secrets.* in an if: expression fails workflow validation
+          # in 0s (see the GlitchTip step in deploy.yml), so the gate lives
+          # here in the run block. The SUPABASE_ACCESS_TOKEN repo secret must
+          # be set BEFORE this lands, or every push to dev and prod goes red.
           if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
-            echo "SUPABASE_ACCESS_TOKEN not set -- skipping edge-function deploy."
-            exit 0
+            echo "SUPABASE_ACCESS_TOKEN repository secret is not set -- cannot deploy edge functions." >&2
+            exit 1
           fi
           REF="${{ steps.target.outputs.ref }}"
+          # Unlike the token gate above, this skip is legitimate: workflow_dispatch
+          # can run this on any branch, and a manual run off dev/prod has no target
+          # ref by design. A push only ever hits dev or prod (see on:), so REF is
+          # always set on the automatic path.
           if [ -z "$REF" ]; then
-            echo "No project ref for ${{ github.ref_name }} -- skipping."
+            echo "No project ref for ${{ github.ref_name }} -- skipping (manual run off dev/prod)."
             exit 0
           fi
           # Deploys every function under supabase/functions, honouring the
