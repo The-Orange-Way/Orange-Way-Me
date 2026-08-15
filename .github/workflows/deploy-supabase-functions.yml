@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 # Least privilege for the automatic GITHUB_TOKEN. The deploy authenticates to
-# Supabase with a branch-specific SUPABASE_ACCESS_TOKEN from secrets and writes
+# Supabase with the environment-scoped SUPABASE_ACCESS_TOKEN secret and writes
 # no GitHub state of its own, so read access to the checkout is the whole
 # requirement. Matches the Pages deploy workflow.
 permissions:
@@ -27,6 +27,11 @@ jobs:
   deploy-functions:
     name: Deploy edge functions
     runs-on: ubuntu-latest
+    # Binds to the GitHub Environment named for the branch (dev or prod). Each
+    # environment defines its OWN SUPABASE_ACCESS_TOKEN, so a dev run never has
+    # the prod credential in scope and a prod run never has dev's. That per
+    # environment isolation is why the secret is a single name here rather than
+    # one differently named secret per branch (DL-1082).
     environment: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v6
@@ -40,20 +45,16 @@ jobs:
         run: |
           if [ "${{ github.ref_name }}" = "prod" ]; then
             echo "ref=tmqjusxxjjcsdgyiqbcg" >> "$GITHUB_OUTPUT"
-            echo "secret_name=SUPABASE_ACCESS_TOKEN_PROD" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref_name }}" = "dev" ]; then
             echo "ref=bogmoovbjpvcvdqrmjgt" >> "$GITHUB_OUTPUT"
-            echo "secret_name=SUPABASE_ACCESS_TOKEN_DEV" >> "$GITHUB_OUTPUT"
           else
             echo "Unknown branch ${{ github.ref_name }} -- skipping functions deploy"
             echo "ref=" >> "$GITHUB_OUTPUT"
-            echo "secret_name=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Deploy all edge functions
         env:
-          SUPABASE_ACCESS_TOKEN_DEV: ${{ secrets.SUPABASE_ACCESS_TOKEN_DEV }}
-          SUPABASE_ACCESS_TOKEN_PROD: ${{ secrets.SUPABASE_ACCESS_TOKEN_PROD }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           # Check the ref first. An empty REF means no project is mapped for
@@ -74,15 +75,11 @@ jobs:
           fi
           # A deploy step that cannot do its job must FAIL, not skip: a green
           # run that deployed nothing is the silent-success shape (DL-1082).
-          # Checking secrets.* in an if: expression fails workflow validation
-          # in 0s (see the GlitchTip step in deploy.yml), so the gate lives
-          # here in the run block. Both branch-specific secrets must be set
-          # BEFORE this lands, or every push to that branch goes red.
-          # We only reach here when REF is set, so secret_name is set too.
-          SUPABASE_ACCESS_TOKEN="$(printenv "${{ steps.target.outputs.secret_name }}" || true)"
-          export SUPABASE_ACCESS_TOKEN
-          if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
-            echo "${{ steps.target.outputs.secret_name }} repository secret is not set -- cannot deploy edge functions." >&2
+          # SUPABASE_ACCESS_TOKEN comes from this branch's GitHub Environment
+          # and must be set there BEFORE this lands, or every push to that
+          # branch goes red.
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "SUPABASE_ACCESS_TOKEN is not set for the ${{ github.ref_name }} environment -- cannot deploy edge functions." >&2
             exit 1
           fi
           # Deploys every function under supabase/functions, honouring the
