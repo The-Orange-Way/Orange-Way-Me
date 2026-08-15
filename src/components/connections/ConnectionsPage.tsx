@@ -70,6 +70,7 @@ import {
   type StealthSyncProgress,
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import { resolveSyncRoute } from "@/lib/or/sync-route";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -692,12 +693,15 @@ export function ConnectionsPage() {
   async function handleSync(conn: ConnectionRow) {
     if (!requireSubaccount()) return;
 
+    // The per-connection routing decision lives in resolveSyncRoute (pure and
+    // tested, src/lib/or/sync-route.ts) so the DL-1047 stealth entry point is
+    // guarded by a unit test rather than by a human clicking a dev deployment.
+    const route = resolveSyncRoute(conn, STEALTH_SYNC_ENABLED);
+
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
-    // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
-    // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The old or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
-    if (conn.provider_type === "quiltt") {
+    // Bitcoin-source or-sync path. The BankSyncDialog fetches OPK-sealed rows
+    // via or-transactions-list, unseals with the vault OPK key, and imports.
+    if (route === "bank") {
       setBankSyncConnId(conn.id);
       return;
     }
@@ -705,19 +709,16 @@ export function ConnectionsPage() {
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
     // `connections` table, so it matches nothing and honestly returns
-    // { synced: 0 }. Routing them below would ask a function that cannot see
-    // this row whether this row is up to date. Same shape as the quiltt branch
-    // above: a provider whose sync lives somewhere else gets sent there.
-    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is this
-    // app's own kill switch (default off). While it is off, a stealth
-    // connection does NOT open the OR widget and falls through to the or-sync
-    // no-op path below, exactly as before this entry existed. Flipping it on
-    // is a separate one-line PR gated on the OR-side sync mode confirmed live
-    // plus a wire observation of is_stealth.
-    if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
+    // { synced: 0 }. resolveSyncRoute only returns "stealth" while this app's
+    // kill switch (STEALTH_SYNC_ENABLED, default off) is on; while it is off a
+    // stealth row falls through to the or-sync no-op path below, exactly as
+    // before this entry existed.
+    if (route === "stealth") {
       await handleStealthSync(conn);
       return;
     }
+
+    // Everything else is a Bitcoin source (Blink/Strike/etc.) synced by or-sync.
 
     setSyncingId(conn.id);
     try {
