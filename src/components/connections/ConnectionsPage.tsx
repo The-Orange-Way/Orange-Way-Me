@@ -61,6 +61,7 @@ import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { startStealthSync } from "@/lib/stealth/sync";
@@ -244,6 +245,18 @@ export function ConnectionsPage() {
   const [opkRegistered, setOpkRegistered] = useState(false);
   const [opkRetryNonce, setOpkRetryNonce] = useState(0);
   const [opening, setOpening] = useState(false);
+  // Connection to ring and scroll to after the connect widget closes. The
+  // "you already have this" case has nothing new to show, so without this the
+  // toast points at a row the user then has to hunt for themselves.
+  const [highlightedConnId, setHighlightedConnId] = useState<string | null>(null);
+
+  // The ring is an answer to a question the user just asked, not permanent
+  // furniture. Drop it once it has been seen.
+  useEffect(() => {
+    if (!highlightedConnId) return;
+    const t = setTimeout(() => setHighlightedConnId(null), 6000);
+    return () => clearTimeout(t);
+  }, [highlightedConnId]);
   const [destPicker, setDestPicker] = useState<DestState>({ kind: "closed" });
   const [editMapping, setEditMapping] = useState<DestState>({ kind: "closed" });
   const [syncingId, setSyncingId] = useState<string | null>(null);
@@ -454,6 +467,12 @@ export function ConnectionsPage() {
       return;
     }
     setOpening(true);
+    // Snapshot BEFORE the widget opens. This is the whole trick: OR answers a
+    // repeated xpub with the id of the connection the user already has, so the
+    // only way to tell "new" from "you already had this" is to know what was on
+    // screen a moment ago. Captured here rather than after the await, because
+    // by then the refresh has already folded the two cases together.
+    const knownConnectionIdsBefore = connections.map((c) => c.id);
     try {
       const credKeyB64 = await exportOrCredsKey();
       const txnKeyB64 = await exportOrTxnsKey();
@@ -472,18 +491,28 @@ export function ConnectionsPage() {
         // The list itself did not load, so we know the connection was created
         // and nothing about whether it is listed. Say both halves.
         toast.success("Connection added. We couldn't refresh the list just now.");
-      } else if (rows.some((c) => c.id === result.connection_id)) {
-        toast.success("Connection added. Credentials stored as ciphertext only.");
       } else {
-        // Created upstream, absent from the list. This is a real defect rather
-        // than a slow refresh, and it used to be invisible.
-        console.error("[Connections] added connection missing from list", {
-          connection_id: result.connection_id,
-          returned: rows.length,
+        const report = describeLinkResult({
+          result,
+          knownConnectionIdsBefore,
+          connectionIdsAfter: rows.map((c) => c.id),
         });
-        toast.warning(
-          "Connection added, but it is not showing in your list yet. Reload the page, and tell us if it still is not there.",
-        );
+        if (report.outcome === "unknown") {
+          // Created upstream, absent from the list. This is a real defect
+          // rather than a slow refresh, and it used to be invisible.
+          console.error("[Connections] added connection missing from list", {
+            connection_id: result.connection_id,
+            returned: rows.length,
+          });
+        }
+        const say =
+          report.toast.level === "success"
+            ? toast.success
+            : report.toast.level === "warning"
+              ? toast.warning
+              : toast.info;
+        say(report.toast.message);
+        setHighlightedConnId(report.highlightConnectionId);
       }
 
       const syncedWallets: OrLinkSourceWallet[] = result.source_wallets ?? [];
@@ -1197,6 +1226,7 @@ export function ConnectionsPage() {
             <ConnectionCard
               key={c.id}
               conn={c}
+              highlighted={highlightedConnId === c.id}
               derivedInstitution={institutionByConn.get(c.id) ?? null}
               syncing={syncingId === c.id}
               expanded={expandedConnId === c.id}
@@ -1354,6 +1384,7 @@ interface DestinationSummary {
 
 function ConnectionCard({
   conn,
+  highlighted,
   derivedInstitution,
   syncing,
   expanded,
@@ -1369,6 +1400,8 @@ function ConnectionCard({
   refreshKey,
 }: {
   conn: ConnectionRow;
+  /** Ring and scroll to this card: the connect widget just pointed at it. */
+  highlighted: boolean;
   /** Institution name derived from the first linked Personal account, used
    *  when conn.decrypted_label is empty (e.g. Quiltt bank connections). */
   derivedInstitution: string | null;
@@ -1434,8 +1467,22 @@ function ConnectionCard({
     (s) => s.accountNames.length === 0,
   ).length;
 
+  // Scroll the highlighted card into view. Without this the "you already have
+  // this wallet" toast names a row that may be off screen, which is only
+  // marginally better than the silence it replaces.
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!highlighted) return;
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlighted]);
+
   return (
-    <div className="rounded-lg border">
+    <div
+      ref={cardRef}
+      className={`rounded-lg border transition-shadow ${
+        highlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+      }`}
+    >
       <div className="flex items-center justify-between gap-4 p-4">
         <button
           type="button"
