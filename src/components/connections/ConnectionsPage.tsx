@@ -67,6 +67,7 @@ import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sy
 import {
   startStealthSync,
   describeStealthProgress,
+  describeStealthFailure,
   type StealthSyncProgress,
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
@@ -655,12 +656,36 @@ export function ConnectionsPage() {
           }
           void refreshList();
         },
-        onError: (message) => {
+        /**
+         * DL-1117. The widget sends `{code, message, retryable}` and this app
+         * used to read only the message, so a network blip and a wallet the
+         * widget can never scan produced the same dead-end toast. It now asks
+         * the widget whether trying again could help, and offers the retry
+         * only when the widget said yes.
+         *
+         * The retry re-enters this same function, which is safe: a scan is
+         * resumable by design, the widget reads its own cursor back and picks
+         * up from `last_block_scanned`, and `handleStealthSync` clears the
+         * stale progress line before it starts.
+         */
+        onError: (failure) => {
           channelRef.current?.stop();
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
-          toast.error(message);
+          // The code is for us, not for the user: it is the difference between
+          // a support conversation that starts with a cause and one that
+          // starts with "it said something went wrong".
+          if (failure.code) {
+            console.warn(`[Connections] stealth sync failed: ${failure.code}`);
+          }
+          const line = describeStealthFailure(failure);
+          toast.error(
+            line.message,
+            line.canRetry
+              ? { action: { label: "Try again", onClick: () => void handleStealthSync(conn) } }
+              : undefined,
+          );
         },
       });
       channelRef.current = channel;

@@ -14,6 +14,7 @@ import {
   buildStealthSyncInit,
   startStealthSync,
   describeStealthProgress,
+  describeStealthFailure,
   STEALTH_WIDGET_PATH,
 } from "../sync";
 import { STEALTH_MESSAGE } from "../protocol";
@@ -278,13 +279,59 @@ describe("startStealthSync", () => {
     });
   });
 
-  it("surfaces the widget's own error text", async () => {
+  /**
+   * WHERE THESE PAYLOADS COME FROM, because a made-up one is not evidence and
+   * that is exactly how DL-1111 stayed green while it was broken.
+   *
+   * No live OR_STEALTH_ERROR frame has been recorded: a sync has to fail to
+   * produce one, and no failure has been provoked on dev. So these are taken
+   * from the DEPLOYED widget bundle, which is the next best source and is
+   * better than the captured type contract (known stale elsewhere: it has no
+   * `widget_token`, which the deployed widget uses). Read out of
+   * dev.orangerails.com chunk `stealth-DHQQ6zju.js`, error emission sites:
+   *
+   *   {type:"OR_STEALTH_ERROR", code:"NETWORK",           message, retryable:true}
+   *   {type:"OR_STEALTH_ERROR", code:"WINDOW_EXHAUSTED",  message, retryable:false}
+   *   {type:"OR_STEALTH_ERROR", code:"INTERNAL",          message, retryable:true}
+   *   {type:"OR_STEALTH_ERROR", code:"INTERNAL",          message, retryable:false}
+   *
+   * The last two are the whole argument for reading `retryable` rather than
+   * keying a table off `code`: one code, both verdicts, same chunk.
+   */
+  it("surfaces the widget's own error text, code and retryable verdict", async () => {
     const { launch, emit } = makeLaunch();
     const onError = vi.fn();
     await startStealthSync({ ...ARGS, launch, onError });
 
-    emit({ type: STEALTH_MESSAGE.ERROR, message: "Envelope not found" });
-    expect(onError).toHaveBeenCalledWith("Envelope not found");
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "NETWORK",
+      message: "Could not reach the filter server.",
+      retryable: true,
+    });
+    expect(onError).toHaveBeenCalledWith({
+      message: "Could not reach the filter server.",
+      code: "NETWORK",
+      retryable: true,
+    });
+  });
+
+  it("carries a false retryable through as false, not as absent", async () => {
+    const { launch, emit } = makeLaunch();
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onError });
+
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "WINDOW_EXHAUSTED",
+      message: "Matches reached the edge of the address window.",
+      retryable: false,
+    });
+    expect(onError).toHaveBeenCalledWith({
+      message: "Matches reached the edge of the address window.",
+      code: "WINDOW_EXHAUSTED",
+      retryable: false,
+    });
   });
 
   it("still says something when the widget's error carries no message", async () => {
@@ -293,7 +340,31 @@ describe("startStealthSync", () => {
     await startStealthSync({ ...ARGS, launch, onError });
 
     emit({ type: STEALTH_MESSAGE.ERROR });
-    expect(onError).toHaveBeenCalledWith("The connect widget reported an error.");
+    expect(onError).toHaveBeenCalledWith({
+      message: "The connect widget reported an error.",
+      code: undefined,
+      retryable: undefined,
+    });
+  });
+
+  it("treats a non-boolean retryable as the widget not having said", async () => {
+    const { launch, emit } = makeLaunch();
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onError });
+
+    // A string "false" is truthy, and Boolean() would have turned this into a
+    // retry invitation on a failure the widget never said was transient.
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "INTERNAL",
+      message: "Something went wrong.",
+      retryable: "false",
+    } as unknown as StealthInboundMessage);
+    expect(onError).toHaveBeenCalledWith({
+      message: "Something went wrong.",
+      code: "INTERNAL",
+      retryable: undefined,
+    });
   });
 
   it("does not treat ADD_COMPLETE as a finished sync", async () => {
@@ -315,5 +386,60 @@ describe("startStealthSync", () => {
     // The whole class of bug behind this ticket is treating "the call did not
     // throw" as "the work happened". Launching is not scanning.
     expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  describe("describeStealthFailure", () => {
+    it("offers a retry when the widget said the failure is retryable", () => {
+      expect(
+        describeStealthFailure({
+          message: "Could not reach the filter server.",
+          code: "NETWORK",
+          retryable: true,
+        }),
+      ).toEqual({ message: "Could not reach the filter server.", canRetry: true });
+    });
+
+    it("withholds the retry when the widget said the failure is permanent", () => {
+      expect(
+        describeStealthFailure({
+          message: "That extended public key is not valid.",
+          code: "INVALID_XPUB",
+          retryable: false,
+        }),
+      ).toEqual({ message: "That extended public key is not valid.", canRetry: false });
+    });
+
+    it("withholds the retry when the widget did not say", () => {
+      // Safe direction, and cheap: the row's Sync button is still there, so a
+      // withheld shortcut costs one click while a wrongly offered one invites
+      // a user to press it forever on something that cannot succeed.
+      expect(describeStealthFailure({ message: "Something went wrong." })).toEqual({
+        message: "Something went wrong.",
+        canRetry: false,
+      });
+    });
+
+    it("decides from retryable and never from the code", () => {
+      // The deployed widget emits INTERNAL with BOTH verdicts, at two sites in
+      // one chunk. Any lookup table keyed on the code is therefore wrong for
+      // one of these two, and this test is what stops someone adding one.
+      const transient = describeStealthFailure({
+        message: "Something went wrong.",
+        code: "INTERNAL",
+        retryable: true,
+      });
+      const permanent = describeStealthFailure({
+        message: "Something went wrong.",
+        code: "INTERNAL",
+        retryable: false,
+      });
+      expect(transient.canRetry).toBe(true);
+      expect(permanent.canRetry).toBe(false);
+    });
+
+    it("passes the widget's sentence through unedited", () => {
+      const message = "Scan stopped at block 962,577. Try again in a moment.";
+      expect(describeStealthFailure({ message, retryable: true }).message).toBe(message);
+    });
   });
 });
