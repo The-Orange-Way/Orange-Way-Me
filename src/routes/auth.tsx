@@ -5,6 +5,9 @@ import { AuthScreen } from "@/components/app/AuthScreen";
 import { VaultGate } from "@/components/app/VaultGate";
 
 export const Route = createFileRoute("/auth")({
+  head: () => ({
+    meta: [{ title: "Sign In | Orange Way" }],
+  }),
   component: AuthRoute,
 });
 

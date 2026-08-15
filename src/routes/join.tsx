@@ -2,6 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { JoinPage } from "@/components/join/JoinPage";
 
 export const Route = createFileRoute("/join")({
+  head: () => ({
+    meta: [{ title: "Get Started | Orange Way" }],
+  }),
   validateSearch: (search: Record<string, unknown>): { code: string } => ({
     code: typeof search.code === "string" ? search.code : "",
   }),
