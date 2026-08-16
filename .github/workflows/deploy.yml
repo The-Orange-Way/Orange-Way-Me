@@ -205,19 +205,22 @@ jobs:
           # slug (orangeway-me). It never was. Do not re-derive the flip from
           # a 200.
           #
-          # What does justify the prod arm, obtained in writing 2026-08-16
-          # from the Orange Rails CTO, who owns that registry:
-          #   - orangeway-me is an active platform row, env=live, status=active.
-          #   - There is NO per-connector provisioning object in their schema
-          #     to be on or off. Their discovery endpoint authenticates by
-          #     platform_slug and 404s on an unknown slug, so an active row
-          #     for the slug IS the provisioning. Do not go looking for a
-          #     separate enablement record; it does not exist.
-          #   - Residual, stated rather than hidden: their read grant did not
-          #     cover the production project, so the prod row is confirmed
-          #     from the registry they can read. Tracked upstream as DL-1198.
-          #     If that row were absent the endpoint 404s, so this fails
-          #     closed on a visible button, not silently.
+          # What does justify the prod arm, stated as the requirements this
+          # flag rests on rather than as a description of anyone else's
+          # systems. The supporting detail is in the ticket, because this
+          # file is public:
+          #   - The prod arm rests on a written confirmation, obtained
+          #     2026-08-16 from the owner of the upstream platform registry,
+          #     that the production platform this app authenticates as is
+          #     live. Read it in the ticket before changing this line.
+          #   - The entry point fails CLOSED if that platform is not
+          #     recognised upstream: the flow stops at discovery on a
+          #     visible button rather than degrading quietly. That is why a
+          #     residual doubt about the confirmation is survivable here and
+          #     would not be survivable on a silent path.
+          #   - Do not go looking for a separate per-connector enablement
+          #     switch to turn on. There is not one to find, and the answer
+          #     to why is in the ticket.
           #
           # VITE_OR_PLATFORM_SLUG above already selects orangeway-me on prod
           # and orangeway-me-dev elsewhere, on BOTH branches, so this change
