@@ -14,7 +14,9 @@ import {
   buildStealthSyncInit,
   startStealthSync,
   describeStealthProgress,
+  describeStealthFailure,
   STEALTH_WIDGET_PATH,
+  type StealthCursorKnowledge,
 } from "../sync";
 import { STEALTH_MESSAGE } from "../protocol";
 import type { StealthInboundMessage, StealthChannel } from "../channel";
@@ -278,13 +280,59 @@ describe("startStealthSync", () => {
     });
   });
 
-  it("surfaces the widget's own error text", async () => {
+  /**
+   * WHERE THESE PAYLOADS COME FROM, because a made-up one is not evidence and
+   * that is exactly how DL-1111 stayed green while it was broken.
+   *
+   * No live OR_STEALTH_ERROR frame has been recorded: a sync has to fail to
+   * produce one, and no failure has been provoked on dev. So these are taken
+   * from the DEPLOYED widget bundle, which is the next best source and is
+   * better than the captured type contract (known stale elsewhere: it has no
+   * `widget_token`, which the deployed widget uses). Read out of
+   * dev.orangerails.com chunk `stealth-DHQQ6zju.js`, error emission sites:
+   *
+   *   {type:"OR_STEALTH_ERROR", code:"NETWORK",           message, retryable:true}
+   *   {type:"OR_STEALTH_ERROR", code:"WINDOW_EXHAUSTED",  message, retryable:false}
+   *   {type:"OR_STEALTH_ERROR", code:"INTERNAL",          message, retryable:true}
+   *   {type:"OR_STEALTH_ERROR", code:"INTERNAL",          message, retryable:false}
+   *
+   * The last two are the whole argument for reading `retryable` rather than
+   * keying a table off `code`: one code, both verdicts, same chunk.
+   */
+  it("surfaces the widget's own error text, code and retryable verdict", async () => {
     const { launch, emit } = makeLaunch();
     const onError = vi.fn();
     await startStealthSync({ ...ARGS, launch, onError });
 
-    emit({ type: STEALTH_MESSAGE.ERROR, message: "Envelope not found" });
-    expect(onError).toHaveBeenCalledWith("Envelope not found");
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "NETWORK",
+      message: "Could not reach the filter server.",
+      retryable: true,
+    });
+    expect(onError).toHaveBeenCalledWith({
+      message: "Could not reach the filter server.",
+      code: "NETWORK",
+      retryable: true,
+    });
+  });
+
+  it("carries a false retryable through as false, not as absent", async () => {
+    const { launch, emit } = makeLaunch();
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onError });
+
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "WINDOW_EXHAUSTED",
+      message: "Matches reached the edge of the address window.",
+      retryable: false,
+    });
+    expect(onError).toHaveBeenCalledWith({
+      message: "Matches reached the edge of the address window.",
+      code: "WINDOW_EXHAUSTED",
+      retryable: false,
+    });
   });
 
   it("still says something when the widget's error carries no message", async () => {
@@ -293,7 +341,31 @@ describe("startStealthSync", () => {
     await startStealthSync({ ...ARGS, launch, onError });
 
     emit({ type: STEALTH_MESSAGE.ERROR });
-    expect(onError).toHaveBeenCalledWith("The connect widget reported an error.");
+    expect(onError).toHaveBeenCalledWith({
+      message: "The connect widget reported an error.",
+      code: undefined,
+      retryable: undefined,
+    });
+  });
+
+  it("treats a non-boolean retryable as the widget not having said", async () => {
+    const { launch, emit } = makeLaunch();
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onError });
+
+    // A string "false" is truthy, and Boolean() would have turned this into a
+    // retry invitation on a failure the widget never said was transient.
+    emit({
+      type: STEALTH_MESSAGE.ERROR,
+      code: "INTERNAL",
+      message: "Something went wrong.",
+      retryable: "false",
+    } as unknown as StealthInboundMessage);
+    expect(onError).toHaveBeenCalledWith({
+      message: "Something went wrong.",
+      code: "INTERNAL",
+      retryable: undefined,
+    });
   });
 
   it("does not treat ADD_COMPLETE as a finished sync", async () => {
@@ -315,5 +387,147 @@ describe("startStealthSync", () => {
     // The whole class of bug behind this ticket is treating "the call did not
     // throw" as "the work happened". Launching is not scanning.
     expect(onComplete).not.toHaveBeenCalled();
+  });
+
+  describe("describeStealthFailure", () => {
+    it("offers a retry when the widget said the failure is retryable", () => {
+      const line = describeStealthFailure({
+        message: "Could not reach the filter server.",
+        code: "NETWORK",
+        retryable: true,
+      });
+      expect(line.message).toBe("Could not reach the filter server.");
+      expect(line.canRetry).toBe(true);
+    });
+
+    it("withholds the retry when the widget said the failure is permanent", () => {
+      expect(
+        describeStealthFailure({
+          message: "That extended public key is not valid.",
+          code: "INVALID_XPUB",
+          retryable: false,
+        }),
+      ).toEqual({ message: "That extended public key is not valid.", canRetry: false });
+    });
+
+    it("withholds the retry when the widget did not say", () => {
+      // Safe direction, and cheap: the row's Sync button is still there, so a
+      // withheld shortcut costs one click while a wrongly offered one invites
+      // a user to press it forever on something that cannot succeed.
+      expect(describeStealthFailure({ message: "Something went wrong." })).toEqual({
+        message: "Something went wrong.",
+        canRetry: false,
+      });
+    });
+
+    it("decides from retryable and never from the code", () => {
+      // The deployed widget emits INTERNAL with BOTH verdicts, at two sites in
+      // one chunk. Any lookup table keyed on the code is therefore wrong for
+      // one of these two, and this test is what stops someone adding one.
+      const transient = describeStealthFailure({
+        message: "Something went wrong.",
+        code: "INTERNAL",
+        retryable: true,
+      });
+      const permanent = describeStealthFailure({
+        message: "Something went wrong.",
+        code: "INTERNAL",
+        retryable: false,
+      });
+      expect(transient.canRetry).toBe(true);
+      expect(permanent.canRetry).toBe(false);
+    });
+
+    it("passes the widget's sentence through unedited", () => {
+      const message = "Scan stopped at block 962,577. Try again in a moment.";
+      expect(describeStealthFailure({ message, retryable: true }).message).toBe(message);
+    });
+  });
+
+  /**
+   * DL-1171. These guard one sentence that used to sit in the app as a comment
+   * and as an implied promise: that pressing Try again picks up where the scan
+   * stopped. We cannot see the cursor, it is upstream, and a first scan is a
+   * range of roughly a hundred thousand requests, so guessing in the
+   * reassuring direction is the expensive way to be wrong.
+   */
+  describe("describeStealthFailure, what it says about the cost of retrying", () => {
+    const transient = { message: "Could not reach the filter server.", retryable: true };
+
+    it("never promises that a retry resumes, whatever we know", () => {
+      // The one assertion that must never be relaxed. If a future change makes
+      // this fail, the change is claiming upstream behaviour this app cannot
+      // observe. Read DL-1171 before touching it.
+      const cases: Array<StealthCursorKnowledge | undefined> = [
+        undefined,
+        {},
+        { completedScanReportedHeight: true },
+        { completedScanReportedHeight: true, cursorUpdateFailed: false },
+        { cursorUpdateFailed: true },
+      ];
+      for (const knowledge of cases) {
+        const note = describeStealthFailure(transient, knowledge).retryNote ?? "";
+        expect(note).not.toMatch(
+          /resume|pick(s)? up where|continue(s)? from|where it (left|stopped)/i,
+        );
+      }
+    });
+
+    it("warns plainly when the widget SAID it could not save its position", () => {
+      // Not a guess. The widget set cursor_update_failed, so the user is owed
+      // the consequence in words before they press anything.
+      const line = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: true,
+      });
+      expect(line.canRetry).toBe(true);
+      expect(line.retryNote).toMatch(/could not save its position/i);
+    });
+
+    it("says a first scan MAY start over, because may is the true word", () => {
+      const line = describeStealthFailure(transient, {});
+      expect(line.retryNote).toMatch(/no scan for this wallet has finished yet/i);
+      expect(line.retryNote).toMatch(/\bmay\b/i);
+    });
+
+    it("treats no knowledge at all the same as no finished scan", () => {
+      // A reload empties what this page has watched. Having forgotten is the
+      // same epistemic state as never having seen it, and must read that way.
+      expect(describeStealthFailure(transient, undefined).retryNote).toBe(
+        describeStealthFailure(transient, {}).retryNote,
+      );
+    });
+
+    it("stays silent when a scan finished and reported a height", () => {
+      // The case people will want to fill in with "this will continue from
+      // where it left off". That sentence is exactly what DL-1171 is about.
+      // Silence costs the user nothing; a false reassurance costs them minutes.
+      const line = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: false,
+      });
+      expect(line.canRetry).toBe(true);
+      expect(line.retryNote).toBeUndefined();
+    });
+
+    it("says nothing about a press that is not on offer", () => {
+      const line = describeStealthFailure(
+        { message: "That extended public key is not valid.", retryable: false },
+        {},
+      );
+      expect(line.canRetry).toBe(false);
+      expect(line.retryNote).toBeUndefined();
+    });
+
+    it("does not read a missing flag as a false one", () => {
+      // undefined means "we have not seen it". A cursorUpdateFailed we never
+      // received must not read as the widget having told us it succeeded.
+      const unseen = describeStealthFailure(transient, { completedScanReportedHeight: true });
+      const said = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: false,
+      });
+      expect(unseen.retryNote).toBe(said.retryNote);
+    });
   });
 });

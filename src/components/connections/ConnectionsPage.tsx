@@ -67,9 +67,17 @@ import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sy
 import {
   startStealthSync,
   describeStealthProgress,
+  describeStealthFailure,
   type StealthSyncProgress,
+  type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
+import {
+  orRowsForConnection,
+  withStealthSourceWallet,
+  withStealthSourceWalletId,
+} from "@/lib/stealth/ledger";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -242,6 +250,20 @@ export function ConnectionsPage() {
   // the widget's own callbacks. Stopped on unmount so its window message
   // listener can never outlive this page.
   const channelRef = useRef<StealthChannel | null>(null);
+  /**
+   * DL-1171. What we have actually watched happen to each connection's scan
+   * position, keyed by connection id.
+   *
+   * A ref and not state on purpose: nothing renders from it directly, it is
+   * read at the moment a failure toast is built, and putting it in state would
+   * re-render the whole page once per completed scan for no visible change.
+   *
+   * Scope is this page's lifetime, and that is not an oversight. A reload
+   * empties it and the UI then correctly says it has seen no scan finish,
+   * because it has not. Persisting it would mean claiming knowledge about the
+   * upstream cursor that survived longer than our evidence for it.
+   */
+  const cursorKnowledgeRef = useRef<Map<string, StealthCursorKnowledge>>(new Map());
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -275,6 +297,10 @@ export function ConnectionsPage() {
    * list refreshes is worse than no progress at all.
    */
   const [stealthProgress, setStealthProgress] = useState<StealthSyncProgress | null>(null);
+  // DL-1113. or-connection-list reports a failed private-wallet arm as a 200
+  // with this flag set, not as an error, so without holding it here the rows
+  // simply vanish and the page looks like it belongs to someone who has none.
+  const [stealthUnavailable, setStealthUnavailable] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [expandedConnId, setExpandedConnId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConnectionRow | null>(null);
@@ -373,6 +399,9 @@ export function ConnectionsPage() {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
       };
+      // Read before decoding, so a decrypt problem further down cannot leave
+      // the page silently pretending the arm is healthy.
+      setStealthUnavailable(readStealthUnavailable(res));
       const decoded = await Promise.all(
         (res.connections ?? []).map(async (c): Promise<ConnectionRow> => {
           let decrypted_label: string | null = null;
@@ -419,7 +448,22 @@ export function ConnectionsPage() {
             }
           }
 
-          return { ...c, decrypted_label, decrypted_last_error, decrypted_wallets };
+          // DL-1116. A stealth connection always arrives with source_wallets
+          // [], which made every wallet-keyed feature in this page
+          // structurally unreachable for it: no mapping row, so no linked
+          // account, so nowhere for a scanned transaction to land, so no
+          // stealth wallet in the Transactions filter. Synthesize the one
+          // wallet the connection already is, here rather than at each of the
+          // four use sites, so the rest of the page needs no stealth branch.
+          return {
+            ...c,
+            decrypted_label,
+            decrypted_last_error,
+            decrypted_wallets: withStealthSourceWallet(
+              { id: c.id, is_stealth: c.is_stealth, decrypted_label },
+              decrypted_wallets,
+            ),
+          };
         }),
       );
       setConnections(decoded);
@@ -441,6 +485,10 @@ export function ConnectionsPage() {
         return;
       }
       console.error("[Connections] list failed", err);
+      // The whole list call failed, which the toast already covers. Clear the
+      // partial-degradation notice rather than stacking two different
+      // explanations of the same blank page on top of each other.
+      setStealthUnavailable(false);
       toastError(err, "We couldn't load your connections.");
     } finally {
       if (!recovering) setLoading(false);
@@ -580,10 +628,18 @@ export function ConnectionsPage() {
   /**
    * Scan a stealth connection by re-opening the OR widget on its sync route.
    *
-   * The widget is the scanner. It fetches the sealed envelope by id, reads
-   * `last_block_scanned` back and resumes from it, runs the filter scan in
-   * this browser, and posts sealed transactions back to OR. Nothing on our
-   * side scans, so this opens the widget and reports what the widget says.
+   * The widget is the scanner. It fetches the sealed envelope by id, runs the
+   * filter scan in this browser, and posts sealed transactions back to OR.
+   * Nothing on our side scans, so this opens the widget and reports what the
+   * widget says.
+   *
+   * This comment used to state that the widget reads `last_block_scanned` back
+   * and resumes from it. We cannot observe that, so we no longer claim it.
+   * What upstream confirmed is narrower: the cursor is written once at
+   * completion, not per batch, and the write is guarded on having sealed at
+   * least one transaction. So a scan that finds nothing does not advance it
+   * either. Do not reintroduce resume language here without a recording that
+   * shows a scan starting from a non-zero height.
    *
    * Every outcome below is reported from something the widget actually sent.
    * There is no success toast on the launch path: launching is not scanning,
@@ -629,6 +685,15 @@ export function ConnectionsPage() {
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
+          // DL-1171. Record what this frame told us about the scan position
+          // BEFORE anything else, because the next failure toast reads it and
+          // an early return further down would leave it stale. Note what is
+          // stored: that the widget reported a height, not that the height was
+          // saved. Those are different claims and only the first is ours.
+          cursorKnowledgeRef.current.set(conn.id, {
+            completedScanReportedHeight: outcome.lastBlockScanned !== undefined,
+            cursorUpdateFailed: outcome.cursorUpdateFailed === true,
+          });
           const found = outcome.txCount;
           // Report the count when the widget gave one. When it did not, say
           // that the scan finished and nothing more: inventing "up to date"
@@ -650,17 +715,65 @@ export function ConnectionsPage() {
           }
           if (outcome.cursorUpdateFailed) {
             toast.warning(
-              "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
+              "This scan finished but its position could not be saved, so the next sync may cover ground this one already scanned.",
             );
           }
-          void refreshList();
+          // DL-1116. This callback used to end at refreshList(), which is why
+          // a scan could report "Sealed and stored 14 transactions" and the
+          // user still saw none of them: the row was marked "Synced just now"
+          // and nothing ever read the transactions back into the local
+          // ledger. Both or-sync paths already call the import bridge here;
+          // this one never did.
+          void importAfterStealthScan(conn);
         },
-        onError: (message) => {
+        /**
+         * DL-1117. The widget sends `{code, message, retryable}` and this app
+         * used to read only the message, so a network blip and a wallet the
+         * widget can never scan produced the same dead-end toast. It now asks
+         * the widget whether trying again could help, and offers the retry
+         * only when the widget said yes.
+         *
+         * DL-1171. What used to be written here: "the retry is safe, a scan is
+         * resumable by design, the widget reads its own cursor back and picks
+         * up from last_block_scanned". Every clause of that was an assumption.
+         * The cursor is upstream, this app cannot observe whether it was
+         * written, and a first scan covers a range of roughly a hundred
+         * thousand requests, so a press that quietly starts over is minutes of
+         * someone's evening, not a detail.
+         *
+         * What is still true and is the part worth keeping: the retry is
+         * always user-initiated, it re-enters this same function, and
+         * `handleStealthSync` clears the stale progress line before starting.
+         * Nothing here retries on its own, and nothing should be made to.
+         *
+         * So the button stays and the promise goes. `describeStealthFailure`
+         * adds a second sentence when we have an observed reason to think the
+         * press is expensive, and stays quiet when we do not.
+         */
+        onError: (failure) => {
           channelRef.current?.stop();
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
-          toast.error(message);
+          // The code is for us, not for the user: it is the difference between
+          // a support conversation that starts with a cause and one that
+          // starts with "it said something went wrong".
+          if (failure.code) {
+            console.warn(`[Connections] stealth sync failed: ${failure.code}`);
+          }
+          const line = describeStealthFailure(failure, cursorKnowledgeRef.current.get(conn.id));
+          toast.error(
+            line.message,
+            line.canRetry
+              ? {
+                  // The caveat rides on the same toast as the button it is
+                  // about. A warning in a separate toast can be dismissed
+                  // first, which would leave the button and lose the sentence.
+                  description: line.retryNote,
+                  action: { label: "Try again", onClick: () => void handleStealthSync(conn) },
+                }
+              : undefined,
+          );
         },
       });
       channelRef.current = channel;
@@ -977,11 +1090,15 @@ export function ConnectionsPage() {
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
-    const listRes = (await callProxy("or-transactions-list", {
+    const listRes = await callProxy("or-transactions-list", {
       subaccount_id: subaccountId,
       limit: 500,
-    })) as { transactions: EncryptedTxRow[] };
-    const forThisConn = (listRes.transactions ?? []).filter((t) => t.connection_id === conn.id);
+    });
+    // Shape lives in one place. Orange Rails has not finalised how stealth
+    // rows come back (their DL-1174) and has ruled they will NOT be extra
+    // entries in `transactions`, so nothing here may assume that array is the
+    // whole answer.
+    const forThisConn = orRowsForConnection(listRes, conn.id);
     if (forThisConn.length === 0) return { unmapped: 0, unmappedWalletIds: [] };
 
     const decoded: OrImportTransaction[] = [];
@@ -990,7 +1107,10 @@ export function ConnectionsPage() {
       try {
         const json = await decryptOrTxnCipher(row.encrypted_payload);
         const payload = JSON.parse(json) as OrImportTransaction;
-        decoded.push(payload);
+        // A stealth connection has exactly one wallet, so an untagged row is
+        // an absent field rather than an ambiguous one. Without this the
+        // bridge counts every stealth row `untagged` and skips it.
+        decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
       } catch {
         decryptFailures += 1;
       }
@@ -1050,6 +1170,40 @@ export function ConnectionsPage() {
       toast.success(`Wallet ledger: ${summary}.`);
     }
     return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
+  }
+
+  /**
+   * DL-1116. Read back and import what the widget just sealed.
+   *
+   * Deliberately NOT gated on the widget's transaction count. The or-sync path
+   * guards its import on `res.synced > 0` because or-sync reports what it
+   * itself just wrote, but the stealth widget's count is what it stored on the
+   * Orange Rails side, and rows stored by an earlier scan may never have been
+   * imported here at all. That is exactly the state this ticket was filed
+   * from: fourteen rows sealed and stored, zero of them in the ledger. A scan
+   * that finds nothing new still has to reconcile.
+   *
+   * Failure is reported rather than swallowed. A scan that succeeded and an
+   * import that failed is a different situation from a failed scan, and the
+   * user's next action is the same either way, so say what happened and name
+   * the retry.
+   */
+  async function importAfterStealthScan(conn: ConnectionRow) {
+    try {
+      await refreshList();
+      const importResult = await importSyncedTransactionsForConnection(conn);
+      setTxRefreshKey((k) => k + 1);
+      // Same call to action as the or-sync path: the transactions arrived but
+      // have nowhere to go until the wallet is pointed at an account. For a
+      // stealth connection this dialog was previously unreachable, because
+      // there was no wallet to map.
+      if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
+        handleEditMapping(conn);
+      }
+    } catch (err) {
+      console.error("[Connections] stealth ledger import failed", err);
+      toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
+    }
   }
 
   function handleDelete(conn: ConnectionRow) {
@@ -1137,16 +1291,22 @@ export function ConnectionsPage() {
   const fetchEncryptedFor = useCallback(
     (connectionId: string) => async (): Promise<EncryptedTxRow[]> => {
       if (!subaccountId) return [];
-      const res = (await callProxy("or-transactions-list", {
+      const res = await callProxy("or-transactions-list", {
         subaccount_id: subaccountId,
         limit: 100,
-      })) as { transactions: EncryptedTxRow[] };
-      return (res.transactions ?? []).filter((t) => t.connection_id === connectionId);
+      });
+      return orRowsForConnection(res, connectionId);
     },
     [subaccountId],
   );
 
   // ─── Render ───────────────────────────────────────────────────────────
+
+  // DL-1113. Null in the ordinary case, so this renders unconditionally below.
+  const stealthNotice = describeStealthAvailability({
+    stealthUnavailable,
+    connectionCount: connections.length,
+  });
 
   if (!isUnlocked) {
     return (
@@ -1245,9 +1405,32 @@ export function ConnectionsPage() {
         </div>
       )}
 
+      {/* DL-1113. The private-wallet arm of or-connection-list failed and the
+          endpoint reported it in a 200 rather than an error, so those rows are
+          missing from the list below. Muted and not destructive on purpose:
+          nothing is lost, the wallets come back when the arm does, and red
+          "something failed" styling would push people toward the one recovery
+          they must not attempt (delete and re-add, which DL-1079 makes a
+          one-way door). aria-live so a screen reader hears the list it just
+          read out was incomplete. */}
+      {stealthNotice && (
+        <div
+          aria-live="polite"
+          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-medium">{stealthNotice.headline}</p>
+            <p className="text-xs text-muted-foreground">{stealthNotice.detail}</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => void refreshList()} disabled={loading}>
+            {stealthNotice.retryLabel}
+          </Button>
+        </div>
+      )}
+
       {loading && connections.length === 0 ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : connections.length === 0 ? (
+      ) : connections.length === 0 && !stealthNotice ? (
         <div className="space-y-2 rounded-md border border-dashed p-8 text-center">
           <Zap className="mx-auto h-8 w-8 text-orange-500" />
           <p className="text-sm font-medium">No connections yet</p>

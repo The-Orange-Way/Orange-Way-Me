@@ -136,7 +136,22 @@ jobs:
           # configured for the env yet; the SPA renders no widget and
           # submits without a token. Supabase Auth must also be
           # configured to skip captcha verification in that case.
-          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || vars.TURNSTILE_SITE_KEY_DEV }}
+          #
+          # Dev uses Cloudflare's published always-passes TEST sitekey
+          # (1x00000000000000000000AA) instead of a repository variable.
+          # It is a public documented value, not a secret. The widget it
+          # renders issues a token with no challenge, which is what lets
+          # an automated sign-in run on dev at all. The dev Auth project
+          # must carry the matching always-passes secret
+          # (1x0000000000000000000000000000000AA) or the server rejects
+          # the test token. The test key is bound STRICTLY to the dev
+          # arm: on prod the value comes only from
+          # vars.TURNSTILE_SITE_KEY_PROD, so a missing or renamed prod
+          # var yields an empty key and NO widget (a visible failure),
+          # never a silent fall-through to the always-passes test key
+          # that would let every bot through. Triggers are push to dev or
+          # prod only, so no preview build depends on the old fallback.
+          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'dev' && '1x00000000000000000000AA' || vars.TURNSTILE_SITE_KEY_PROD }}
           # Release identifier -- paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
@@ -176,33 +191,47 @@ jobs:
           # would name the prod platform from a dev build.
           VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
           # Gate the Orange Rails stealth-sync connector to the environments
-          # where it is actually provisioned. Today that is dev only; prod
-          # still lands the "+ Connect a Bitcoin source" button on the broken
-          # XPUB sync screen (DL-0393), so prod must not render it.
+          # where it is actually provisioned. Dev and prod as of DL-0347.
           #
           # OR_CONNECT_ENABLED in src/components/connections/ConnectionsPage.tsx
           # reads `import.meta.env.VITE_OR_CONNECT_ENABLED === "true"`. Branch
           # derived rather than a repo variable, same shape and reasoning as
-          # VITE_ONBOARDING_V2 above: an empty value folds the compare to a
-          # constant false, so the prod bundle never contains the flag-on
-          # branch of the button and no route reaches the connect widget.
-          # Flip prod on here (change the prod arm to 'true') once the OR
-          # connector is live in prod.
+          # VITE_ONBOARDING_V2 above: an unset value folds the compare to a
+          # constant false, so a build that forgets the flag ships dark rather
+          # than shipping a half-wired button.
+          #
+          # The old prod arm said to flip "once the OR connector is live in
+          # prod". Its prod target, VITE_OR_CONNECT_URL above, answers 200 on
+          # connect.orangerails.com. That is a liveness check on the HOST and
+          # is NOT proof the connector is provisioned for the prod platform
+          # slug (orangeway-me). That is an Orange Rails fact and theirs to
+          # confirm on this PR. Do not merge on the 200 alone.
+          #
+          # The button this ungates opens the searchable source list, over 100
+          # entries. It is not a tile grid and it is not new: DL-1116, PR 275.
           VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Stealth sync entry (DL-1047): Sync on a private connection opens
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
           #
-          # Dev on, prod off. The Orange Rails sync route is verified live on
-          # dev.orangerails.com against the deployed chunk, so dev can be
-          # walked. Nobody has yet watched a scan complete end to end for a
-          # host-app user, so prod stays dark until someone has.
+          # The old prod arm stayed dark because "nobody has yet watched a
+          # scan complete end to end for a host-app user". Somebody has,
+          # 2026-08-16. That precondition is met. Measurements live in the
+          # ticket, not here: they profile a partner's infrastructure and
+          # this is a public file.
+          #
+          # Two requirements the reviewer must hold, stated as requirements
+          # rather than as a description of what currently breaks, for the
+          # same reason:
+          #
+          #   1. This flag must not evaluate true on the prod branch before
+          #      the upstream read path in DL-1174 has landed.
+          #   2. The retry-behaviour copy from PR 278 must be in before the
+          #      flip, so the UI does not promise something unobserved.
           #
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
-          # empty value folds the compare to a constant false and the prod
-          # bundle never contains the widget branch. Flip prod on here (change
-          # the prod arm to 'true') once the dev walk passes.
+          # unset value folds the compare to a constant false.
           VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip

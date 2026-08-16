@@ -1,5 +1,10 @@
 /**
- * Stealth Sync, resuming a scan for a connection that already exists.
+ * Stealth Sync, re-running a scan for a connection that already exists.
+ *
+ * "Re-running", not "resuming". Whether a second scan continues from where the
+ * last one stopped is decided upstream, in the widget and in its own store, and
+ * this app cannot observe it. See `describeStealthFailure` before writing the
+ * word resume anywhere in this file.
  *
  * A stealth connection is created by the add flow and then scanned inside the
  * OR Connect widget, in the browser, during that same session. Until this
@@ -157,6 +162,36 @@ export function buildStealthSyncInit(args: {
   };
 }
 
+/**
+ * A failure the widget reported, as the widget described it.
+ *
+ * DL-1117. The widget has always sent three fields on OR_STEALTH_ERROR and
+ * this app read one of them. `code` and `retryable` were parsed away, so no
+ * error the widget raised could ever be told apart from any other, and the
+ * only honest thing the UI could offer was a sentence and a dead end. That is
+ * also the whole of DL-1025: the missing retry button is missing because its
+ * input was being discarded here, not because nobody drew it.
+ */
+export interface StealthSyncFailure {
+  /** The widget's own sentence. Displayed as-is; never rewritten. */
+  message: string;
+  /**
+   * The widget's machine-readable cause, when it sent one we can read.
+   *
+   * Carried for support and logging, NOT for deciding retryability. See
+   * `describeStealthFailure` for why those are different questions.
+   */
+  code?: string;
+  /**
+   * The widget's own verdict on whether trying again could help.
+   *
+   * Optional because this crosses an origin boundary: a frame that omits it,
+   * or sends a non-boolean, must read as "the widget did not say" rather than
+   * as a false we invented.
+   */
+  retryable?: boolean;
+}
+
 /** What the connection row should show while a stealth scan is running. */
 export interface StealthProgressLine {
   /** One short sentence. Always present, so the row is never blank. */
@@ -206,6 +241,126 @@ export function describeStealthProgress(
   };
 }
 
+/** What the UI should do about a failure the widget reported. */
+export interface StealthFailureLine {
+  /** The sentence to show. Always present. */
+  message: string;
+  /** Offer a one-press retry next to the message. */
+  canRetry: boolean;
+  /**
+   * A second sentence about what pressing retry actually costs, when we have a
+   * positive reason to think it is not cheap. Absent when we have no such
+   * reason: see `describeStealthFailure` for why silence is the honest default
+   * rather than a reassurance.
+   */
+  retryNote?: string;
+}
+
+/**
+ * What this app has actually observed about the scan position for one
+ * connection. DL-1171.
+ *
+ * Every field is optional and undefined means "we have not seen it", never
+ * false. This whole type exists to stop the UI reasoning from an assumption:
+ * the app is a different origin from the thing that owns the cursor, and the
+ * only facts it has are the ones a SYNC_COMPLETE frame handed it during this
+ * page's lifetime.
+ */
+export interface StealthCursorKnowledge {
+  /**
+   * A scan for this connection completed while this page was open AND reported
+   * a `last_block_scanned`. That is the strongest thing we can honestly say,
+   * and note what it is not: it is the widget telling us a height, not proof
+   * that the height was persisted anywhere.
+   */
+  completedScanReportedHeight?: boolean;
+  /**
+   * The last completed scan set `cursor_update_failed`. The widget is telling
+   * us in as many words that its position was not saved.
+   */
+  cursorUpdateFailed?: boolean;
+}
+
+/**
+ * Decide what a reported failure lets the UI offer.
+ *
+ * WHY THIS READS `retryable` AND NOT `code`. This is the part to read twice,
+ * because deciding from the code is the obvious-looking version and it is
+ * wrong. Checked against the deployed widget bundle rather than against the
+ * captured type contract, which is known to be stale in other places:
+ *
+ *   INTERNAL              emitted with retryable TRUE at one site and FALSE at
+ *                         another, in the same chunk
+ *   NETWORK               true
+ *   DELIVERY_ACK_MISSING  true
+ *   WINDOW_EXHAUSTED      false
+ *   every INIT validation false
+ *
+ * One code, both verdicts. So no lookup table keyed on `code` can be right,
+ * and any table we shipped would drift the first time the widget changed its
+ * mind about a case we had hard-coded. The widget is the only thing that knows
+ * whether its own failure is transient; this asks it and believes the answer.
+ *
+ * WHY UNKNOWN MEANS NO BUTTON. When the field is absent or is not a boolean we
+ * do not offer the retry. That is the safe direction and it is not a hardship:
+ * the row's own Sync button is still right there, so withholding the shortcut
+ * costs a user one extra click, while offering it on a permanent failure
+ * invites them to press it forever on something that can never succeed.
+ *
+ * WHAT `retryNote` IS FOR, and why it is usually absent. DL-1171.
+ *
+ * This app used to state, in a comment right above the retry button, that
+ * retrying was safe because "a scan is resumable by design, the widget reads
+ * its own cursor back and picks up from last_block_scanned". We cannot see any
+ * of that. The cursor lives upstream, and a first scan for a wallet covers a
+ * range of roughly a hundred thousand requests, so the difference between
+ * continuing and starting over is minutes of someone's evening, not a detail.
+ *
+ * So the rule for this function: never promise a resume, and never promise a
+ * restart either. Speak only when there is a positive, observed reason to
+ * think the press is expensive:
+ *
+ *   cursorUpdateFailed          the widget SAID it could not save its position.
+ *                               Not a guess. Say it plainly.
+ *   no completed scan observed  we have watched nothing finish for this
+ *                               connection, so we have no evidence a saved
+ *                               position exists. Say "may", because it may.
+ *
+ * When a scan did complete and reported a height, this returns no note at all.
+ * That is deliberate and it is the case people will want to change. Saying
+ * "this will pick up where it left off" there would be inventing the upstream
+ * behaviour again, one comment further down the file. Silence costs the user
+ * nothing; a false reassurance costs them the thing this ticket is about.
+ */
+export function describeStealthFailure(
+  failure: StealthSyncFailure,
+  knowledge?: StealthCursorKnowledge,
+): StealthFailureLine {
+  const canRetry = failure.retryable === true;
+  return {
+    message: failure.message,
+    canRetry,
+    // No button, no note. A caveat about a press that is not on offer is noise.
+    ...(canRetry ? retryNoteFor(knowledge) : {}),
+  };
+}
+
+function retryNoteFor(knowledge?: StealthCursorKnowledge): { retryNote?: string } {
+  if (knowledge?.cursorUpdateFailed === true) {
+    return {
+      retryNote:
+        "The last scan could not save its position, so this one may cover ground already scanned.",
+    };
+  }
+  if (knowledge?.completedScanReportedHeight !== true) {
+    return {
+      retryNote:
+        "No scan for this wallet has finished yet, so this may start from the beginning and take several minutes.",
+    };
+  }
+  return {};
+}
+
 export interface StealthSyncHandle {
   /** The live transport. The caller stops it when the flow ends. */
   channel: StealthChannel;
@@ -230,8 +385,15 @@ export async function startStealthSync(args: {
   widgetToken: string;
   onProgress?: (progress: StealthSyncProgress) => void;
   onComplete?: (outcome: StealthSyncOutcome) => void;
-  /** Called with the widget's own message when it reports a failure. */
-  onError?: (message: string) => void;
+  /**
+   * Called with the widget's own account of a failure.
+   *
+   * DL-1117 changed this from a bare string. The string was everything the
+   * caller could know, so every failure looked identical to every other one
+   * and no caller could offer a retry even when the widget had just said the
+   * failure was transient.
+   */
+  onError?: (failure: StealthSyncFailure) => void;
   /** Injectable for tests. */
   launch?: typeof launchStealthConnect;
   baseUrl?: string;
@@ -274,9 +436,17 @@ export async function startStealthSync(args: {
           // The widget's own text, never a string we invent. An error we
           // cannot read still has to say something, so it says so plainly
           // rather than claiming a cause.
-          args.onError?.(
-            stringOrUndefined(message.message) ?? "The connect widget reported an error.",
-          );
+          //
+          // DL-1117. `code` and `retryable` are read here rather than thrown
+          // away. Both are treated as untrusted: a code that is not a string
+          // and a retryable that is not a boolean both arrive as undefined,
+          // which reads as "the widget did not say" and never as a value we
+          // decided on its behalf.
+          args.onError?.({
+            message: stringOrUndefined(message.message) ?? "The connect widget reported an error.",
+            code: stringOrUndefined(message.code),
+            retryable: booleanOrUndefined(message.retryable),
+          });
           break;
         default:
           break;
@@ -300,6 +470,18 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Read a boolean off an untrusted frame, or undefined.
+ *
+ * Deliberately not `Boolean(value)`. This flag decides whether the UI invites
+ * the user to try again, and coercing the string "false", or 0, or a missing
+ * field into a definite answer would be inventing the widget's verdict. Only
+ * an actual boolean counts as the widget having said anything.
+ */
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 /**
