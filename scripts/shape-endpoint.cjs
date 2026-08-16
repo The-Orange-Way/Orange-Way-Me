@@ -24,16 +24,19 @@
  *   OW_SUPABASE_URL=https://<project>.supabase.co \
  *   CAPTURE_DIR=/path/holding/session.json+e2e-owm.txt \
  *   PW_PATH=/path/to/playwright-core \
- *   node scripts/shape-endpoint.js <subaccount-id>
+ *   node scripts/shape-endpoint.cjs <subaccount-id>
  *
  * CAPTURE_DIR must hold:
  *   session.json   the Supabase auth session to inject
  *   e2e-owm.txt    KEY=value lines, must include OWM_DEV_Vault_Password
  * Neither file belongs in this repo and neither is read into a log line here.
  *
- * Point this at a development environment. It is a read-only capture, but it
- * authenticates as a real user, and the endpoints it calls are somebody's
- * production surface when pointed at production.
+ * This runs against development only, and that is now enforced rather than
+ * advised: the Supabase project ref is checked against an allowlist below and
+ * the script refuses to start otherwise. It is a read-only capture, but it
+ * authenticates as a real user, so "read-only" is not the same as harmless.
+ * Both OW_APP_URL and OW_SUPABASE_URL must be set explicitly; there is no
+ * default target, because a default target is a target nobody chose.
  */
 const fs = require("fs");
 const path = require("path");
@@ -41,12 +44,17 @@ const path = require("path");
 const SUPABASE_URL = (process.env.OW_SUPABASE_URL || "").replace(/\/+$/, "");
 const CAPTURE_DIR = process.env.CAPTURE_DIR || process.cwd();
 const SUB = process.argv[2];
-const APP_URL = process.env.OW_APP_URL || "https://orangeway.dev";
+// No default. A default target means a run with nothing configured still
+// points at a hosted surface, and the one it pointed at was a real one. Make
+// the operator name the target every time.
+const APP_URL = process.env.OW_APP_URL || "";
 
-if (!SUPABASE_URL || !SUB) {
+if (!SUPABASE_URL || !SUB || !APP_URL) {
   console.error(
-    "usage: OW_SUPABASE_URL=https://<project>.supabase.co node scripts/shape-endpoint.js <subaccount-id>",
+    "usage: OW_APP_URL=https://<app-host> OW_SUPABASE_URL=https://<project>.supabase.co " +
+      "node scripts/shape-endpoint.cjs <subaccount-id>",
   );
+  console.error("Both OW_APP_URL and OW_SUPABASE_URL are required. There is no default target.");
   process.exit(2);
 }
 
@@ -55,6 +63,31 @@ if (!SUPABASE_URL || !SUB) {
 // script silently captured nothing the first time it was pointed elsewhere.
 const PROJECT_REF = new URL(SUPABASE_URL).hostname.split(".")[0];
 const AUTH_KEY = `sb-${PROJECT_REF}-auth-token`;
+
+// This tool signs in, calls real endpoints and reads real responses. It is a
+// development instrument and it must be impossible to point at anything else
+// by accident.
+//
+// The guard is keyed on the Supabase project ref rather than on the app URL
+// because the ref is what actually decides which database is answering. A URL
+// can be a proxy, a preview host, a local alias or a typo away from a hosted
+// one; the ref cannot. Refs are not secret: they are part of the public API
+// hostname and already ship inside the client bundle.
+//
+// Adding a ref here is a deliberate act. If you find yourself wanting to add a
+// production ref, the answer is no. Capture the shape on development and
+// promote the finding, not the probe.
+const ALLOWED_PROJECT_REFS = ["bogmoovbjpvcvdqrmjgt"]; // the development project
+
+if (!ALLOWED_PROJECT_REFS.includes(PROJECT_REF)) {
+  console.error(
+    `REFUSED: project ref "${PROJECT_REF}" is not in this script's development allowlist.`,
+  );
+  console.error(
+    "This tool only runs against development. Edit ALLOWED_PROJECT_REFS if a new development project exists.",
+  );
+  process.exit(2);
+}
 
 const { chromium } = require(process.env.PW_PATH || "playwright-core");
 
@@ -186,14 +219,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
               L.j || {},
               "stealth_unavailable",
             ),
-            stealthUnavailableValue: (L.j || {}).stealth_unavailable,
+            // Through desc() like every other field. This was the one line
+            // that returned a raw value out of the page, which defeats the
+            // point of building the summary from descriptors: whatever the
+            // server chose to put in that field would have been printed
+            // verbatim. desc() still prints booleans in full, and a boolean
+            // is the answer this probe is actually after.
+            stealthUnavailableValue: desc((L.j || {}).stealth_unavailable),
             connectionCount: ((L.j || {}).connections || []).length,
           },
         };
       },
       { SUB, SUPABASE_URL },
     )
-    .catch((e) => ({ error: String(e).slice(0, 300) }));
+    // Name and length only. This was the one path carrying unstructured text
+    // out of the page, and an error message is exactly where a server likes to
+    // echo back the input that caused it.
+    .catch((e) => ({
+      error: {
+        name: (e && e.name) || typeof e,
+        messageLength: String((e && e.message) || e).length,
+      },
+    }));
 
   console.log("SHAPE " + JSON.stringify(out, null, 1));
   await browser.close();
