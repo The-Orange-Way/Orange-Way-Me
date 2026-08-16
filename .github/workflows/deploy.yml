@@ -209,7 +209,7 @@ jobs:
           #
           # The button this ungates opens the searchable source list, over 100
           # entries. It is not a tile grid and it is not new: DL-1116, PR 275.
-          VITE_OR_CONNECT_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
+          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
           # Stealth sync entry (DL-1047): Sync on a private connection opens
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
