@@ -349,7 +349,7 @@ function retryNoteFor(knowledge?: StealthCursorKnowledge): { retryNote?: string 
   if (knowledge?.cursorUpdateFailed === true) {
     return {
       retryNote:
-        "The last scan could not save its position, so this one starts again from the previous saved point.",
+        "The last scan could not save its position, so this one may cover ground already scanned.",
     };
   }
   if (knowledge?.completedScanReportedHeight !== true) {

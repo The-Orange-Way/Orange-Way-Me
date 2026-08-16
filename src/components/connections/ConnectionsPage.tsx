@@ -628,10 +628,18 @@ export function ConnectionsPage() {
   /**
    * Scan a stealth connection by re-opening the OR widget on its sync route.
    *
-   * The widget is the scanner. It fetches the sealed envelope by id, reads
-   * `last_block_scanned` back and resumes from it, runs the filter scan in
-   * this browser, and posts sealed transactions back to OR. Nothing on our
-   * side scans, so this opens the widget and reports what the widget says.
+   * The widget is the scanner. It fetches the sealed envelope by id, runs the
+   * filter scan in this browser, and posts sealed transactions back to OR.
+   * Nothing on our side scans, so this opens the widget and reports what the
+   * widget says.
+   *
+   * This comment used to state that the widget reads `last_block_scanned` back
+   * and resumes from it. We cannot observe that, so we no longer claim it.
+   * What upstream confirmed is narrower: the cursor is written once at
+   * completion, not per batch, and the write is guarded on having sealed at
+   * least one transaction. So a scan that finds nothing does not advance it
+   * either. Do not reintroduce resume language here without a recording that
+   * shows a scan starting from a non-zero height.
    *
    * Every outcome below is reported from something the widget actually sent.
    * There is no success toast on the launch path: launching is not scanning,
@@ -707,7 +715,7 @@ export function ConnectionsPage() {
           }
           if (outcome.cursorUpdateFailed) {
             toast.warning(
-              "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
+              "This scan finished but its position could not be saved, so the next sync may cover ground this one already scanned.",
             );
           }
           // DL-1116. This callback used to end at refreshList(), which is why
