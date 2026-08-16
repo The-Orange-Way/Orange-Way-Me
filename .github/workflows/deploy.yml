@@ -214,25 +214,20 @@ jobs:
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
           #
-          # The old prod arm stayed dark because "nobody has yet watched a scan
-          # complete end to end for a host-app user". Somebody has, 2026-08-16,
-          # recorded: a first sync of an unscanned wallet ran about 208s over
-          # roughly 105,000 requests to the filter host and returned a
-          # SYNC_COMPLETE frame carrying last_block_scanned. A repeat sync of
-          # the same wallet is 8.8s and six requests. That precondition is met.
+          # The old prod arm stayed dark because "nobody has yet watched a
+          # scan complete end to end for a host-app user". Somebody has,
+          # 2026-08-16. That precondition is met. Measurements live in the
+          # ticket, not here: they profile a partner's infrastructure and
+          # this is a public file.
           #
-          # Two things a reviewer must weigh that the precondition does not
-          # cover, stated here so nobody discovers them after the flip:
+          # Two requirements the reviewer must hold, stated as requirements
+          # rather than as a description of what currently breaks, for the
+          # same reason:
           #
-          #   1. DL-1174 is open upstream. Sealed stealth rows are stored but
-          #      the read path does not return them yet, so a prod customer can
-          #      finish a scan and still see an empty transactions list. That is
-          #      a worse first impression than no button, so this should not
-          #      reach the prod branch before DL-1174 lands.
-          #   2. The cursor is written only at completion, confirmed by Orange
-          #      Rails 2026-08-16, so a first scan that dies partway redoes the
-          #      whole range on retry. PR 278 makes the copy say so instead of
-          #      promising a resume we cannot prove.
+          #   1. This flag must not evaluate true on the prod branch before
+          #      the upstream read path in DL-1174 has landed.
+          #   2. The retry-behaviour copy from PR 278 must be in before the
+          #      flip, so the UI does not promise something unobserved.
           #
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
