@@ -1,5 +1,10 @@
 /**
- * Stealth Sync, resuming a scan for a connection that already exists.
+ * Stealth Sync, re-running a scan for a connection that already exists.
+ *
+ * "Re-running", not "resuming". Whether a second scan continues from where the
+ * last one stopped is decided upstream, in the widget and in its own store, and
+ * this app cannot observe it. See `describeStealthFailure` before writing the
+ * word resume anywhere in this file.
  *
  * A stealth connection is created by the add flow and then scanned inside the
  * OR Connect widget, in the browser, during that same session. Until this
@@ -242,6 +247,38 @@ export interface StealthFailureLine {
   message: string;
   /** Offer a one-press retry next to the message. */
   canRetry: boolean;
+  /**
+   * A second sentence about what pressing retry actually costs, when we have a
+   * positive reason to think it is not cheap. Absent when we have no such
+   * reason: see `describeStealthFailure` for why silence is the honest default
+   * rather than a reassurance.
+   */
+  retryNote?: string;
+}
+
+/**
+ * What this app has actually observed about the scan position for one
+ * connection. DL-1171.
+ *
+ * Every field is optional and undefined means "we have not seen it", never
+ * false. This whole type exists to stop the UI reasoning from an assumption:
+ * the app is a different origin from the thing that owns the cursor, and the
+ * only facts it has are the ones a SYNC_COMPLETE frame handed it during this
+ * page's lifetime.
+ */
+export interface StealthCursorKnowledge {
+  /**
+   * A scan for this connection completed while this page was open AND reported
+   * a `last_block_scanned`. That is the strongest thing we can honestly say,
+   * and note what it is not: it is the widget telling us a height, not proof
+   * that the height was persisted anywhere.
+   */
+  completedScanReportedHeight?: boolean;
+  /**
+   * The last completed scan set `cursor_update_failed`. The widget is telling
+   * us in as many words that its position was not saved.
+   */
+  cursorUpdateFailed?: boolean;
 }
 
 /**
@@ -269,12 +306,59 @@ export interface StealthFailureLine {
  * the row's own Sync button is still right there, so withholding the shortcut
  * costs a user one extra click, while offering it on a permanent failure
  * invites them to press it forever on something that can never succeed.
+ *
+ * WHAT `retryNote` IS FOR, and why it is usually absent. DL-1171.
+ *
+ * This app used to state, in a comment right above the retry button, that
+ * retrying was safe because "a scan is resumable by design, the widget reads
+ * its own cursor back and picks up from last_block_scanned". We cannot see any
+ * of that. The cursor lives upstream, and a first scan for a wallet covers a
+ * range of roughly a hundred thousand requests, so the difference between
+ * continuing and starting over is minutes of someone's evening, not a detail.
+ *
+ * So the rule for this function: never promise a resume, and never promise a
+ * restart either. Speak only when there is a positive, observed reason to
+ * think the press is expensive:
+ *
+ *   cursorUpdateFailed          the widget SAID it could not save its position.
+ *                               Not a guess. Say it plainly.
+ *   no completed scan observed  we have watched nothing finish for this
+ *                               connection, so we have no evidence a saved
+ *                               position exists. Say "may", because it may.
+ *
+ * When a scan did complete and reported a height, this returns no note at all.
+ * That is deliberate and it is the case people will want to change. Saying
+ * "this will pick up where it left off" there would be inventing the upstream
+ * behaviour again, one comment further down the file. Silence costs the user
+ * nothing; a false reassurance costs them the thing this ticket is about.
  */
-export function describeStealthFailure(failure: StealthSyncFailure): StealthFailureLine {
+export function describeStealthFailure(
+  failure: StealthSyncFailure,
+  knowledge?: StealthCursorKnowledge,
+): StealthFailureLine {
+  const canRetry = failure.retryable === true;
   return {
     message: failure.message,
-    canRetry: failure.retryable === true,
+    canRetry,
+    // No button, no note. A caveat about a press that is not on offer is noise.
+    ...(canRetry ? retryNoteFor(knowledge) : {}),
   };
+}
+
+function retryNoteFor(knowledge?: StealthCursorKnowledge): { retryNote?: string } {
+  if (knowledge?.cursorUpdateFailed === true) {
+    return {
+      retryNote:
+        "The last scan could not save its position, so this one may cover ground already scanned.",
+    };
+  }
+  if (knowledge?.completedScanReportedHeight !== true) {
+    return {
+      retryNote:
+        "No scan for this wallet has finished yet, so this may start from the beginning and take several minutes.",
+    };
+  }
+  return {};
 }
 
 export interface StealthSyncHandle {

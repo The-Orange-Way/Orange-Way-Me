@@ -16,6 +16,7 @@ import {
   describeStealthProgress,
   describeStealthFailure,
   STEALTH_WIDGET_PATH,
+  type StealthCursorKnowledge,
 } from "../sync";
 import { STEALTH_MESSAGE } from "../protocol";
 import type { StealthInboundMessage, StealthChannel } from "../channel";
@@ -390,13 +391,13 @@ describe("startStealthSync", () => {
 
   describe("describeStealthFailure", () => {
     it("offers a retry when the widget said the failure is retryable", () => {
-      expect(
-        describeStealthFailure({
-          message: "Could not reach the filter server.",
-          code: "NETWORK",
-          retryable: true,
-        }),
-      ).toEqual({ message: "Could not reach the filter server.", canRetry: true });
+      const line = describeStealthFailure({
+        message: "Could not reach the filter server.",
+        code: "NETWORK",
+        retryable: true,
+      });
+      expect(line.message).toBe("Could not reach the filter server.");
+      expect(line.canRetry).toBe(true);
     });
 
     it("withholds the retry when the widget said the failure is permanent", () => {
@@ -440,6 +441,93 @@ describe("startStealthSync", () => {
     it("passes the widget's sentence through unedited", () => {
       const message = "Scan stopped at block 962,577. Try again in a moment.";
       expect(describeStealthFailure({ message, retryable: true }).message).toBe(message);
+    });
+  });
+
+  /**
+   * DL-1171. These guard one sentence that used to sit in the app as a comment
+   * and as an implied promise: that pressing Try again picks up where the scan
+   * stopped. We cannot see the cursor, it is upstream, and a first scan is a
+   * range of roughly a hundred thousand requests, so guessing in the
+   * reassuring direction is the expensive way to be wrong.
+   */
+  describe("describeStealthFailure, what it says about the cost of retrying", () => {
+    const transient = { message: "Could not reach the filter server.", retryable: true };
+
+    it("never promises that a retry resumes, whatever we know", () => {
+      // The one assertion that must never be relaxed. If a future change makes
+      // this fail, the change is claiming upstream behaviour this app cannot
+      // observe. Read DL-1171 before touching it.
+      const cases: Array<StealthCursorKnowledge | undefined> = [
+        undefined,
+        {},
+        { completedScanReportedHeight: true },
+        { completedScanReportedHeight: true, cursorUpdateFailed: false },
+        { cursorUpdateFailed: true },
+      ];
+      for (const knowledge of cases) {
+        const note = describeStealthFailure(transient, knowledge).retryNote ?? "";
+        expect(note).not.toMatch(
+          /resume|pick(s)? up where|continue(s)? from|where it (left|stopped)/i,
+        );
+      }
+    });
+
+    it("warns plainly when the widget SAID it could not save its position", () => {
+      // Not a guess. The widget set cursor_update_failed, so the user is owed
+      // the consequence in words before they press anything.
+      const line = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: true,
+      });
+      expect(line.canRetry).toBe(true);
+      expect(line.retryNote).toMatch(/could not save its position/i);
+    });
+
+    it("says a first scan MAY start over, because may is the true word", () => {
+      const line = describeStealthFailure(transient, {});
+      expect(line.retryNote).toMatch(/no scan for this wallet has finished yet/i);
+      expect(line.retryNote).toMatch(/\bmay\b/i);
+    });
+
+    it("treats no knowledge at all the same as no finished scan", () => {
+      // A reload empties what this page has watched. Having forgotten is the
+      // same epistemic state as never having seen it, and must read that way.
+      expect(describeStealthFailure(transient, undefined).retryNote).toBe(
+        describeStealthFailure(transient, {}).retryNote,
+      );
+    });
+
+    it("stays silent when a scan finished and reported a height", () => {
+      // The case people will want to fill in with "this will continue from
+      // where it left off". That sentence is exactly what DL-1171 is about.
+      // Silence costs the user nothing; a false reassurance costs them minutes.
+      const line = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: false,
+      });
+      expect(line.canRetry).toBe(true);
+      expect(line.retryNote).toBeUndefined();
+    });
+
+    it("says nothing about a press that is not on offer", () => {
+      const line = describeStealthFailure(
+        { message: "That extended public key is not valid.", retryable: false },
+        {},
+      );
+      expect(line.canRetry).toBe(false);
+      expect(line.retryNote).toBeUndefined();
+    });
+
+    it("does not read a missing flag as a false one", () => {
+      // undefined means "we have not seen it". A cursorUpdateFailed we never
+      // received must not read as the widget having told us it succeeded.
+      const unseen = describeStealthFailure(transient, { completedScanReportedHeight: true });
+      const said = describeStealthFailure(transient, {
+        completedScanReportedHeight: true,
+        cursorUpdateFailed: false,
+      });
+      expect(unseen.retryNote).toBe(said.retryNote);
     });
   });
 });

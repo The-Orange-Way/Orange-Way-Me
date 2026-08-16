@@ -69,6 +69,7 @@ import {
   describeStealthProgress,
   describeStealthFailure,
   type StealthSyncProgress,
+  type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
@@ -249,6 +250,20 @@ export function ConnectionsPage() {
   // the widget's own callbacks. Stopped on unmount so its window message
   // listener can never outlive this page.
   const channelRef = useRef<StealthChannel | null>(null);
+  /**
+   * DL-1171. What we have actually watched happen to each connection's scan
+   * position, keyed by connection id.
+   *
+   * A ref and not state on purpose: nothing renders from it directly, it is
+   * read at the moment a failure toast is built, and putting it in state would
+   * re-render the whole page once per completed scan for no visible change.
+   *
+   * Scope is this page's lifetime, and that is not an oversight. A reload
+   * empties it and the UI then correctly says it has seen no scan finish,
+   * because it has not. Persisting it would mean claiming knowledge about the
+   * upstream cursor that survived longer than our evidence for it.
+   */
+  const cursorKnowledgeRef = useRef<Map<string, StealthCursorKnowledge>>(new Map());
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -613,10 +628,18 @@ export function ConnectionsPage() {
   /**
    * Scan a stealth connection by re-opening the OR widget on its sync route.
    *
-   * The widget is the scanner. It fetches the sealed envelope by id, reads
-   * `last_block_scanned` back and resumes from it, runs the filter scan in
-   * this browser, and posts sealed transactions back to OR. Nothing on our
-   * side scans, so this opens the widget and reports what the widget says.
+   * The widget is the scanner. It fetches the sealed envelope by id, runs the
+   * filter scan in this browser, and posts sealed transactions back to OR.
+   * Nothing on our side scans, so this opens the widget and reports what the
+   * widget says.
+   *
+   * This comment used to state that the widget reads `last_block_scanned` back
+   * and resumes from it. We cannot observe that, so we no longer claim it.
+   * What upstream confirmed is narrower: the cursor is written once at
+   * completion, not per batch, and the write is guarded on having sealed at
+   * least one transaction. So a scan that finds nothing does not advance it
+   * either. Do not reintroduce resume language here without a recording that
+   * shows a scan starting from a non-zero height.
    *
    * Every outcome below is reported from something the widget actually sent.
    * There is no success toast on the launch path: launching is not scanning,
@@ -662,6 +685,15 @@ export function ConnectionsPage() {
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
+          // DL-1171. Record what this frame told us about the scan position
+          // BEFORE anything else, because the next failure toast reads it and
+          // an early return further down would leave it stale. Note what is
+          // stored: that the widget reported a height, not that the height was
+          // saved. Those are different claims and only the first is ours.
+          cursorKnowledgeRef.current.set(conn.id, {
+            completedScanReportedHeight: outcome.lastBlockScanned !== undefined,
+            cursorUpdateFailed: outcome.cursorUpdateFailed === true,
+          });
           const found = outcome.txCount;
           // Report the count when the widget gave one. When it did not, say
           // that the scan finished and nothing more: inventing "up to date"
@@ -683,7 +715,7 @@ export function ConnectionsPage() {
           }
           if (outcome.cursorUpdateFailed) {
             toast.warning(
-              "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
+              "This scan finished but its position could not be saved, so the next sync may cover ground this one already scanned.",
             );
           }
           // DL-1116. This callback used to end at refreshList(), which is why
@@ -701,10 +733,22 @@ export function ConnectionsPage() {
          * the widget whether trying again could help, and offers the retry
          * only when the widget said yes.
          *
-         * The retry re-enters this same function, which is safe: a scan is
+         * DL-1171. What used to be written here: "the retry is safe, a scan is
          * resumable by design, the widget reads its own cursor back and picks
-         * up from `last_block_scanned`, and `handleStealthSync` clears the
-         * stale progress line before it starts.
+         * up from last_block_scanned". Every clause of that was an assumption.
+         * The cursor is upstream, this app cannot observe whether it was
+         * written, and a first scan covers a range of roughly a hundred
+         * thousand requests, so a press that quietly starts over is minutes of
+         * someone's evening, not a detail.
+         *
+         * What is still true and is the part worth keeping: the retry is
+         * always user-initiated, it re-enters this same function, and
+         * `handleStealthSync` clears the stale progress line before starting.
+         * Nothing here retries on its own, and nothing should be made to.
+         *
+         * So the button stays and the promise goes. `describeStealthFailure`
+         * adds a second sentence when we have an observed reason to think the
+         * press is expensive, and stays quiet when we do not.
          */
         onError: (failure) => {
           channelRef.current?.stop();
@@ -717,11 +761,17 @@ export function ConnectionsPage() {
           if (failure.code) {
             console.warn(`[Connections] stealth sync failed: ${failure.code}`);
           }
-          const line = describeStealthFailure(failure);
+          const line = describeStealthFailure(failure, cursorKnowledgeRef.current.get(conn.id));
           toast.error(
             line.message,
             line.canRetry
-              ? { action: { label: "Try again", onClick: () => void handleStealthSync(conn) } }
+              ? {
+                  // The caveat rides on the same toast as the button it is
+                  // about. A warning in a separate toast can be dismissed
+                  // first, which would leave the button and lose the sentence.
+                  description: line.retryNote,
+                  action: { label: "Try again", onClick: () => void handleStealthSync(conn) },
+                }
               : undefined,
           );
         },
