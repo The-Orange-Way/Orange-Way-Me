@@ -204,6 +204,39 @@ if command -v gitleaks >/dev/null; then
   fi
 fi
 
+# ---- Check 5: Seat trailer on every pushed commit ----
+# Every commit body's last non-empty line must name the seat that authored
+# it: "Seat: <seat-name>", matching ^Seat: [a-z0-9-]+$. This keeps public
+# authorship legible without publishing anything internal (a seat name is a
+# role, not a secret). A missing or malformed trailer refuses the push. Same
+# push_base as the scans above, so it measures only the commits this push adds.
+SEAT_PATTERN='^Seat: [a-z0-9-]+$'
+# GitHub injects a Claude co-author trailer on squash/rebase merges; that is a
+# public identifier, not a seat, so it is dropped before the last-line check,
+# mirroring the reserved-term scan's exemption so the two cannot drift.
+SEAT_COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+SEAT_FAIL=0
+for i in "${!LOCAL_SHAS[@]}"; do
+  sha="${LOCAL_SHAS[$i]}"
+  base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
+  if [ -n "$base" ]; then RANGE="$base..$sha"; else RANGE="$sha"; fi
+  while read -r commit; do
+    [ -z "$commit" ] && continue
+    last_line="$(git log -1 --format='%B' "$commit" \
+      | grep -viE "$SEAT_COAUTHOR_EXEMPT" \
+      | grep -vE '^[[:space:]]*$' | tail -1 || true)"
+    if ! printf '%s\n' "$last_line" | grep -qE "$SEAT_PATTERN"; then
+      red "✗ Commit ${commit:0:8} lacks a valid Seat: trailer as its last body line."
+      red "  End the commit body with 'Seat: <your-seat>' (matches ^Seat: [a-z0-9-]+\$)."
+      FAIL=1
+      SEAT_FAIL=1
+    fi
+  done < <(git rev-list "$RANGE" 2>/dev/null)
+done
+if [ "$SEAT_FAIL" = "0" ]; then
+  green "✓ Every pushed commit carries a Seat: trailer."
+fi
+
 if [ "$FAIL" != "0" ]; then
   red ""
   red "PUSH REFUSED. Fix the issues above, run /pr-this again, then retry."
