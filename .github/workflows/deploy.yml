@@ -200,16 +200,33 @@ jobs:
           # constant false, so a build that forgets the flag ships dark rather
           # than shipping a half-wired button.
           #
-          # The old prod arm said to flip "once the OR connector is live in
-          # prod". Its prod target, VITE_OR_CONNECT_URL above, answers 200 on
-          # connect.orangerails.com. That is a liveness check on the HOST and
+          # A 200 from VITE_OR_CONNECT_URL is a liveness check on the HOST and
           # is NOT proof the connector is provisioned for the prod platform
-          # slug (orangeway-me). That is an Orange Rails fact and theirs to
-          # confirm on this PR. Do not merge on the 200 alone.
+          # slug (orangeway-me). It never was. Do not re-derive the flip from
+          # a 200.
+          #
+          # What does justify the prod arm, obtained in writing 2026-08-16
+          # from the Orange Rails CTO, who owns that registry:
+          #   - orangeway-me is an active platform row, env=live, status=active.
+          #   - There is NO per-connector provisioning object in their schema
+          #     to be on or off. Their discovery endpoint authenticates by
+          #     platform_slug and 404s on an unknown slug, so an active row
+          #     for the slug IS the provisioning. Do not go looking for a
+          #     separate enablement record; it does not exist.
+          #   - Residual, stated rather than hidden: their read grant did not
+          #     cover the production project, so the prod row is confirmed
+          #     from the registry they can read. Tracked upstream as DL-1198.
+          #     If that row were absent the endpoint 404s, so this fails
+          #     closed on a visible button, not silently.
+          #
+          # VITE_OR_PLATFORM_SLUG above already selects orangeway-me on prod
+          # and orangeway-me-dev elsewhere, on BOTH branches, so this change
+          # does not alter which slug is sent. It only decides whether the
+          # entry point is reachable.
           #
           # The button this ungates opens the searchable source list, over 100
           # entries. It is not a tile grid and it is not new: DL-1116, PR 275.
-          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          VITE_OR_CONNECT_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
           # Stealth sync entry (DL-1047): Sync on a private connection opens
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
