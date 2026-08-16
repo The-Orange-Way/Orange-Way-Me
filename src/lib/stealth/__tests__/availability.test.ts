@@ -23,11 +23,11 @@ import { describeStealthAvailability, readStealthUnavailable } from "../availabi
 /**
  * Shape as recorded from deployed dev, trimmed to the fields under test. The
  * shape is what this fixture is for; the id inside it is not under test and is
- * never parsed, so it uses the reserved repeated-block pattern the rest of the
- * suite uses (11111111-..., 22222222-...).
+ * never parsed, so it uses the reserved-fictional deadbeef- prefix so it can
+ * never collide with a real recorded id.
  */
 const RECORDED_HEALTHY = {
-  connections: [{ id: "dddddddd-dddd-dddd-dddd-dddddddddddd" }],
+  connections: [{ id: "deadbeef-0000-4000-8000-000000000004" }],
   stealth_unavailable: false,
 };
 
