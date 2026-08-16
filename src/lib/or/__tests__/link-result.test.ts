@@ -8,14 +8,14 @@
 import { describe, it, expect } from "vitest";
 import { describeLinkResult } from "../link-result";
 
-// Fixture identifiers use the reserved repeated-block pattern the rest of the
-// suite already uses (11111111-..., 22222222-...). These are opaque row keys to
-// the code under test, which compares them and never parses them, so a value
-// that is obviously fictional at a glance costs nothing here and keeps every
-// fixture id in the suite recognisable as a fixture.
-const EXISTING = "88888888-8888-8888-8888-888888888888";
-const OTHER = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-const FRESH = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+// Fixture identifiers use the reserved-fictional deadbeef- prefix so they can
+// never collide with a real recorded id. These are opaque row keys to the code
+// under test, which compares them and never parses them, so a value that is
+// obviously fictional at a glance costs nothing here and keeps every fixture id
+// in the suite recognisable as a fixture.
+const EXISTING = "deadbeef-0000-4000-8000-000000000001";
+const OTHER = "deadbeef-0000-4000-8000-000000000002";
+const FRESH = "deadbeef-0000-4000-8000-000000000003";
 
 describe("describeLinkResult", () => {
   it("names the duplicate when the returned id was already on screen", () => {
