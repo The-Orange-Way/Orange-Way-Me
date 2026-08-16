@@ -20,9 +20,14 @@
 import { describe, it, expect } from "vitest";
 import { describeStealthAvailability, readStealthUnavailable } from "../availability";
 
-/** Shape as recorded from deployed dev, trimmed to the fields under test. */
+/**
+ * Shape as recorded from deployed dev, trimmed to the fields under test. The
+ * shape is what this fixture is for; the id inside it is not under test and is
+ * never parsed, so it uses the reserved repeated-block pattern the rest of the
+ * suite uses (11111111-..., 22222222-...).
+ */
 const RECORDED_HEALTHY = {
-  connections: [{ id: "52417f95-4482-403d-abb7-ac4a047fbd40" }],
+  connections: [{ id: "dddddddd-dddd-dddd-dddd-dddddddddddd" }],
   stealth_unavailable: false,
 };
 
