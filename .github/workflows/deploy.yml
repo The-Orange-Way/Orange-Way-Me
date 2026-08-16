@@ -144,8 +144,14 @@ jobs:
           # an automated sign-in run on dev at all. The dev Auth project
           # must carry the matching always-passes secret
           # (1x0000000000000000000000000000000AA) or the server rejects
-          # the test token. Prod is unchanged and keeps its real key.
-          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'prod' && vars.TURNSTILE_SITE_KEY_PROD || '1x00000000000000000000AA' }}
+          # the test token. The test key is bound STRICTLY to the dev
+          # arm: on prod the value comes only from
+          # vars.TURNSTILE_SITE_KEY_PROD, so a missing or renamed prod
+          # var yields an empty key and NO widget (a visible failure),
+          # never a silent fall-through to the always-passes test key
+          # that would let every bot through. Triggers are push to dev or
+          # prod only, so no preview build depends on the old fallback.
+          VITE_TURNSTILE_SITE_KEY: ${{ github.ref_name == 'dev' && '1x00000000000000000000AA' || vars.TURNSTILE_SITE_KEY_PROD }}
           # Release identifier -- paired with the source map upload step below
           # so Sentry can resolve minified prod stack traces ("index-XYZ.js:1457:52434")
           # back to readable filenames + line numbers from our checked-in source.
