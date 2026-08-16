@@ -237,7 +237,17 @@ jobs:
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
           # unset value folds the compare to a constant false.
-          VITE_STEALTH_SYNC_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
+          #
+          # The prod arm was added and then REMOVED again on the same day. It
+          # contradicted the numbered warning directly above it, which is the
+          # useful part of the story: the comment stating the constraint and the
+          # expression implementing it drifted apart inside one file, and only a
+          # reviewer reading both together caught it. The value is baked in at
+          # BUILD time from the branch name, so no amount of inspecting the
+          # hosting project's variables can detect or undo it after the fact.
+          # Turning this on for prod is a one line change, and it is gated on
+          # DL-1174 landing upstream, not on anything in this repository.
+          VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors
