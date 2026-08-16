@@ -191,34 +191,53 @@ jobs:
           # would name the prod platform from a dev build.
           VITE_OR_PLATFORM_SLUG: ${{ github.ref_name == 'prod' && 'orangeway-me' || 'orangeway-me-dev' }}
           # Gate the Orange Rails stealth-sync connector to the environments
-          # where it is actually provisioned. Today that is dev only; prod
-          # still lands the "+ Connect a Bitcoin source" button on the broken
-          # XPUB sync screen (DL-0393), so prod must not render it.
+          # where it is actually provisioned. Dev and prod as of DL-0347.
           #
           # OR_CONNECT_ENABLED in src/components/connections/ConnectionsPage.tsx
           # reads `import.meta.env.VITE_OR_CONNECT_ENABLED === "true"`. Branch
           # derived rather than a repo variable, same shape and reasoning as
-          # VITE_ONBOARDING_V2 above: an empty value folds the compare to a
-          # constant false, so the prod bundle never contains the flag-on
-          # branch of the button and no route reaches the connect widget.
-          # Flip prod on here (change the prod arm to 'true') once the OR
-          # connector is live in prod.
-          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          # VITE_ONBOARDING_V2 above: an unset value folds the compare to a
+          # constant false, so a build that forgets the flag ships dark rather
+          # than shipping a half-wired button.
+          #
+          # The old prod arm said to flip "once the OR connector is live in
+          # prod". Its prod target, VITE_OR_CONNECT_URL above, answers 200 on
+          # connect.orangerails.com. That is a liveness check on the HOST and
+          # is NOT proof the connector is provisioned for the prod platform
+          # slug (orangeway-me). That is an Orange Rails fact and theirs to
+          # confirm on this PR. Do not merge on the 200 alone.
+          #
+          # The button this ungates opens the searchable source list, over 100
+          # entries. It is not a tile grid and it is not new: DL-1116, PR 275.
+          VITE_OR_CONNECT_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
           # Stealth sync entry (DL-1047): Sync on a private connection opens
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
           #
-          # Dev on, prod off. The Orange Rails sync route is verified live on
-          # dev.orangerails.com against the deployed chunk, so dev can be
-          # walked. Nobody has yet watched a scan complete end to end for a
-          # host-app user, so prod stays dark until someone has.
+          # The old prod arm stayed dark because "nobody has yet watched a scan
+          # complete end to end for a host-app user". Somebody has, 2026-08-16,
+          # recorded: a first sync of an unscanned wallet ran about 208s over
+          # roughly 105,000 requests to the filter host and returned a
+          # SYNC_COMPLETE frame carrying last_block_scanned. A repeat sync of
+          # the same wallet is 8.8s and six requests. That precondition is met.
+          #
+          # Two things a reviewer must weigh that the precondition does not
+          # cover, stated here so nobody discovers them after the flip:
+          #
+          #   1. DL-1174 is open upstream. Sealed stealth rows are stored but
+          #      the read path does not return them yet, so a prod customer can
+          #      finish a scan and still see an empty transactions list. That is
+          #      a worse first impression than no button, so this should not
+          #      reach the prod branch before DL-1174 lands.
+          #   2. The cursor is written only at completion, confirmed by Orange
+          #      Rails 2026-08-16, so a first scan that dies partway redoes the
+          #      whole range on retry. PR 278 makes the copy say so instead of
+          #      promising a resume we cannot prove.
           #
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
-          # empty value folds the compare to a constant false and the prod
-          # bundle never contains the widget branch. Flip prod on here (change
-          # the prod arm to 'true') once the dev walk passes.
-          VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          # unset value folds the compare to a constant false.
+          VITE_STEALTH_SYNC_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
 
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors
