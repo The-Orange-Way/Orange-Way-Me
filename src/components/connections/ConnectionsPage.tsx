@@ -72,6 +72,11 @@ import {
 } from "@/lib/stealth/sync";
 import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
+import {
+  orRowsForConnection,
+  withStealthSourceWallet,
+  withStealthSourceWalletId,
+} from "@/lib/stealth/ledger";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -428,7 +433,22 @@ export function ConnectionsPage() {
             }
           }
 
-          return { ...c, decrypted_label, decrypted_last_error, decrypted_wallets };
+          // DL-1116. A stealth connection always arrives with source_wallets
+          // [], which made every wallet-keyed feature in this page
+          // structurally unreachable for it: no mapping row, so no linked
+          // account, so nowhere for a scanned transaction to land, so no
+          // stealth wallet in the Transactions filter. Synthesize the one
+          // wallet the connection already is, here rather than at each of the
+          // four use sites, so the rest of the page needs no stealth branch.
+          return {
+            ...c,
+            decrypted_label,
+            decrypted_last_error,
+            decrypted_wallets: withStealthSourceWallet(
+              { id: c.id, is_stealth: c.is_stealth, decrypted_label },
+              decrypted_wallets,
+            ),
+          };
         }),
       );
       setConnections(decoded);
@@ -666,7 +686,13 @@ export function ConnectionsPage() {
               "This scan finished but its position could not be saved, so the next sync will scan from the previous point again.",
             );
           }
-          void refreshList();
+          // DL-1116. This callback used to end at refreshList(), which is why
+          // a scan could report "Sealed and stored 14 transactions" and the
+          // user still saw none of them: the row was marked "Synced just now"
+          // and nothing ever read the transactions back into the local
+          // ledger. Both or-sync paths already call the import bridge here;
+          // this one never did.
+          void importAfterStealthScan(conn);
         },
         /**
          * DL-1117. The widget sends `{code, message, retryable}` and this app
@@ -1014,11 +1040,15 @@ export function ConnectionsPage() {
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
-    const listRes = (await callProxy("or-transactions-list", {
+    const listRes = await callProxy("or-transactions-list", {
       subaccount_id: subaccountId,
       limit: 500,
-    })) as { transactions: EncryptedTxRow[] };
-    const forThisConn = (listRes.transactions ?? []).filter((t) => t.connection_id === conn.id);
+    });
+    // Shape lives in one place. Orange Rails has not finalised how stealth
+    // rows come back (their DL-1174) and has ruled they will NOT be extra
+    // entries in `transactions`, so nothing here may assume that array is the
+    // whole answer.
+    const forThisConn = orRowsForConnection(listRes, conn.id);
     if (forThisConn.length === 0) return { unmapped: 0, unmappedWalletIds: [] };
 
     const decoded: OrImportTransaction[] = [];
@@ -1027,7 +1057,10 @@ export function ConnectionsPage() {
       try {
         const json = await decryptOrTxnCipher(row.encrypted_payload);
         const payload = JSON.parse(json) as OrImportTransaction;
-        decoded.push(payload);
+        // A stealth connection has exactly one wallet, so an untagged row is
+        // an absent field rather than an ambiguous one. Without this the
+        // bridge counts every stealth row `untagged` and skips it.
+        decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
       } catch {
         decryptFailures += 1;
       }
@@ -1087,6 +1120,40 @@ export function ConnectionsPage() {
       toast.success(`Wallet ledger: ${summary}.`);
     }
     return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
+  }
+
+  /**
+   * DL-1116. Read back and import what the widget just sealed.
+   *
+   * Deliberately NOT gated on the widget's transaction count. The or-sync path
+   * guards its import on `res.synced > 0` because or-sync reports what it
+   * itself just wrote, but the stealth widget's count is what it stored on the
+   * Orange Rails side, and rows stored by an earlier scan may never have been
+   * imported here at all. That is exactly the state this ticket was filed
+   * from: fourteen rows sealed and stored, zero of them in the ledger. A scan
+   * that finds nothing new still has to reconcile.
+   *
+   * Failure is reported rather than swallowed. A scan that succeeded and an
+   * import that failed is a different situation from a failed scan, and the
+   * user's next action is the same either way, so say what happened and name
+   * the retry.
+   */
+  async function importAfterStealthScan(conn: ConnectionRow) {
+    try {
+      await refreshList();
+      const importResult = await importSyncedTransactionsForConnection(conn);
+      setTxRefreshKey((k) => k + 1);
+      // Same call to action as the or-sync path: the transactions arrived but
+      // have nowhere to go until the wallet is pointed at an account. For a
+      // stealth connection this dialog was previously unreachable, because
+      // there was no wallet to map.
+      if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
+        handleEditMapping(conn);
+      }
+    } catch (err) {
+      console.error("[Connections] stealth ledger import failed", err);
+      toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
+    }
   }
 
   function handleDelete(conn: ConnectionRow) {
@@ -1174,11 +1241,11 @@ export function ConnectionsPage() {
   const fetchEncryptedFor = useCallback(
     (connectionId: string) => async (): Promise<EncryptedTxRow[]> => {
       if (!subaccountId) return [];
-      const res = (await callProxy("or-transactions-list", {
+      const res = await callProxy("or-transactions-list", {
         subaccount_id: subaccountId,
         limit: 100,
-      })) as { transactions: EncryptedTxRow[] };
-      return (res.transactions ?? []).filter((t) => t.connection_id === connectionId);
+      });
+      return orRowsForConnection(res, connectionId);
     },
     [subaccountId],
   );
