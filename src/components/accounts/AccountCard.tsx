@@ -192,7 +192,9 @@ function ConnectionBadge({
             </Link>
           </TooltipTrigger>
           <TooltipContent side="top" align="start" className="max-w-xs text-xs">
-            <p className="font-medium">Cannot check the connection feeding {accountName} right now.</p>
+            <p className="font-medium">
+              Cannot check the connection feeding {accountName} right now.
+            </p>
             <p className="mt-1 text-muted-foreground">
               We could not reach OrangeRails, so this account's sync status is unknown. It is not
               necessarily broken. Click to open Connections.
