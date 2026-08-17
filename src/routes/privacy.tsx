@@ -32,7 +32,7 @@ function PrivacyPage() {
       <article className="mx-auto max-w-3xl px-6 py-16">
         <h1 className="text-4xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Version: 2026.07.02.{" "}
+          Version: 2026.08.17.{" "}
           <Link to="/privacy-changelog" className="underline">
             See changes to this policy.
           </Link>
@@ -61,6 +61,31 @@ function PrivacyPage() {
           <li>Sell or share your data with advertisers, brokers, or aggregators.</li>
           <li>Train AI models on your financial data.</li>
           <li>Build a behavioral profile of your spending.</li>
+        </ul>
+
+        <h2 className="mt-8 text-xl font-semibold">Marketing and cross-product messages</h2>
+        <p className="mt-2 text-muted-foreground">
+          Separately from the transactional emails above, we may send you a small number of
+          marketing messages about other Generation Bitcoin products, such as the Children's Books.
+          These are distinct from transactional email: transactional messages (signup, password
+          reset, account notices) are part of running your account and are always sent, while these
+          marketing messages are optional and you can turn them off at any time.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          One of these messages is triggered by an in-app action: when you connect a financial
+          account, such as a bank feed or a wallet, that connection event can trigger a one-time
+          message inviting you to a related Generation Bitcoin product. The trigger is only the fact
+          that you connected an account. We do not read, and cannot read, the contents of that
+          account: your balances and transactions stay encrypted on your device exactly as described
+          above, and none of that data is used to target or personalize these messages.
+        </p>
+        <p className="mt-2 text-muted-foreground">
+          You can opt out at any time, and opting out is honored across both products:
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+          <li>One tap at the moment you connect an account, before any message is sent.</li>
+          <li>A one-click unsubscribe link in every marketing email, which needs no login.</li>
+          <li>A setting in the app you can change whenever you like.</li>
         </ul>
 
         <h2 className="mt-8 text-xl font-semibold">Sub-processors</h2>
@@ -115,7 +140,9 @@ function PrivacyPage() {
         <h3 className="mt-6 text-lg font-semibold">Resend</h3>
         <p className="mt-2 text-muted-foreground">
           Sends the transactional emails we generate: signup confirmations, password reset links,
-          and any future notification we explicitly opt into. Headquartered in Delaware, United
+          and any future notification we explicitly opt into. Resend also delivers the optional
+          cross-product marketing messages described under Marketing and cross-product messages
+          above. Headquartered in Delaware, United
           States, with mail delivery infrastructure in the United States and Europe. Sees: your
           email address and the email body. Retention: send logs for the period required by the
           Resend service plan, typically up to 30 days.{" "}
