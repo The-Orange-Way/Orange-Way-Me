@@ -9,16 +9,19 @@
  *   - Does NOT decrypt source_wallets metadata. We only need the
  *     connection-level status, last_sync_at, and the decrypted
  *     last-error message.
- *   - Returns a flat array, no React state for picker / sync /
- *     delete UX. Pure read.
+ *   - Returns a discriminated result, not a flat array, so a caller
+ *     cannot confuse "we could not read your connections" with "you
+ *     have no connections". Pure read, no picker / sync / delete UX.
  *   - Caches the subaccount_id from localStorage same as the
  *     Connections page. If the user has never visited /connections
- *     (subaccount not provisioned yet) we return empty quietly — no
+ *     (subaccount not provisioned yet) the result is unavailable — no
  *     OR connections means nothing to surface.
  *
  * ZK invariants are unchanged: the proxy authenticates via the
  * Supabase JWT, OR returns ciphertexts, and the decrypted_last_error
- * is decrypted in-browser with the OR creds subkey.
+ * is decrypted in-browser with the OR creds subkey. The raw error
+ * string is deliberately not returned when a fetch fails; a failed
+ * read yields the unreadable state, not an error message on the UI.
  */
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -38,6 +41,25 @@ export interface OrConnectionStatus {
   /** Decrypted last error message; null if there's no error or we couldn't decrypt. */
   lastError: string | null;
 }
+
+/**
+ * The three distinct facts a caller must be able to tell apart:
+ *
+ *   loaded      — we reached OR and read the list. Trust it, including
+ *                 an empty connections array (genuinely no connections).
+ *   unreadable  — the proxy threw. The list is UNKNOWN, not empty; a
+ *                 broken connection may exist and we could not see it.
+ *   unavailable — the vault is locked, or OR was never provisioned for
+ *                 this user. There is nothing OR-side to surface.
+ *
+ * The union is intentional: `connections` only exists on `loaded`, so a
+ * consumer cannot read the list without first acknowledging which fact
+ * it is looking at.
+ */
+export type OrConnectionsResult =
+  | { state: "loaded"; connections: OrConnectionStatus[] }
+  | { state: "unreadable" }
+  | { state: "unavailable" };
 
 interface RawConnectionRow {
   id: string;
@@ -64,33 +86,31 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
 }
 
 export function useOrConnectionsList(): {
-  connections: OrConnectionStatus[];
+  result: OrConnectionsResult;
   loading: boolean;
-  error: string | null;
   refresh: () => Promise<void>;
 } {
   const { user } = useAuth();
   const { isUnlocked, decryptOrCipher } = useVault();
-  const [connections, setConnections] = useState<OrConnectionStatus[]>([]);
+  const [result, setResult] = useState<OrConnectionsResult>({ state: "unavailable" });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!user || !isUnlocked) {
-      setConnections([]);
+      // Cannot read anything without an unlocked vault. Nothing to surface.
+      setResult({ state: "unavailable" });
       setLoading(false);
       return;
     }
     const cachedSub = localStorage.getItem(SUBACCOUNT_LS_PREFIX + user.id);
     if (!cachedSub) {
       // User hasn't visited Connections yet (no OR subaccount provisioned).
-      // Quietly return empty — there's nothing OR-side to surface.
-      setConnections([]);
+      // There's nothing OR-side to surface.
+      setResult({ state: "unavailable" });
       setLoading(false);
       return;
     }
     setLoading(true);
-    setError(null);
     try {
       const res = (await callProxy("or-connection-list", {
         subaccount_id: cachedSub,
@@ -122,13 +142,15 @@ export function useOrConnectionsList(): {
           lastError,
         });
       }
-      setConnections(out);
+      setResult({ state: "loaded", connections: out });
     } catch (err) {
-      // Non-fatal: a Wallets-page surface that can't reach OR shouldn't
-      // block account rendering. Log and leave the list empty.
+      // The read failed. The list is UNKNOWN, not empty: a broken
+      // connection may exist and we could not see it. Surface that as
+      // unreadable so the badge can say "status unknown" instead of
+      // silently rendering healthy. The raw error is logged, never
+      // returned to the UI.
       console.warn("[useOrConnectionsList] fetch failed", err);
-      setError(err instanceof Error ? err.message : "Could not load connections");
-      setConnections([]);
+      setResult({ state: "unreadable" });
     } finally {
       setLoading(false);
     }
@@ -138,5 +160,5 @@ export function useOrConnectionsList(): {
     void refresh();
   }, [refresh]);
 
-  return { connections, loading, error, refresh };
+  return { result, loading, refresh };
 }
