@@ -142,10 +142,9 @@ function PrivacyPage() {
           Sends the transactional emails we generate: signup confirmations, password reset links,
           and any future notification we explicitly opt into. Resend also delivers the optional
           cross-product marketing messages described under Marketing and cross-product messages
-          above. Headquartered in Delaware, United
-          States, with mail delivery infrastructure in the United States and Europe. Sees: your
-          email address and the email body. Retention: send logs for the period required by the
-          Resend service plan, typically up to 30 days.{" "}
+          above. Headquartered in Delaware, United States, with mail delivery infrastructure in the
+          United States and Europe. Sees: your email address and the email body. Retention: send
+          logs for the period required by the Resend service plan, typically up to 30 days.{" "}
           <a
             href="https://resend.com/legal/dpa"
             className="underline"
