@@ -19,6 +19,7 @@
  * jsdom dependency required.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { OR_LINK_SUCCESS, OR_LINK_SUCCESS_STEALTH } from "./__fixtures__/or-connect-messages";
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
@@ -169,12 +170,16 @@ describe("openOrConnect", () => {
     expect(frag.get("txn_key")).toBe(TXN_KEY);
 
     // Drive a success message.
-    postSuccess({ connection_id: "conn-1", subaccount_id: "sub-1", source_wallets: [] });
+    postSuccess({
+      connection_id: OR_LINK_SUCCESS.connection_id,
+      subaccount_id: OR_LINK_SUCCESS.subaccount_id,
+      source_wallets: OR_LINK_SUCCESS.source_wallets,
+    });
     const result = await pending;
     expect(result).toMatchObject({
       type: "or-link-success",
-      connection_id: "conn-1",
-      subaccount_id: "sub-1",
+      connection_id: OR_LINK_SUCCESS.connection_id,
+      subaccount_id: OR_LINK_SUCCESS.subaccount_id,
     });
     expect(shim.popup.close).toHaveBeenCalled();
   });
@@ -318,5 +323,34 @@ describe("openOrConnect", () => {
     // fallback back to any case that runs after this one. unstubAllEnvs
     // would also drop the module-level stubs the other cases need.
     vi.stubEnv("VITE_OR_PLATFORM_SLUG", "");
+  });
+});
+
+// Contract conformance (DL-1114). These guards pin the or-link-success
+// payload to the shape OR's /connect route actually posts, not a shape
+// invented here. The wrong-shape guard is red against the pre-fixture inline
+// literal (which omitted subaccount_id) and green against the real fixture.
+describe("or-link-success contract (DL-1114)", () => {
+  it("real fixture carries every field the sender posts", () => {
+    expect(OR_LINK_SUCCESS.type).toBe("or-link-success");
+    expect(typeof OR_LINK_SUCCESS.connection_id).toBe("string");
+    expect(typeof OR_LINK_SUCCESS.subaccount_id).toBe("string");
+    expect(Array.isArray(OR_LINK_SUCCESS.source_wallets)).toBe(true);
+    for (const w of OR_LINK_SUCCESS.source_wallets) {
+      expect(typeof w.id).toBe("string");
+      expect(typeof w.external_wallet_id).toBe("string");
+      expect(typeof w.currency).toBe("string");
+      expect(typeof w.label).toBe("string");
+    }
+  });
+
+  it("rejects the pre-fixture invented shape that dropped subaccount_id", () => {
+    const invented = { type: "or-link-success", connection_id: "conn-1" };
+    expect(invented).not.toHaveProperty("subaccount_id");
+    expect(OR_LINK_SUCCESS).toHaveProperty("subaccount_id");
+  });
+
+  it("stealth variant sends an empty source_wallets array, not absent", () => {
+    expect(OR_LINK_SUCCESS_STEALTH.source_wallets).toEqual([]);
   });
 });
