@@ -116,8 +116,9 @@ function PrivacyPage() {
         <p className="mt-2 text-muted-foreground">
           Sends the transactional emails we generate: signup confirmations, password reset links,
           and any future notification we explicitly opt into. Headquartered in Delaware, United
-          States, with mail delivery infrastructure in the United States and Europe. Sees: your email address and the email body. Retention: send
-          logs for the period required by the Resend service plan, typically up to 30 days.{" "}
+          States, with mail delivery infrastructure in the United States and Europe. Sees: your
+          email address and the email body. Retention: send logs for the period required by the
+          Resend service plan, typically up to 30 days.{" "}
           <a
             href="https://resend.com/legal/dpa"
             className="underline"
