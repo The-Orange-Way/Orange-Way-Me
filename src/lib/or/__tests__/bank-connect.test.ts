@@ -22,6 +22,10 @@
  * watch and the 3000ms discovery poll.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  OR_QUILTT_LINK_COMPLETE,
+  OR_QUILTT_LINK_COMPLETE_NULL_CONN,
+} from "./__fixtures__/or-connect-messages";
 
 const invokeMock = vi.fn();
 
@@ -116,10 +120,13 @@ describe("openBankPopup", () => {
     const { openBankPopup } = await import("../bank-connect");
     const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
-    postMessage({ type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" });
+    postMessage(OR_QUILTT_LINK_COMPLETE);
     const result = await pending;
 
-    expect(result).toMatchObject({ type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" });
+    expect(result).toMatchObject({
+      type: "OR_QUILTT_LINK_COMPLETE",
+      quilttConnectionId: OR_QUILTT_LINK_COMPLETE.quilttConnectionId,
+    });
     expect(shim.popup.close).toHaveBeenCalled();
     // Only the baseline snapshot fires (taken the instant the popup opens);
     // the postMessage settles the promise before any 3s poll tick occurs.
@@ -258,5 +265,27 @@ describe("openBankPopup", () => {
     shim.popup.closed = true;
     await vi.advanceTimersByTimeAsync(500);
     await expect(pending).rejects.toThrow(/closed before completion/i);
+  });
+});
+
+// Contract conformance (DL-1114). Pin OR_QUILTT_LINK_COMPLETE to what OR's
+// /connect/quiltt route actually posts: quilttConnectionId (which may be null)
+// plus orConnectionId and orSubaccountId. The wrong-shape guard is red against
+// the pre-fixture inline literal (which dropped the OR ids) and green here.
+describe("OR_QUILTT_LINK_COMPLETE contract (DL-1114)", () => {
+  it("real fixture carries the OR ids the sender posts", () => {
+    expect(OR_QUILTT_LINK_COMPLETE.type).toBe("OR_QUILTT_LINK_COMPLETE");
+    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orConnectionId");
+    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orSubaccountId");
+  });
+
+  it("rejects the pre-fixture invented shape that dropped the OR ids", () => {
+    const invented = { type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" };
+    expect(invented).not.toHaveProperty("orConnectionId");
+    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orConnectionId");
+  });
+
+  it("sender may post a null quilttConnectionId", () => {
+    expect(OR_QUILTT_LINK_COMPLETE_NULL_CONN.quilttConnectionId).toBeNull();
   });
 });
