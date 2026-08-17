@@ -286,7 +286,25 @@ jobs:
               echo "CSP: branch=dev, header=Content-Security-Policy (enforcing)"
               ;;
             prod)
-              echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (Report-Only default kept)"
+              # prod keeps the Report-Only default, but "keep" must be
+              # asserted, not assumed: the policy only reaches prod because
+              # the build copies public/_headers into dist/. Verify the copy
+              # happened and is the shape we expect, or fail the deploy.
+              if [ ! -f dist/_headers ]; then
+                echo "CSP: dist/_headers missing on prod, refusing to deploy with no policy"
+                exit 1
+              fi
+              ro_count=$(grep -cE '^  Content-Security-Policy-Report-Only: ' dist/_headers || true)
+              if [ "$ro_count" -ne 1 ]; then
+                echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $ro_count"
+                exit 1
+              fi
+              enf_count=$(grep -cE '^  Content-Security-Policy: ' dist/_headers || true)
+              if [ "$enf_count" -ne 0 ]; then
+                echo "CSP: enforcing header must not be present on prod, found $enf_count"
+                exit 1
+              fi
+              echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (Report-Only default kept, asserted)"
               ;;
             *)
               echo "CSP: unknown branch '${{ github.ref_name }}', refusing to guess"
