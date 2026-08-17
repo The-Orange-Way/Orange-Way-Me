@@ -254,6 +254,64 @@ jobs:
           # unset value folds the compare to a constant false.
           VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
+      - name: Apply CSP policy for this branch
+        # public/_headers is the single source and ships Report-Only; vite
+        # copies it verbatim to dist/_headers. On dev only, flip the header
+        # NAME up to enforcing IN PLACE, touching no other character of the
+        # policy body, so there is no second file to drift against. prod keeps
+        # the Report-Only default; an unknown branch fails loudly. If this step
+        # is skipped or fails, dist/_headers stays Report-Only, so the residual
+        # failure is a missing report on dev, never a vault lockout on prod.
+        run: |
+          set -euo pipefail
+          case "${{ github.ref_name }}" in
+            dev)
+              # Anchored to the header value line (two leading spaces) so the
+              # header names written in the comment block never match. Require
+              # EXACTLY one Report-Only header: zero or more than one is a
+              # malformed source, so refuse rather than guess.
+              count=$(grep -cE '^  Content-Security-Policy-Report-Only: ' dist/_headers || true)
+              if [ "$count" -ne 1 ]; then
+                echo "CSP: expected exactly 1 Report-Only header in dist/_headers, found $count"
+                exit 1
+              fi
+              # Flip the NAME only. The policy body is left byte-for-byte intact.
+              sed -i 's/^  Content-Security-Policy-Report-Only: /  Content-Security-Policy: /' dist/_headers
+              if ! grep -qE '^  Content-Security-Policy: ' dist/_headers; then
+                echo "CSP: enforcing header not present after flip"; exit 1
+              fi
+              if grep -qE '^  Content-Security-Policy-Report-Only: ' dist/_headers; then
+                echo "CSP: Report-Only header still present after flip"; exit 1
+              fi
+              echo "CSP: branch=dev, header=Content-Security-Policy (enforcing)"
+              ;;
+            prod)
+              # prod keeps the Report-Only default, but "keep" must be
+              # asserted, not assumed: the policy only reaches prod because
+              # the build copies public/_headers into dist/. Verify the copy
+              # happened and is the shape we expect, or fail the deploy.
+              if [ ! -f dist/_headers ]; then
+                echo "CSP: dist/_headers missing on prod, refusing to deploy with no policy"
+                exit 1
+              fi
+              ro_count=$(grep -cE '^  Content-Security-Policy-Report-Only: ' dist/_headers || true)
+              if [ "$ro_count" -ne 1 ]; then
+                echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $ro_count"
+                exit 1
+              fi
+              enf_count=$(grep -cE '^  Content-Security-Policy: ' dist/_headers || true)
+              if [ "$enf_count" -ne 0 ]; then
+                echo "CSP: enforcing header must not be present on prod, found $enf_count"
+                exit 1
+              fi
+              echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (Report-Only default kept, asserted)"
+              ;;
+            *)
+              echo "CSP: unknown branch '${{ github.ref_name }}', refusing to guess"
+              exit 1
+              ;;
+          esac
+
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors
         # building dist locally don't need to upload anywhere, and a dev build
