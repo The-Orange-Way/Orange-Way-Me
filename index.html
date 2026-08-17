@@ -17,8 +17,9 @@
       support.orangeway.app) before flipping to enforcing. Flip criterion:
       zero legitimate violations across the observation window.
 
-      script-src is strict (no 'unsafe-inline'): the only inline executable
-      script is the Chatwoot bootstrap below, allow-listed by its sha256.
+      script-src is strict (no 'unsafe-inline'): there is no inline executable
+      script. The Chatwoot live-chat bootstrap loads from src/lib/chatwoot.ts
+      (bundled, covered by 'self'); its SDK loads from support.orangeway.app.
       JSON-LD blocks use type="application/ld+json" (non-executable) and are
       not governed by script-src. 'wasm-unsafe-eval' is required by hash-wasm
       for the Argon2id vault unlock WASM.
@@ -212,26 +213,6 @@
       </noscript>
     </div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- Chatwoot live chat widget -->
-    <script>
-      (function (d, t) {
-        var BASE_URL = "https://support.orangeway.app";
-        var g = d.createElement(t),
-          s = d.getElementsByTagName(t)[0];
-        g.src = BASE_URL + "/packs/js/sdk.js";
-        g.defer = true;
-        g.async = true;
-        s.parentNode.insertBefore(g, s);
-        g.onload = function () {
-          window.chatwootSDK.run({
-            // Chatwoot websiteToken is public by design -- equivalent to a
-            // Google Analytics property ID, embedded in every page to
-            // identify this site to the Chatwoot widget. Not a secret.
-            websiteToken: "kSi4hwVaBkUfr7zhmVdhCwHq",
-            baseUrl: BASE_URL,
-          });
-        };
-      })(document, "script");
-    </script>
+    <!-- Chatwoot live chat widget bootstraps from src/lib/chatwoot.ts -->
   </body>
 </html>

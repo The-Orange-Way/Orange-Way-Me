@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getRouter } from "./router";
 import { initSentry } from "./lib/observability/sentry";
 import { installChunkReloadHandler } from "./lib/chunk-reload";
+import { initChatwoot } from "./lib/chatwoot";
 import "./styles.css";
 
 // Wire Sentry before React mounts so the very first render errors are
@@ -29,6 +30,10 @@ if (!container) {
 }
 
 createRoot(container).render(<RouterProvider router={router} />);
+
+// Chatwoot live-chat widget. Extracted from an inline <script> in index.html so
+// a strict script-src 'self' CSP covers it with no per-build sha256 to drift.
+initChatwoot();
 
 // Fade out the inline loading splash after React paints. Keeps the brand
 // moment visible briefly even on fast connections so the framing
