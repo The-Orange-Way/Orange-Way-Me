@@ -254,6 +254,37 @@ jobs:
           # unset value folds the compare to a constant false.
           VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
+      - name: Apply CSP policy for this branch
+        # public/_headers ships Report-Only and vite copies it to dist/_headers.
+        # Enforce on dev only by swapping in the byte-identical enforcing
+        # variant; prod keeps Report-Only; an unknown branch fails loudly. If
+        # this step is skipped or fails, dist/_headers stays Report-Only, so the
+        # residual failure mode is a missing report, never a vault lockout.
+        run: |
+          set -euo pipefail
+          case "${{ github.ref_name }}" in
+            dev)
+              cp deploy/_headers.enforcing dist/_headers
+              # Prove the swap produced an enforcing policy and left no
+              # Report-Only header. Anchored to the header line so the header
+              # names mentioned in the comment block never match.
+              if ! grep -qE '^  Content-Security-Policy: ' dist/_headers; then
+                echo "CSP: enforcing header not present after swap"; exit 1
+              fi
+              if grep -qE '^  Content-Security-Policy-Report-Only: ' dist/_headers; then
+                echo "CSP: Report-Only header still present after swap"; exit 1
+              fi
+              echo "CSP: enforcing variant applied for dev"
+              ;;
+            prod)
+              echo "CSP: Report-Only default kept for prod"
+              ;;
+            *)
+              echo "CSP: unknown branch '${{ github.ref_name }}', refusing to guess"
+              exit 1
+              ;;
+          esac
+
       - name: Upload source maps to GlitchTip
         # Skip when the DSN for THIS branch is unset (open-source contributors
         # building dist locally don't need to upload anywhere, and a dev build
