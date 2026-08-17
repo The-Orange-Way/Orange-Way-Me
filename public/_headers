@@ -1,20 +1,31 @@
 # Cloudflare Pages response headers for orangeway.app
 #
-# Content-Security-Policy ran Report-Only from 2026-07-24 so violations could be
-# logged to GlitchTip (report-uri) without blocking anything, and the host
-# allow-list confirmed complete. It is ENFORCING here as of 2026-08-17 on dev.
+# THIS FILE IS THE SAFE BASELINE. The policy below is Report-Only, and that is
+# what every environment gets unless something deliberately upgrades it.
+# `scripts/csp-mode-plugin.ts` is that something: on a Cloudflare Pages build it
+# reads CF_PAGES_BRANCH and rewrites this header to the enforcing
+# `Content-Security-Policy` for branches listed in ENFORCING_BRANCHES (`dev`
+# today, so orangeway.dev enforces and orangeway.app reports). It can only
+# upgrade, never downgrade, so if the plugin is removed or never runs, every
+# environment reports instead of blocking.
+#
+# Do not restore an enforcing header here. A static enforcing line applies to
+# every environment at once, which is exactly the defect this replaced: the file
+# used to claim prod stayed Report-Only while dev enforced, and nothing in the
+# repository made that true. It was true only for as long as prod had not
+# received the commit yet, which is a delay, not a gate.
+#
 # report-uri is deliberately kept: an enforcing policy still reports, and those
 # reports are how a real break is caught. frame-ancestors and report-uri can
 # only be delivered as a header, never via <meta>.
 #
-# Flip criterion, restated so it can be met: zero violations naming a source we
-# own or depend on. Violations with an EMPTY source are not attributable to any
-# host and cannot be allow-listed, so "zero violations" of any kind was a bar
-# nothing could clear. Prod stays Report-Only until dev has run 48 hours clean
-# under enforcement and QA has passed vault unlock, Turnstile and the support
-# widget.
+# Promotion criterion for adding `prod` to ENFORCING_BRANCHES: dev has run 48
+# hours clean under enforcement AND QA has passed vault unlock, Turnstile and
+# the support widget. Violations naming an EMPTY source are not attributable to
+# any host and cannot be allow-listed, so they do not count against it; a
+# violation naming a source we own or depend on does.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; report-uri https://pulse.orangeway.app/api/1/security/?sentry_key=557469b0d58a45a3b7626e1329b014ee
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; report-uri https://pulse.orangeway.app/api/1/security/?sentry_key=557469b0d58a45a3b7626e1329b014ee
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

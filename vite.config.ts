@@ -5,6 +5,7 @@ import path from "path";
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import prerenderMarketingPlugin from "./scripts/prerender-plugin";
 import prerenderManifestPlugin from "./scripts/prerender-manifest-plugin";
+import cspModePlugin from "./scripts/csp-mode-plugin";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -26,6 +27,10 @@ export default defineConfig(({ mode }) => ({
     mode !== "development" && prerenderMarketingPlugin(),
     // Build-time static prerender for /api/public/ai/manifest.json (issue #7).
     mode !== "development" && prerenderManifestPlugin(),
+    // Rewrites dist/_headers to the enforcing CSP on branches that enforce.
+    // Runs for every build command, including a bare `vite build`, because
+    // Cloudflare Pages does not necessarily invoke `npm run build`.
+    cspModePlugin(),
   ].filter(Boolean),
   resolve: {
     alias: {
