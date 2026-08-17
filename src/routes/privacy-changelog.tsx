@@ -44,6 +44,27 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.08.17</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                Added a Marketing and cross-product messages section disclosing optional marketing
+                about other Generation Bitcoin products, including a message triggered when you
+                connect a financial account. The trigger uses only the connection event, never the
+                contents of the account, which stay encrypted on your device.
+              </li>
+              <li>
+                Documented the opt-out paths: one tap at connection, a no-login unsubscribe link in
+                every marketing email, and an in-app setting. Opt-out is honored across both
+                products.
+              </li>
+              <li>
+                Noted that Resend also delivers these marketing messages, in addition to
+                transactional email.
+              </li>
+            </ul>
+          </div>
+
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.07.02</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>
