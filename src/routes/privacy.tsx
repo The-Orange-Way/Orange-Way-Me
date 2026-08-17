@@ -32,7 +32,7 @@ function PrivacyPage() {
       <article className="mx-auto max-w-3xl px-6 py-16">
         <h1 className="text-4xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Version: 2026.08.17.{" "}
+          Version: 2026.07.02.{" "}
           <Link to="/privacy-changelog" className="underline">
             See changes to this policy.
           </Link>
