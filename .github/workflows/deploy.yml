@@ -200,16 +200,36 @@ jobs:
           # constant false, so a build that forgets the flag ships dark rather
           # than shipping a half-wired button.
           #
-          # The old prod arm said to flip "once the OR connector is live in
-          # prod". Its prod target, VITE_OR_CONNECT_URL above, answers 200 on
-          # connect.orangerails.com. That is a liveness check on the HOST and
+          # A 200 from VITE_OR_CONNECT_URL is a liveness check on the HOST and
           # is NOT proof the connector is provisioned for the prod platform
-          # slug (orangeway-me). That is an Orange Rails fact and theirs to
-          # confirm on this PR. Do not merge on the 200 alone.
+          # slug (orangeway-me). It never was. Do not re-derive the flip from
+          # a 200.
+          #
+          # What does justify the prod arm, stated as the requirements this
+          # flag rests on rather than as a description of anyone else's
+          # systems. The supporting detail is in the ticket, because this
+          # file is public:
+          #   - The prod arm rests on a written confirmation, obtained
+          #     2026-08-16 from the owner of the upstream platform registry,
+          #     that the production platform this app authenticates as is
+          #     live. Read it in the ticket before changing this line.
+          #   - The entry point fails CLOSED if that platform is not
+          #     recognised upstream: the flow stops at discovery on a
+          #     visible button rather than degrading quietly. That is why a
+          #     residual doubt about the confirmation is survivable here and
+          #     would not be survivable on a silent path.
+          #   - Do not go looking for a separate per-connector enablement
+          #     switch to turn on. There is not one to find, and the answer
+          #     to why is in the ticket.
+          #
+          # VITE_OR_PLATFORM_SLUG above already selects orangeway-me on prod
+          # and orangeway-me-dev elsewhere, on BOTH branches, so this change
+          # does not alter which slug is sent. It only decides whether the
+          # entry point is reachable.
           #
           # The button this ungates opens the searchable source list, over 100
           # entries. It is not a tile grid and it is not new: DL-1116, PR 275.
-          VITE_OR_CONNECT_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          VITE_OR_CONNECT_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
           # Stealth sync entry (DL-1047): Sync on a private connection opens
           # the Orange Rails widget on its sync route instead of calling
           # or-sync, which cannot see that row and honestly returns zero.
