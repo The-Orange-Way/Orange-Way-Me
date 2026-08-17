@@ -1,5 +1,5 @@
 /**
- * FX rates. BTC↔USD reads live ORBI quotes when available (refreshed by the
+ * FX rates. BTC<>USD reads live ORBI quotes when available (refreshed by the
  * root-level useORBIBootstrap effect) and falls back to a static reference
  * value when ORBI is unreachable. Other fiat pairs stay static for MVP.
  *
@@ -7,6 +7,7 @@
  * BTC and sats are tracked alongside fiat (1 BTC = 1e8 sats).
  */
 import { getLiveBTCRate } from "./orbi-rates";
+import { normalizeBitcoinToSats } from "./bitcoin-units";
 
 export type SupportedCurrency = "USD" | "CAD" | "EUR" | "GBP" | "BTC" | "sats";
 
@@ -48,12 +49,17 @@ export function convert(amount: number, from: string, to: string): number {
   const f = (from as SupportedCurrency) in USD_PER_UNIT ? (from as SupportedCurrency) : "USD";
   const t = (to as SupportedCurrency) in USD_PER_UNIT ? (to as SupportedCurrency) : "USD";
   if (!Number.isFinite(amount)) return 0;
-  const usd = amount * usdPerUnit(f);
+  // Stored BTC amounts may be whole-integer sats (imported from OR/Blink).
+  // Normalise through the shared heuristic so FX conversion and display always
+  // agree on the unit -- preventing the 1e8 over-count that showed ~$940 as ~$94B.
+  const effectiveAmount = f === "BTC" ? normalizeBitcoinToSats(amount, "BTC") : amount;
+  const effectiveFrom: SupportedCurrency = f === "BTC" ? "sats" : f;
+  const usd = effectiveAmount * usdPerUnit(effectiveFrom);
   return usd / usdPerUnit(t);
 }
 
 /**
- * Format a number in the chosen currency (no FX conversion — caller supplies the value).
+ * Format a number in the chosen currency (no FX conversion -- caller supplies the value).
  * Accepts an optional `locale` (BCP 47 tag) so the caller can plug in the
  * user's numberFormat preference. Defaults to the browser locale.
  */
