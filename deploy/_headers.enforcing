@@ -1,0 +1,31 @@
+# Cloudflare Pages response headers for Orange Way.
+#
+# CSP delivery is branch-derived by .github/workflows/deploy.yml, the same
+# mechanism every other per-environment value in that workflow uses, so no repo
+# variable can flip it by accident:
+#
+#   - public/_headers is the checked-in default and is Report-Only. vite copies
+#     it verbatim into dist/_headers, so anything that skips or fails the deploy
+#     CSP step serves Report-Only: a missing report, never a vault lockout.
+#   - On the dev branch only, the deploy overwrites dist/_headers with the
+#     enforcing variant at deploy/_headers.enforcing, which is byte-identical to
+#     public/_headers except that Content-Security-Policy-Report-Only becomes
+#     Content-Security-Policy. Prod keeps the Report-Only default; an unknown
+#     branch fails the deploy loudly.
+#
+# report-uri is kept under both policies: an enforcing policy still reports, and
+# those reports are how a real break is caught. frame-ancestors and report-uri
+# can only be delivered as a header, never via <meta>.
+#
+# Prod flips to enforcing only after dev has run 48 hours clean under
+# enforcement and QA has passed vault unlock, Turnstile and the support widget.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://support.orangeway.app https://eu-assets.i.posthog.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://eu.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://eu.i.posthog.com https://eu-assets.i.posthog.com https://pulse.orangeway.app https://support.orangeway.app wss://support.orangeway.app; frame-src https://challenges.cloudflare.com https://support.orangeway.app; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'; report-uri https://pulse.orangeway.app/api/1/security/?sentry_key=557469b0d58a45a3b7626e1329b014ee
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  # Force HTTPS for two years incl. subdomains; 'preload' opts into the browser
+  # preload list. Orange Way is HTTPS-only behind Cloudflare, so this is safe.
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+  # Deny powerful browser features the app never uses (defense in depth).
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), payment=(), usb=()
