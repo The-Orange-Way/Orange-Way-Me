@@ -11,11 +11,12 @@
       log a console warning), and only the header can carry report-uri and
       frame-ancestors. See public/_headers for the authoritative policy.
 
-      Report-Only first: it logs violations to GlitchTip (pulse.orangeway.app)
-      without blocking anything, so we can confirm every legitimate host
-      (Supabase, PostHog EU, GlitchTip, Cloudflare Turnstile, Chatwoot at
-      support.orangeway.app) before flipping to enforcing. Flip criterion:
-      zero legitimate violations across the observation window.
+      It ran Report-Only from 2026-07-24 so every legitimate host (Supabase,
+      PostHog EU, GlitchTip, Cloudflare Turnstile, Chatwoot at
+      support.orangeway.app) could be confirmed from real traffic. It is
+      enforcing on dev as of 2026-08-17 and still Report-Only on prod.
+      report-uri is kept under enforcement, because an enforcing policy still
+      reports and that is how a real break is caught.
 
       script-src is strict (no 'unsafe-inline'): there is no inline executable
       script. The Chatwoot live-chat bootstrap loads from src/lib/chatwoot.ts
