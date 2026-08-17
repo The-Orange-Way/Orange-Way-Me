@@ -1265,13 +1265,37 @@ export function ConnectionsPage() {
       }
     }
 
+    // DL-1081: a 2xx from the delete endpoint is not proof the row is gone,
+    // and the optimistic removal above would otherwise hide a delete that did
+    // not take. Read the list back and confirm this connection is actually
+    // absent before saying "disconnected". If it is still present, that is a
+    // silent failure: refreshList has already restored the row, so say so
+    // rather than claim success.
+    const rows = await refreshList();
+    if (rows && rows.some((c) => c.id === conn.id)) {
+      console.error("[Connections] delete returned ok but the connection is still listed", {
+        connection_id: conn.id,
+      });
+      toast.error(
+        "Couldn't disconnect. It may still be connected. Give it a moment and try again.",
+      );
+      setTxRefreshKey((k) => k + 1);
+      return;
+    }
+
     // Clean up the local account mappings (best-effort).
     try {
       await removeAllForConnection(conn.id);
     } catch (mapErr) {
       console.warn("[Connections] removeAllForConnection failed", mapErr);
     }
-    toast.success(`${name} disconnected`);
+    // Read-back confirmed the connection is gone. When the list could not be
+    // refreshed, say only what we know, exactly as the add path does.
+    toast.success(
+      rows
+        ? `${name} disconnected`
+        : `${name} disconnected. We couldn't refresh the list just now.`,
+    );
     setTxRefreshKey((k) => k + 1);
   }
 
