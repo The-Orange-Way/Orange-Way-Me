@@ -74,6 +74,12 @@ const ALLOWED_ENDPOINTS = new Set([
   // than by subaccount_id, so or-connection-delete cannot see them and answers
   // 404 "Connection not found in this subaccount" for every one of them.
   "or-stealth-connection-delete",
+  // Read back the sealed transactions the stealth widget stored. Separate
+  // from or-transactions-list for the same reason the delete is separate:
+  // stealth rows live in their own store, scoped by app_user_id. Without
+  // this entry the call is rejected below before any network hop, which is
+  // why the app has never issued a stealth read at all (#305).
+  "or-stealth-transactions-list",
   "or-sync",
   "or-transactions-list",
   // Hosted Link widget -- OW mints a short-lived widget_token, then opens
@@ -243,6 +249,37 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "connection_id required in payload" }, 400, cors);
       }
       orBody = { app_user_id: user.id, connection_id: p.connection_id };
+    } else if (endpoint === "or-stealth-transactions-list") {
+      // Same scoping as the stealth delete: app_user_id, never subaccount_id,
+      // and forced to the authenticated caller rather than taken from the
+      // payload. OR re-checks that the connection belongs to that app_user_id
+      // and answers 403 otherwise, so forcing it here is what makes that check
+      // resolve to the caller instead of to whatever the browser claimed.
+      //
+      // The cursor is forwarded verbatim and never rebuilt. Both halves must
+      // travel together -- OR rejects a half cursor, because block_height is
+      // not unique and a height-only cursor silently drops the remainder of a
+      // block. Passing them through untouched is what keeps that guarantee.
+      const p = payload as {
+        connection_id?: unknown;
+        limit?: unknown;
+        before_block?: unknown;
+        before_txid_blind_index_hex?: unknown;
+      };
+      if (typeof p.connection_id !== "string" || !p.connection_id) {
+        return jsonResponse({ error: "connection_id required in payload" }, 400, cors);
+      }
+      orBody = {
+        app_user_id: user.id,
+        connection_id: p.connection_id,
+        ...(typeof p.limit === "number" ? { limit: p.limit } : {}),
+        ...(typeof p.before_block === "number" && typeof p.before_txid_blind_index_hex === "string"
+          ? {
+              before_block: p.before_block,
+              before_txid_blind_index_hex: p.before_txid_blind_index_hex,
+            }
+          : {}),
+      };
     } else {
       // For everything else, ensure subaccount_id is in the payload.
       // The browser passes it from localStorage; we additionally validate
