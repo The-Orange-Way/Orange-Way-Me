@@ -223,6 +223,7 @@ function buildConnectUrl(args: {
     platform: args.platform,
     app_user_id: args.appUserId,
     return_to: args.returnTo,
+    app_url: args.returnTo,
   });
   if (args.provider) qs.set("provider", args.provider);
   const frag = new URLSearchParams({
