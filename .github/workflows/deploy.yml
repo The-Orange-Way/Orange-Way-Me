@@ -249,10 +249,28 @@ jobs:
           #   2. The retry-behaviour copy from PR 278 must be in before the
           #      flip, so the UI does not promise something unobserved.
           #
+          # Both are now satisfied, which is why the prod arm is on:
+          #   1. The DL-1174 read path already reached prod in an earlier
+          #      promotion, ahead of this line, so any prod build that carries
+          #      this line necessarily includes the read path. The flag can
+          #      never evaluate true on a prod build that lacks it.
+          #   2. PR 278 merged 2026-08-16 and its merge commit is an ancestor
+          #      of prod, verified with `git merge-base --is-ancestor`.
+          #
+          # What the dark arm actually did, measured on prod 2026-08-18: Sync
+          # on a private connection issued one request, the proxy answered 400
+          # "stealth connections cannot be synced via this endpoint", and the
+          # page showed the customer nothing at all -- no error, no state
+          # change, the card stayed "Never synced" indefinitely. The comment
+          # above calls that fallthrough an "honest no-op". It is not honest;
+          # it is a dead button. The silent-failure half is a real defect and
+          # is filed separately, because it will still be wrong for any future
+          # connection kind the proxy rejects, flag or no flag.
+          #
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
           # unset value folds the compare to a constant false.
-          VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
+          VITE_STEALTH_SYNC_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
 
       - name: Apply CSP policy for this branch
         # public/_headers is the single source and ships Report-Only; vite
