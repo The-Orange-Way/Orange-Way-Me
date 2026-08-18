@@ -241,10 +241,14 @@ export interface StealthProgressLine {
 export function shouldShowScanProgress(args: {
   /** True only while the in-browser stealth scan path is running for this row. */
   scanActive: boolean;
-  /** True when the row is a private connection, whatever is syncing it. */
-  isStealth: boolean;
+  /**
+   * True when the row is a private connection, whatever is syncing it.
+   * Optional because the column is nullable on the row type: an absent flag
+   * is not a private connection, and must not be treated as one.
+   */
+  isStealth: boolean | undefined;
 }): boolean {
-  return args.scanActive && args.isStealth;
+  return args.scanActive && args.isStealth === true;
 }
 
 export function describeStealthProgress(

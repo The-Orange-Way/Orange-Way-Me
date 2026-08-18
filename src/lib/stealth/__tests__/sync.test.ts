@@ -551,6 +551,12 @@ describe("shouldShowScanProgress", () => {
     expect(shouldShowScanProgress({ scanActive: false, isStealth: true })).toBe(false);
   });
 
+  // The column is nullable, and an absent flag used to be indistinguishable
+  // from false only by JSX truthiness. Pin it.
+  it("treats an absent is_stealth as not private", () => {
+    expect(shouldShowScanProgress({ scanActive: true, isStealth: undefined })).toBe(false);
+  });
+
   it("shows nothing for a non-private row, scan flag notwithstanding", () => {
     expect(shouldShowScanProgress({ scanActive: true, isStealth: false })).toBe(false);
     expect(shouldShowScanProgress({ scanActive: false, isStealth: false })).toBe(false);
