@@ -87,4 +87,15 @@ describe("humanizeError", () => {
     expect(humanizeError(new Error("HTTP 429 Too Many Requests"))).toMatch(/too many tries/i);
     expect(humanizeError(new Error("too many requests"))).toMatch(/too many tries/i);
   });
+
+  // #313. This exact string came back from production and was replaced by the
+  // generic fallback, which ends in "Please try again." The retry cannot work:
+  // the endpoint rejects private connections by design. Assert both halves,
+  // that the reason survives AND that we stop asking for a pointless retry.
+  it("keeps the reason a private connection cannot be synced server-side", () => {
+    const msg = humanizeError(new Error("Stealth connections cannot be synced via this endpoint"));
+    expect(msg).toMatch(/private connections/i);
+    expect(msg).not.toMatch(/try again/i);
+    expect(msg).not.toBe("Something went wrong. Please try again.");
+  });
 });

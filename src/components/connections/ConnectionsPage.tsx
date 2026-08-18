@@ -67,6 +67,7 @@ import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sy
 import {
   startStealthSync,
   describeStealthProgress,
+  shouldShowScanProgress,
   describeStealthFailure,
   type StealthSyncProgress,
   type StealthCursorKnowledge,
@@ -301,6 +302,13 @@ export function ConnectionsPage() {
    * list refreshes is worse than no progress at all.
    */
   const [stealthProgress, setStealthProgress] = useState<StealthSyncProgress | null>(null);
+  /**
+   * #313. Which row, if any, has the in-browser stealth scan path running.
+   * Distinct from syncingId on purpose: syncingId is true for ANY sync of any
+   * connection kind, and a private row synced by the generic path does no
+   * scanning, so driving scan UI off syncingId claims work that never started.
+   */
+  const [stealthScanId, setStealthScanId] = useState<string | null>(null);
   // DL-1113. or-connection-list reports a failed private-wallet arm as a 200
   // with this flag set, not as an error, so without holding it here the rows
   // simply vanish and the page looks like it belongs to someone who has none.
@@ -659,6 +667,7 @@ export function ConnectionsPage() {
     // Showing the last run's "97%" while a fresh scan is at zero is a lie the
     // user has no way to detect.
     setStealthProgress(null);
+    setStealthScanId(conn.id);
     try {
       // Read the key immediately before use, like handleAddConnection does, so
       // a vault that locked while this page sat open fails here rather than
@@ -689,6 +698,7 @@ export function ConnectionsPage() {
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
+          setStealthScanId(null);
           // DL-1171. Record what this frame told us about the scan position
           // BEFORE anything else, because the next failure toast reads it and
           // an early return further down would leave it stale. Note what is
@@ -759,6 +769,7 @@ export function ConnectionsPage() {
           channelRef.current = null;
           setSyncingId(null);
           setStealthProgress(null);
+          setStealthScanId(null);
           // The code is for us, not for the user: it is the difference between
           // a support conversation that starts with a cause and one that
           // starts with "it said something went wrong".
@@ -786,6 +797,7 @@ export function ConnectionsPage() {
       // mint failed. All of these mean no scan was started, so say so.
       setSyncingId(null);
       setStealthProgress(null);
+      setStealthScanId(null);
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
       toast.error(humanizeError(new Error(msg)));
@@ -1557,6 +1569,7 @@ export function ConnectionsPage() {
               derivedInstitution={institutionByConn.get(c.id) ?? null}
               syncing={syncingId === c.id}
               syncProgress={syncingId === c.id ? stealthProgress : null}
+              scanActive={stealthScanId === c.id}
               expanded={expandedConnId === c.id}
               onToggleExpand={() => setExpandedConnId((prev) => (prev === c.id ? null : c.id))}
               onSync={() => handleSync(c)}
@@ -1716,6 +1729,7 @@ function ConnectionCard({
   derivedInstitution,
   syncing,
   syncProgress,
+  scanActive,
   expanded,
   onToggleExpand,
   onSync,
@@ -1739,6 +1753,9 @@ function ConnectionCard({
    *  one syncing or the widget has not spoken yet. Only private (stealth)
    *  connections ever get one; bank and or-sync paths leave this null. */
   syncProgress: StealthSyncProgress | null;
+  /** True only while the in-browser stealth scan is running for this row.
+   *  Gates the scan-progress line; see shouldShowScanProgress. */
+  scanActive: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
   onSync: () => void;
@@ -1871,12 +1888,15 @@ function ConnectionCard({
               </div>
             )}
             {/* DL-1111. Live scan progress, in the widget's own words.
-                Stealth only: no other sync path posts progress frames, so for
-                a bank or an or-sync connection this would render a permanent
-                "Scanning" line that never advances and never resolves.
+                Gated on the scan path having actually started, not on the row
+                being private and syncing: only the stealth path posts progress
+                frames, so any other path here renders a "Scanning" line that
+                never advances and never resolves. #313 is that bug, measured on
+                production, where a private row synced by the generic path
+                claimed a first scan for a request already rejected on the wire.
                 aria-live so a screen reader hears the scan move rather than
                 being told "Syncing" once and then left in silence. */}
-            {syncing && conn.is_stealth && (
+            {shouldShowScanProgress({ scanActive, isStealth: conn.is_stealth }) && (
               <div className="mt-1.5" aria-live="polite">
                 {(() => {
                   const line = describeStealthProgress(syncProgress);
