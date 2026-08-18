@@ -62,7 +62,7 @@ import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
-import { buildDeletePlan } from "@/lib/or/connection-delete";
+import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import {
   startStealthSync,
@@ -1369,7 +1369,8 @@ export function ConnectionsPage() {
     // silent failure: refreshList has already restored the row, so say so
     // rather than claim success.
     const rows = await refreshList();
-    if (rows && rows.some((c) => c.id === conn.id)) {
+    const readback = classifyDeleteReadback(rows, conn.id);
+    if (readback === "silent-failure") {
       console.error("[Connections] delete returned ok but the connection is still listed", {
         connection_id: conn.id,
       });
@@ -1389,7 +1390,7 @@ export function ConnectionsPage() {
     // Read-back confirmed the connection is gone. When the list could not be
     // refreshed, say only what we know, exactly as the add path does.
     toast.success(
-      rows
+      readback === "confirmed-gone"
         ? `${name} disconnected`
         : `${name} disconnected. We couldn't refresh the list just now.`,
     );
