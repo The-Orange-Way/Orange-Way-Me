@@ -2,12 +2,14 @@
  * DL-1116. These cover the two things that made stealth transactions
  * invisible on our side, and one thing that is not settled yet.
  *
- * The wire-shape tests exist because Orange Rails has NOT finalised how
- * stealth rows come back (their DL-1174). Their CTO ruled the read path is
- * fixed additively and that stealth rows are not concatenated into
- * `transactions`, so both the shape that exists today and the separate-array
- * shape are asserted here. When the real shape lands, the test that fails is
- * the specification of what changed.
+ * The wire-shape tests were written before Orange Rails finalised how stealth
+ * rows come back (their DL-1174). That has now landed, and the real shape was
+ * neither of the two guessed at: a separate endpoint whose rows carry NO
+ * connection id and whose envelope is split rather than concatenated. The
+ * `orRowsForConnection` tests are kept as-is because that function still owns
+ * the non-stealth response; the new block at the bottom covers the real
+ * stealth shape, and the first test in it is the trap that would otherwise
+ * have made this whole change a no-op.
  */
 
 import { describe, expect, it } from "vitest";
@@ -16,6 +18,8 @@ import {
   STEALTH_WALLET_CURRENCY,
   STEALTH_WALLET_FALLBACK_LABEL,
   orRowsForConnection,
+  sealedRecordToCipherB64,
+  stealthPageFromResponse,
   stealthSourceWalletId,
   withStealthSourceWallet,
   withStealthSourceWalletId,
@@ -133,5 +137,153 @@ describe("orRowsForConnection", () => {
     expect(orRowsForConnection("nope", CONN)).toEqual([]);
     expect(orRowsForConnection({ transactions: "nope" }, CONN)).toEqual([]);
     expect(orRowsForConnection({}, CONN)).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------
+ * The real DL-1174 shape.
+ * ------------------------------------------------------------------------- */
+
+/** A 12-byte IV and a short ciphertext, as base64, matching the real framing. */
+const IV_B64 = btoa("\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b");
+const CT_B64 = btoa("sealed-bytes");
+
+function sealed(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    algorithm: "AES-256-GCM",
+    iv_b64: IV_B64,
+    ciphertext_b64: CT_B64,
+    ...overrides,
+  };
+}
+
+function stealthRow(id: string, blockHeight = 800000, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    sealed_record: sealed(),
+    occurred_at: "2026-08-01T00:00:00.000Z",
+    block_height: blockHeight,
+    txid_blind_index_hex: "a".repeat(64),
+    ...overrides,
+  };
+}
+
+describe("stealthPageFromResponse", () => {
+  it("reads rows that carry no connection_id of their own", () => {
+    // THE TRAP. The endpoint puts the connection id at the top level and the
+    // rows do not repeat it. `orRowsForConnection` filters on the row field,
+    // so routing this response through it returns [] -- indistinguishable
+    // from an empty wallet, which is exactly the reported bug. If this test
+    // ever goes red because someone consolidated the two readers, the bug is
+    // back and it will not announce itself in production.
+    const res = { connection_id: CONN, transactions: [stealthRow("t1"), stealthRow("t2", 799999)] };
+
+    expect(orRowsForConnection(res, CONN)).toEqual([]);
+    expect(stealthPageFromResponse(res, CONN).rows.map((r) => r.id)).toEqual(["t1", "t2"]);
+  });
+
+  it("refuses a response for a different connection", () => {
+    // A mismatched id means we are holding someone else's page. Importing it
+    // would attribute another wallet's history to this one, which is worse
+    // than showing nothing.
+    const res = { connection_id: OTHER_CONN, transactions: [stealthRow("t1")] };
+    expect(stealthPageFromResponse(res, CONN).rows).toEqual([]);
+  });
+
+  it("returns an empty page for malformed input instead of throwing", () => {
+    for (const bad of [null, undefined, 42, "nope", {}, { connection_id: CONN }]) {
+      const page = stealthPageFromResponse(bad, CONN);
+      expect(page.rows).toEqual([]);
+      expect(page.hasMore).toBe(false);
+    }
+  });
+
+  it("skips a row sealed under an envelope version it does not understand", () => {
+    // Decrypting a future envelope under today's framing assumptions either
+    // throws or authenticates against the wrong bytes. Leaving the row out and
+    // letting `total` disagree with the row count is the honest outcome.
+    const res = {
+      connection_id: CONN,
+      total: 2,
+      transactions: [
+        stealthRow("ok"),
+        stealthRow("future", 799998, { sealed_record: sealed({ version: 2 }) }),
+      ],
+    };
+    const page = stealthPageFromResponse(res, CONN);
+    expect(page.rows.map((r) => r.id)).toEqual(["ok"]);
+    expect(page.total).toBe(2);
+  });
+
+  it("skips a row whose algorithm is not the one we can open", () => {
+    const res = {
+      connection_id: CONN,
+      transactions: [
+        stealthRow("x", 800000, { sealed_record: sealed({ algorithm: "ChaCha20-Poly1305" }) }),
+      ],
+    };
+    expect(stealthPageFromResponse(res, CONN).rows).toEqual([]);
+  });
+
+  it("de-duplicates by row id", () => {
+    const res = { connection_id: CONN, transactions: [stealthRow("dup"), stealthRow("dup")] };
+    expect(stealthPageFromResponse(res, CONN).rows).toHaveLength(1);
+  });
+
+  it("reports hasMore only when a usable two-half cursor came with it", () => {
+    const base = { connection_id: CONN, transactions: [stealthRow("t1")], has_more: true };
+
+    // No cursor at all: a caller that trusted has_more here would re-request
+    // page one forever.
+    expect(stealthPageFromResponse({ ...base, next_cursor: null }, CONN).hasMore).toBe(false);
+
+    // Half a cursor is not a cursor. block_height is not unique, so a
+    // height-only cursor silently drops the rest of a block at a page edge.
+    expect(
+      stealthPageFromResponse({ ...base, next_cursor: { before_block: 800000 } }, CONN).hasMore,
+    ).toBe(false);
+
+    const good = stealthPageFromResponse(
+      {
+        ...base,
+        next_cursor: { before_block: 800000, before_txid_blind_index_hex: "b".repeat(64) },
+      },
+      CONN,
+    );
+    expect(good.hasMore).toBe(true);
+    expect(good.nextCursor).toEqual({
+      before_block: 800000,
+      before_txid_blind_index_hex: "b".repeat(64),
+    });
+  });
+
+  it("does not claim more pages when the server says there are none", () => {
+    const res = {
+      connection_id: CONN,
+      transactions: [stealthRow("t1")],
+      has_more: false,
+      total: 1,
+    };
+    expect(stealthPageFromResponse(res, CONN).hasMore).toBe(false);
+  });
+});
+
+describe("sealedRecordToCipherB64", () => {
+  it("reframes split iv/ciphertext into the concatenated form decryptText expects", () => {
+    // decryptText slices the first 12 bytes off as the IV and treats the rest
+    // as ciphertext+tag. Assert on that split rather than on a magic string,
+    // so the test still means something if the fixture changes.
+    const out = sealedRecordToCipherB64(sealed());
+    const raw = atob(out);
+    expect(raw.slice(0, 12)).toBe(atob(IV_B64));
+    expect(raw.slice(12)).toBe(atob(CT_B64));
+  });
+
+  it("throws rather than handing back something that fails later as an opaque decrypt error", () => {
+    expect(() => sealedRecordToCipherB64(sealed({ version: 9 }) as never)).toThrow();
+    expect(() => sealedRecordToCipherB64(sealed({ iv_b64: btoa("short") }) as never)).toThrow(
+      /IV length/,
+    );
   });
 });

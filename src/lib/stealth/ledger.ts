@@ -35,12 +35,13 @@
  *    of truth. So the rows will arrive either in a separate array or carrying
  *    a per-row source tag, and NOT as extra entries in `transactions`.
  *
- *    Nothing in this app should encode a guess about which. `orRowsForConnection`
- *    is the single place that touches the response shape, so when DL-1174
- *    lands there is one function to change and no call site to hunt for. It
- *    accepts the shape that exists today plus the separate-array shape, reads
- *    both when both are present, and is deliberately incurious about a source
- *    tag: we select by connection id, which is correct under either design.
+ *    UPDATE: DL-1174 has landed. Orange Rails shipped a dedicated endpoint,
+ *    `or-stealth-transactions-list`, and it is deployed. It is neither of the
+ *    two shapes guessed at above -- it is a separate response with its own
+ *    envelope framing and no per-row connection id -- so `orRowsForConnection`
+ *    was left exactly as it was and `stealthPageFromResponse` at the bottom of
+ *    this file reads the real thing. Read the block above it before changing
+ *    either: the two shapes differ in a way that fails silently.
  */
 
 /**
@@ -178,4 +179,186 @@ export function orRowsForConnection(response: unknown, connectionId: string): Or
     out.push(row);
   }
   return out;
+}
+
+/* -------------------------------------------------------------------------
+ * The stealth read path (DL-1174 landed; this app's half of DL-1116)
+ *
+ * The comment at the top of this file says the wire shape "is NOT final".
+ * It is now. Orange Rails shipped `or-stealth-transactions-list` and it is
+ * deployed, so the guesswork this module was built to absorb is over and the
+ * real shape is encoded below.
+ *
+ * It is NOT the shape `orRowsForConnection` handles, and the difference is the
+ * kind that fails silently:
+ *
+ *   - The rows do NOT carry `connection_id`. The endpoint selects
+ *     `id, sealed_record, occurred_at, block_height, txid_blind_index_hex,
+ *     created_at` and puts the connection id at the TOP LEVEL of the response,
+ *     because every row in the response belongs to the connection that was
+ *     asked for. Feeding these rows to `orRowsForConnection` drops all of them
+ *     on its `row.connection_id !== connectionId` test and returns [], which
+ *     is indistinguishable from "this wallet has no history" -- exactly the
+ *     bug this work exists to fix (#305). So this is a separate reader, and
+ *     it checks the connection id ONCE, against the response.
+ *
+ *   - The envelope is framed differently. `encrypted_payload` is base64 of
+ *     iv||ciphertext concatenated, which is what `decryptText` expects.
+ *     `sealed_record` splits the same AES-256-GCM output into `iv_b64` and
+ *     `ciphertext_b64`. A second decrypt path would have to reach for the
+ *     transactions subkey on its own, so instead `sealedRecordToCipherB64`
+ *     reframes the envelope into the concatenated form and the existing,
+ *     already-reviewed `decryptOrTxnCipher` stays the only caller that ever
+ *     touches that subkey.
+ *
+ *     (The wording here is deliberate: an earlier draft put the word "key"
+ *     immediately before the function name and the repo's leak scanner read
+ *     the pair as a generic API key. Rephrasing beat adding an allowlist
+ *     entry, which would have been a permanent hole for one comment.)
+ *
+ * There is no new key material here. The widget seals with the `txn_key` this
+ * app hands it in the /connect fragment, and that is `deriveTransactionsKey`
+ * -- the same ORANGERAILS_TRANSACTIONS_V1 subkey that opens `encrypted_payload`.
+ * ------------------------------------------------------------------------- */
+
+/** The sealed envelope as `or-stealth-transactions-list` returns it. */
+export interface StealthSealedRecord {
+  version: number;
+  algorithm: string;
+  iv_b64: string;
+  ciphertext_b64: string;
+}
+
+/** One row of that endpoint's `transactions` array. Note: no `connection_id`. */
+export interface StealthSealedRow {
+  id: string;
+  sealed_record: StealthSealedRecord;
+  /** Plaintext block date. Deliberate: see the ZKA level-2 trade-off on the OR side. */
+  occurred_at: string;
+  block_height: number;
+  txid_blind_index_hex: string;
+}
+
+/**
+ * Cursor for the next page, echoed back verbatim.
+ *
+ * Both halves or neither. `block_height` is not unique on the table -- one
+ * block can hold several of a wallet's transactions -- so a cursor built on
+ * height alone silently drops the rest of a block whenever a page boundary
+ * lands inside one. Orange Rails documents this and refuses a half cursor, so
+ * we never construct one by hand.
+ */
+export interface StealthPageCursor {
+  before_block: number;
+  before_txid_blind_index_hex: string;
+}
+
+/** What a caller needs to decide whether to ask for another page. */
+export interface StealthPage {
+  rows: StealthSealedRow[];
+  /** Total rows the server holds for this connection, across all pages. */
+  total: number;
+  hasMore: boolean;
+  nextCursor: StealthPageCursor | null;
+}
+
+const SUPPORTED_SEALED_VERSION = 1;
+const SUPPORTED_SEALED_ALGORITHM = "AES-256-GCM";
+
+function isSealedRecord(value: unknown): value is StealthSealedRecord {
+  if (!value || typeof value !== "object") return false;
+  const r = value as Record<string, unknown>;
+  return (
+    r.version === SUPPORTED_SEALED_VERSION &&
+    r.algorithm === SUPPORTED_SEALED_ALGORITHM &&
+    typeof r.iv_b64 === "string" &&
+    r.iv_b64.length > 0 &&
+    typeof r.ciphertext_b64 === "string" &&
+    r.ciphertext_b64.length > 0
+  );
+}
+
+/**
+ * An unknown `version` or `algorithm` is skipped rather than attempted. A
+ * future envelope decrypted under today's assumptions would either throw or,
+ * worse, authenticate against the wrong framing; neither is better than
+ * leaving the row out and letting the count mismatch show.
+ */
+function isStealthRow(value: unknown): value is StealthSealedRow {
+  if (!value || typeof value !== "object") return false;
+  const r = value as Record<string, unknown>;
+  return (
+    typeof r.id === "string" &&
+    typeof r.occurred_at === "string" &&
+    typeof r.block_height === "number" &&
+    typeof r.txid_blind_index_hex === "string" &&
+    isSealedRecord(r.sealed_record)
+  );
+}
+
+function readCursor(value: unknown): StealthPageCursor | null {
+  if (!value || typeof value !== "object") return null;
+  const c = value as Record<string, unknown>;
+  if (typeof c.before_block !== "number") return null;
+  if (typeof c.before_txid_blind_index_hex !== "string") return null;
+  if (!c.before_txid_blind_index_hex) return null;
+  return {
+    before_block: c.before_block,
+    before_txid_blind_index_hex: c.before_txid_blind_index_hex,
+  };
+}
+
+/**
+ * The only place in this app that knows the shape of an
+ * `or-stealth-transactions-list` response.
+ *
+ * Returns an empty page for a null, non-object or malformed response rather
+ * than throwing, and for a response whose `connection_id` is not the one we
+ * asked about -- a mismatched id means we are looking at someone else's page
+ * and importing it would attribute another wallet's history to this one.
+ *
+ * `hasMore` is only reported when a usable cursor came with it. A server that
+ * says "more exist" and gives us no way to ask for them would otherwise send
+ * the caller into a loop re-fetching page one.
+ */
+export function stealthPageFromResponse(response: unknown, connectionId: string): StealthPage {
+  const empty: StealthPage = { rows: [], total: 0, hasMore: false, nextCursor: null };
+  if (!response || typeof response !== "object") return empty;
+  const body = response as Record<string, unknown>;
+  if (body.connection_id !== connectionId) return empty;
+  if (!Array.isArray(body.transactions)) return empty;
+
+  const seen = new Set<string>();
+  const rows: StealthSealedRow[] = [];
+  for (const row of body.transactions) {
+    if (!isStealthRow(row)) continue;
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    rows.push(row);
+  }
+
+  const nextCursor = readCursor(body.next_cursor);
+  return {
+    rows,
+    total: typeof body.total === "number" ? body.total : rows.length,
+    hasMore: body.has_more === true && nextCursor !== null,
+    nextCursor,
+  };
+}
+
+/**
+ * Reframe a split sealed record into the base64 iv||ciphertext form
+ * `decryptText` (and therefore `decryptOrTxnCipher`) expects.
+ *
+ * Throws on a malformed record instead of returning something that would fail
+ * later as an opaque decrypt error, so the caller can count it as a decode
+ * failure and say so.
+ */
+export function sealedRecordToCipherB64(record: StealthSealedRecord): string {
+  if (!isSealedRecord(record)) throw new Error("Unsupported sealed_record");
+  const iv = atob(record.iv_b64);
+  const ct = atob(record.ciphertext_b64);
+  // AES-GCM here is always a 12-byte IV; decryptText slices exactly 12 back off.
+  if (iv.length !== 12) throw new Error("Unexpected IV length");
+  return btoa(iv + ct);
 }
