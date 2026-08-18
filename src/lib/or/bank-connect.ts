@@ -128,6 +128,7 @@ export function buildBankPopupUrl(args: {
   const qs = new URLSearchParams({
     app_user_id: qc.orPlatformUserId,
     return_to: window.location.origin,
+    app_url: window.location.origin,
     provider: "quiltt",
   });
   return `${OR_CONNECT_BASE}?${qs.toString()}#${fragParams.toString()}`;
