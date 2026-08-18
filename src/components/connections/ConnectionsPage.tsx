@@ -803,7 +803,8 @@ export function ConnectionsPage() {
   }
 
   async function handleSync(conn: ConnectionRow) {
-    if (!requireSubaccount()) return;
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
@@ -837,7 +838,7 @@ export function ConnectionsPage() {
       const credentials_key = await exportOrCredsKey();
       const transactions_key = await exportOrTxnsKey();
       const res = (await callProxy("or-sync", {
-        subaccount_id: subaccountId,
+        subaccount_id: subaccount,
         connection_ids: [conn.id],
         credentials_key,
         transactions_key,
@@ -915,7 +916,8 @@ export function ConnectionsPage() {
   }
 
   async function handleSyncAll() {
-    if (!requireSubaccount()) return;
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
     // DL-1086. The button only renders above one connection, so an empty list
     // means the list emptied between the render and the click, most likely a
     // delete landing. Rare, but "nothing happened" is the worst possible
@@ -950,7 +952,7 @@ export function ConnectionsPage() {
         const credentials_key = await exportOrCredsKey();
         const transactions_key = await exportOrTxnsKey();
         const res = (await callProxy("or-sync", {
-          subaccount_id: subaccountId,
+          subaccount_id: subaccount,
           connection_ids: plan.syncableIds,
           credentials_key,
           transactions_key,
