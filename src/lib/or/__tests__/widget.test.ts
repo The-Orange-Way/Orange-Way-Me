@@ -161,6 +161,10 @@ describe("openOrConnect", () => {
     expect(url.origin).toBe("https://connect.orangerails.com");
     expect(url.searchParams.get("platform")).toBe("orangeway-me");
     expect(url.searchParams.get("app_user_id")).toBe(ORG_ID);
+    // DL-0347: OR reads app_url to resolve the sending app; return_to is
+    // kept so the existing Rails path is untouched. Both carry the origin.
+    expect(url.searchParams.get("return_to")).toBe("https://orangeway.local");
+    expect(url.searchParams.get("app_url")).toBe("https://orangeway.local");
     expect(url.searchParams.has("provider")).toBe(false); // omitted → OR picker
 
     const frag = new URLSearchParams(url.hash.slice(1));
