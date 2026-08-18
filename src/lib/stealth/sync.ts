@@ -220,6 +220,37 @@ export interface StealthProgressLine {
  * description of what it is doing than it does, and paraphrasing a live
  * progress string is how a UI ends up claiming a stage that already finished.
  */
+/**
+ * Should a connection row show a scan-progress line?
+ *
+ * DL-1047 / #313. This exists because the row used to decide with
+ * `syncing && conn.is_stealth`, and that is not the same question. A private
+ * row can be synced by the generic server-side path, which does no scanning
+ * at all: while the stealth entry is off, or if the stealth path throws before
+ * the widget starts, `syncing` is true and the row is private, so the old gate
+ * opened and `describeStealthProgress(null)` filled it with its "nothing has
+ * arrived yet" default. Measured on production 2026-08-18: the row read
+ * "Scanning. The first scan for a wallet can take a few minutes." for a
+ * request that had already been rejected on the wire.
+ *
+ * The honest signal is not "is this row syncing" but "did the scan path
+ * actually start for this row", which is what `scanActive` carries. Keep
+ * `syncing` out of this function entirely: taking it as an input is how the
+ * old bug would come back.
+ */
+export function shouldShowScanProgress(args: {
+  /** True only while the in-browser stealth scan path is running for this row. */
+  scanActive: boolean;
+  /**
+   * True when the row is a private connection, whatever is syncing it.
+   * Optional because the column is nullable on the row type: an absent flag
+   * is not a private connection, and must not be treated as one.
+   */
+  isStealth: boolean | undefined;
+}): boolean {
+  return args.scanActive && args.isStealth === true;
+}
+
 export function describeStealthProgress(
   progress?: StealthSyncProgress | null,
 ): StealthProgressLine {
