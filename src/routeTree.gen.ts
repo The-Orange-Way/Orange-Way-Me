@@ -303,7 +303,6 @@ const ApiPublicAiManifestDotjsonRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -324,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/households': typeof HouseholdsRoute
   '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
+  '/onboarding': typeof OnboardingRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/privacy-changelog': typeof PrivacyChangelogRoute
@@ -353,7 +353,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -374,6 +373,7 @@ export interface FileRoutesByTo {
   '/households': typeof HouseholdsRoute
   '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
+  '/onboarding': typeof OnboardingRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/privacy-changelog': typeof PrivacyChangelogRoute
@@ -403,7 +403,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/onboarding': typeof OnboardingRoute
   '/about': typeof AboutRoute
   '/accounts': typeof AccountsRouteWithChildren
   '/admin': typeof AdminRoute
@@ -424,6 +423,7 @@ export interface FileRoutesById {
   '/households': typeof HouseholdsRoute
   '/join': typeof JoinRoute
   '/landing-classic': typeof LandingClassicRoute
+  '/onboarding': typeof OnboardingRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/privacy-changelog': typeof PrivacyChangelogRoute
@@ -455,7 +455,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -476,6 +475,7 @@ export interface FileRouteTypes {
     | '/households'
     | '/join'
     | '/landing-classic'
+    | '/onboarding'
     | '/pricing'
     | '/privacy'
     | '/privacy-changelog'
@@ -505,7 +505,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -526,6 +525,7 @@ export interface FileRouteTypes {
     | '/households'
     | '/join'
     | '/landing-classic'
+    | '/onboarding'
     | '/pricing'
     | '/privacy'
     | '/privacy-changelog'
@@ -554,7 +554,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/onboarding'
     | '/about'
     | '/accounts'
     | '/admin'
@@ -575,6 +574,7 @@ export interface FileRouteTypes {
     | '/households'
     | '/join'
     | '/landing-classic'
+    | '/onboarding'
     | '/pricing'
     | '/privacy'
     | '/privacy-changelog'
@@ -605,7 +605,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  OnboardingRoute: typeof OnboardingRoute
   AboutRoute: typeof AboutRoute
   AccountsRoute: typeof AccountsRouteWithChildren
   AdminRoute: typeof AdminRoute
@@ -626,6 +625,7 @@ export interface RootRouteChildren {
   HouseholdsRoute: typeof HouseholdsRoute
   JoinRoute: typeof JoinRoute
   LandingClassicRoute: typeof LandingClassicRoute
+  OnboardingRoute: typeof OnboardingRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   PrivacyChangelogRoute: typeof PrivacyChangelogRoute
@@ -641,13 +641,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/wallets': {
       id: '/wallets'
       path: '/wallets'
@@ -716,6 +709,13 @@ declare module '@tanstack/react-router' {
       path: '/pricing'
       fullPath: '/pricing'
       preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/landing-classic': {
@@ -1049,7 +1049,6 @@ const WalletsRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  OnboardingRoute: OnboardingRoute,
   AboutRoute: AboutRoute,
   AccountsRoute: AccountsRouteWithChildren,
   AdminRoute: AdminRoute,
@@ -1070,6 +1069,7 @@ const rootRouteChildren: RootRouteChildren = {
   HouseholdsRoute: HouseholdsRoute,
   JoinRoute: JoinRoute,
   LandingClassicRoute: LandingClassicRoute,
+  OnboardingRoute: OnboardingRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   PrivacyChangelogRoute: PrivacyChangelogRoute,

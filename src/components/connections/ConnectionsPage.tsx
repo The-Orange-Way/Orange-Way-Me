@@ -834,16 +834,25 @@ export function ConnectionsPage() {
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, so it matches nothing and honestly returns
-    // { synced: 0 }. Routing them below would ask a function that cannot see
-    // this row whether this row is up to date. Same shape as the quiltt branch
-    // above: a provider whose sync lives somewhere else gets sent there.
-    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is this
-    // app's own kill switch (default off). While it is off, a stealth
-    // connection does NOT open the OR widget and falls through to the or-sync
-    // no-op path below, exactly as before this entry existed. Flipping it on
-    // is a separate one-line PR gated on the OR-side sync mode confirmed live
-    // plus a wire observation of is_stealth.
+    // `connections` table, which does not contain this row. Routing them below
+    // would ask a function that cannot see this row whether this row is up to
+    // date. Same shape as the quiltt branch above: a provider whose sync lives
+    // somewhere else gets sent there.
+    //
+    // Do NOT read the branch below as a safe fallthrough. This comment used to
+    // say or-sync "matches nothing and honestly returns { synced: 0 }". That
+    // was never measured and it is wrong. Observed on production 2026-08-18,
+    // signed in, with the network recorded: one request, or-sync via the
+    // proxy, answered 400 "stealth connections cannot be synced via this
+    // endpoint". It is a rejection, not an empty success, and it is raised
+    // before or-sync ever selects anything.
+    //
+    // DL-1047: STEALTH_SYNC_ENABLED is this app's own kill switch. It is now
+    // ON for both dev and prod, set per environment in
+    // .github/workflows/deploy.yml, so this branch is the live path rather
+    // than a dark one. An unset or empty value still folds to false, and a
+    // build that lands here with the flag off gives the customer the 400 above
+    // rather than a graceful skip.
     if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
       await handleStealthSync(conn);
       return;
