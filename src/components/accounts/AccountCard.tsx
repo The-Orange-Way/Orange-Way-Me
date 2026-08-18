@@ -1,4 +1,4 @@
-import { AlertTriangle, Building2, PowerOff, Zap } from "lucide-react";
+import { AlertTriangle, Building2, HelpCircle, PowerOff, Zap } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,7 @@ import { useNow } from "@/hooks/useNow";
  *   error > disconnected > active
  */
 export interface AccountConnectionStatus {
-  status: "active" | "error" | "disconnected";
+  status: "active" | "error" | "disconnected" | "unknown";
   /** Decrypted error message when status === 'error', else null. */
   lastError: string | null;
   /** Most recent successful sync across all connections feeding this account. */
@@ -101,7 +101,7 @@ export function AccountCard({
 
 /**
  * Tiny inline badge that surfaces the OR connection health for an
- * account. Three states:
+ * account. Four states:
  *
  *   active       → small green "Synced" pill (only shown if recent;
  *                  hidden for accounts that haven't synced in > 24h to
@@ -110,6 +110,9 @@ export function AccountCard({
  *                  tooltip and a click-through to /connections
  *   disconnected → muted "Disconnected" pill with click-through to
  *                  /connections to re-add
+ *   unknown      → amber "Status unknown" pill, shown when OR was
+ *                  unreachable so the real status could not be read.
+ *                  Distinct from error: not known to be broken.
  *
  * Clicking the badge stops event propagation so the underlying card
  * click (which opens the statement sheet) doesn't fire.
@@ -167,6 +170,35 @@ function ConnectionBadge({
           <TooltipContent side="top" align="start" className="max-w-xs text-xs">
             <p>The OrangeRails connection feeding {accountName} is disconnected.</p>
             <p className="mt-1 text-muted-foreground">Click to re-add.</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  if (status.status === "unknown") {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link
+              to="/connections"
+              onClick={stop}
+              onKeyDown={stop}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+            >
+              <HelpCircle className="h-3 w-3" />
+              Status unknown
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start" className="max-w-xs text-xs">
+            <p className="font-medium">
+              Cannot check the connection feeding {accountName} right now.
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              We could not reach OrangeRails, so this account's sync status is unknown. It is not
+              necessarily broken. Click to open Connections.
+            </p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

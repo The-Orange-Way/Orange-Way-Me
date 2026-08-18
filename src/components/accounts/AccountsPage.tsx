@@ -28,7 +28,7 @@ export function AccountsPage() {
     listArchivedAccounts,
   } = useAccounts();
   const { rows: mapRows } = useConnectionAccountMap();
-  const { connections: orConnections } = useOrConnectionsList();
+  const { result: orResult } = useOrConnectionsList();
   const { prefs } = useDashboardPrefs();
 
   // For the "live balance" fallback: when a wallet's stored balance is $0
@@ -61,12 +61,36 @@ export function AccountsPage() {
   // badge when status is undefined.
   const accountConnectionStatus = useMemo(() => {
     const out = new Map<string, AccountConnectionStatus>();
-    if (orConnections.length === 0 || mapRows.length === 0) return out;
+    if (mapRows.length === 0) return out;
+
+    // OR was unreachable: we know which accounts are fed by an OR
+    // connection but not their real status. Surface an explicit
+    // "unknown" badge on those, never a silent healthy.
+    if (orResult.state === "unreadable") {
+      for (const row of mapRows) {
+        if (!row.is_active) continue;
+        const prev = out.get(row.account_id);
+        out.set(row.account_id, {
+          status: "unknown",
+          lastError: null,
+          lastSyncAt: null,
+          connectionCount: (prev?.connectionCount ?? 0) + 1,
+        });
+      }
+      return out;
+    }
+
+    // Vault locked or OR never provisioned: nothing OR-side to surface.
+    if (orResult.state !== "loaded") return out;
+
+    const orConnections = orResult.connections;
+    if (orConnections.length === 0) return out;
     const connById = new Map(orConnections.map((c) => [c.connectionId, c]));
     const STATUS_RANK: Record<AccountConnectionStatus["status"], number> = {
       error: 3,
       disconnected: 2,
       active: 1,
+      unknown: 0,
     };
     for (const row of mapRows) {
       if (!row.is_active) continue;
@@ -96,7 +120,7 @@ export function AccountsPage() {
       out.set(row.account_id, merged);
     }
     return out;
-  }, [orConnections, mapRows]);
+  }, [orResult, mapRows]);
   // Archived view is opt-in. Loaded lazily on first toggle so the
   // page's first paint doesn't pay for a second decrypt pass.
   const [showArchived, setShowArchived] = useState(false);
