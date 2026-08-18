@@ -273,8 +273,7 @@ Deno.serve(async (req: Request) => {
         app_user_id: user.id,
         connection_id: p.connection_id,
         ...(typeof p.limit === "number" ? { limit: p.limit } : {}),
-        ...(typeof p.before_block === "number" &&
-        typeof p.before_txid_blind_index_hex === "string"
+        ...(typeof p.before_block === "number" && typeof p.before_txid_blind_index_hex === "string"
           ? {
               before_block: p.before_block,
               before_txid_blind_index_hex: p.before_txid_blind_index_hex,
