@@ -130,7 +130,7 @@ describe("reportSyncAll", () => {
       ...base,
       requestedIds: ["a", "b"],
       returned: [
-        { connection_id: "a", synced: 5 },
+        { connection_id: "a", synced: 8 },
         { connection_id: "b", synced: 0, error: "boom" },
       ],
       synced: 5,
@@ -138,5 +138,33 @@ describe("reportSyncAll", () => {
     });
     expect(report.toasts[0]?.level).toBe("warning");
     expect(report.toasts[0]?.message).toMatch(/Synced 5 across 1 wallet; 1 had trouble/);
+  });
+
+  it("shows the server's own synced total, never a client recompute of the entries", () => {
+    // THE INVARIANT (DL-1193). The count in the toast is what the write op
+    // returned (args.synced), the server confirming what it did. It is NOT a
+    // sum recomputed from the per-entry values: here the entries sum to 10 but
+    // the authoritative server total is 7, and 7 is what must be shown.
+    const report = reportSyncAll({
+      ...base,
+      requestedIds: ["a", "b"],
+      returned: [
+        { connection_id: "a", synced: 4 },
+        { connection_id: "b", synced: 6 },
+      ],
+      synced: 7,
+    });
+    expect(report.toasts[0]?.level).toBe("success");
+    expect(report.toasts[0]?.message).toBe("Sync all: 7 transactions across 2 wallets.");
+  });
+
+  it("pins the singular pluralization to the response body", () => {
+    const report = reportSyncAll({
+      ...base,
+      requestedIds: ["a"],
+      returned: [{ connection_id: "a", synced: 2 }],
+      synced: 1,
+    });
+    expect(report.toasts[0]?.message).toBe("Sync all: 1 transaction across 1 wallet.");
   });
 });

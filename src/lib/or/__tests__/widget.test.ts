@@ -19,6 +19,7 @@
  * jsdom dependency required.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { OR_LINK_SUCCESS, OR_LINK_SUCCESS_STEALTH } from "./__fixtures__/or-connect-messages";
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
@@ -169,12 +170,16 @@ describe("openOrConnect", () => {
     expect(frag.get("txn_key")).toBe(TXN_KEY);
 
     // Drive a success message.
-    postSuccess({ connection_id: "conn-1", subaccount_id: "sub-1", source_wallets: [] });
+    postSuccess({
+      connection_id: OR_LINK_SUCCESS.connection_id,
+      subaccount_id: OR_LINK_SUCCESS.subaccount_id,
+      source_wallets: OR_LINK_SUCCESS.source_wallets,
+    });
     const result = await pending;
     expect(result).toMatchObject({
       type: "or-link-success",
-      connection_id: "conn-1",
-      subaccount_id: "sub-1",
+      connection_id: OR_LINK_SUCCESS.connection_id,
+      subaccount_id: OR_LINK_SUCCESS.subaccount_id,
     });
     expect(shim.popup.close).toHaveBeenCalled();
   });
@@ -318,5 +323,88 @@ describe("openOrConnect", () => {
     // fallback back to any case that runs after this one. unstubAllEnvs
     // would also drop the module-level stubs the other cases need.
     vi.stubEnv("VITE_OR_PLATFORM_SLUG", "");
+  });
+});
+
+// Contract conformance (DL-1114). Every assertion below runs against what
+// openOrConnect RESOLVES WITH, never against the fixture on its own. An
+// earlier revision of this block compared the fixture to an object built
+// inside the test, which could not fail: no consumer code ran, so the guards
+// stayed green even if widget.ts stopped forwarding the fields entirely. A
+// test that cannot fail reads as coverage and is the exact condition DL-1114
+// exists to remove.
+describe("or-link-success contract, through the consumer (DL-1114)", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let shim: ReturnType<typeof installWindowShim>;
+
+  beforeEach(() => {
+    shim = installWindowShim();
+    fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ widget_token: "widget-tok-abc" }), { status: 200 }),
+      );
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    shim.restore();
+    vi.restoreAllMocks();
+  });
+
+  // Posts the fixture verbatim, as the sender would, and returns whatever
+  // openOrConnect hands back. `postRaw` bypasses postSuccess() because that
+  // helper injects `type` itself; here the fixture must supply it, so a
+  // fixture whose type ever drifts fails rather than being papered over.
+  async function resolveWith(fixture: Record<string, unknown>) {
+    const { openOrConnect } = await import("../widget");
+    const pending = openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY });
+    await new Promise((r) => setTimeout(r, 0));
+    const win = (globalThis as { window: EventTarget }).window;
+    win.dispatchEvent(
+      Object.assign(new Event("message"), {
+        data: fixture,
+        origin: "https://connect.orangerails.com",
+      }) as unknown as Event,
+    );
+    return pending;
+  }
+
+  it("forwards every field of the real sender payload to the caller", async () => {
+    const result = await resolveWith({ ...OR_LINK_SUCCESS });
+
+    // Goes red if widget.ts starts reshaping the payload instead of passing
+    // the sender's object through, which is what it does today.
+    expect(result.type).toBe("or-link-success");
+    expect(result.connection_id).toBe(OR_LINK_SUCCESS.connection_id);
+    expect(result.subaccount_id).toBe(OR_LINK_SUCCESS.subaccount_id);
+    expect(result.source_wallets).toHaveLength(1);
+    expect(result.source_wallets[0]).toMatchObject({
+      id: OR_LINK_SUCCESS.source_wallets[0].id,
+      external_wallet_id: OR_LINK_SUCCESS.source_wallets[0].external_wallet_id,
+      currency: OR_LINK_SUCCESS.source_wallets[0].currency,
+      label: OR_LINK_SUCCESS.source_wallets[0].label,
+    });
+  });
+
+  it("subaccount_id survives the consumer, the field the old inline literal omitted", async () => {
+    // The specific regression DL-1114 is about. The pre-fixture test posted
+    // { connection_id: "conn-1", subaccount_id: "sub-1" } that it invented,
+    // so it could not have caught the sender adding or renaming a field.
+    // Asserting on the resolved value means dropping subaccount_id anywhere
+    // between the message handler and the caller turns this red.
+    const result = await resolveWith({ ...OR_LINK_SUCCESS });
+    expect(result).toHaveProperty("subaccount_id");
+    expect(result.subaccount_id).toBe(OR_LINK_SUCCESS.subaccount_id);
+  });
+
+  it("stealth payload reaches the caller with source_wallets empty, not absent", async () => {
+    // Empty and absent are different downstream: the import bridge branches on
+    // length, and `undefined.length` throws. Driving it through the consumer
+    // proves the distinction survives, which asserting on the fixture cannot.
+    const result = await resolveWith({ ...OR_LINK_SUCCESS_STEALTH });
+    expect(result.source_wallets).toBeDefined();
+    expect(Array.isArray(result.source_wallets)).toBe(true);
+    expect(result.source_wallets).toEqual([]);
   });
 });

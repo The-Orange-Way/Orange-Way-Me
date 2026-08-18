@@ -75,8 +75,12 @@ import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import {
   orRowsForConnection,
+  sealedRecordToCipherB64,
+  stealthPageFromResponse,
   withStealthSourceWallet,
   withStealthSourceWalletId,
+  type StealthPageCursor,
+  type StealthSealedRow,
 } from "@/lib/stealth/ledger";
 import type { StealthChannel } from "@/lib/stealth/channel";
 import { AddBankDialog } from "./AddBankDialog";
@@ -803,7 +807,8 @@ export function ConnectionsPage() {
   }
 
   async function handleSync(conn: ConnectionRow) {
-    if (!requireSubaccount()) return;
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
@@ -837,7 +842,7 @@ export function ConnectionsPage() {
       const credentials_key = await exportOrCredsKey();
       const transactions_key = await exportOrTxnsKey();
       const res = (await callProxy("or-sync", {
-        subaccount_id: subaccountId,
+        subaccount_id: subaccount,
         connection_ids: [conn.id],
         credentials_key,
         transactions_key,
@@ -915,7 +920,8 @@ export function ConnectionsPage() {
   }
 
   async function handleSyncAll() {
-    if (!requireSubaccount()) return;
+    const subaccount = requireSubaccount();
+    if (!subaccount) return;
     // DL-1086. The button only renders above one connection, so an empty list
     // means the list emptied between the render and the click, most likely a
     // delete landing. Rare, but "nothing happened" is the worst possible
@@ -950,7 +956,7 @@ export function ConnectionsPage() {
         const credentials_key = await exportOrCredsKey();
         const transactions_key = await exportOrTxnsKey();
         const res = (await callProxy("or-sync", {
-          subaccount_id: subaccountId,
+          subaccount_id: subaccount,
           connection_ids: plan.syncableIds,
           credentials_key,
           transactions_key,
@@ -1086,6 +1092,61 @@ export function ConnectionsPage() {
     ],
   );
 
+  /**
+   * Page through `or-stealth-transactions-list` for one stealth connection.
+   *
+   * Pagination is followed rather than ignored because the default page is
+   * 100 rows: a customer with a longer history would otherwise get a list
+   * that looks complete and is not, which is the bug in #305 at a smaller
+   * size and just as silent.
+   *
+   * The cursor is echoed back exactly as received and never rebuilt from the
+   * last row. Both halves must travel together -- `block_height` is not
+   * unique, so a height-only cursor drops the remainder of a block whenever a
+   * page boundary lands inside one.
+   *
+   * A page that cannot be read stops the walk and returns what was collected
+   * so far. Returning a partial import beats throwing away a good first page,
+   * and `hasMore` is only trusted when a usable cursor came with it, so a
+   * server that claims more and supplies no cursor terminates instead of
+   * looping on page one.
+   */
+  async function fetchStealthRows(connectionId: string): Promise<StealthSealedRow[]> {
+    const MAX_PAGES = 25;
+    const out: StealthSealedRow[] = [];
+    let cursor: StealthPageCursor | null = null;
+    let skipped = 0;
+
+    for (let i = 0; i < MAX_PAGES; i += 1) {
+      let res: unknown;
+      try {
+        res = await callProxy("or-stealth-transactions-list", {
+          connection_id: connectionId,
+          ...(cursor ?? {}),
+        });
+      } catch (err) {
+        console.warn("[Connections] stealth transaction read failed", err);
+        break;
+      }
+      const page = stealthPageFromResponse(res, connectionId);
+      out.push(...page.rows);
+      skipped += page.skipped;
+      if (!page.hasMore || !page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
+    // A skipped row is a row the customer paid for and cannot see. It is not
+    // an error the server can tell us about -- it means this build does not
+    // understand an envelope version the widget wrote -- so the only place it
+    // can surface is here. Counted, never silent.
+    if (skipped > 0) {
+      console.warn(
+        `[Connections] ${skipped} stealth transaction(s) skipped: unreadable or an unsupported sealed_record version`,
+      );
+    }
+    return out;
+  }
+
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
@@ -1099,7 +1160,17 @@ export function ConnectionsPage() {
     // entries in `transactions`, so nothing here may assume that array is the
     // whole answer.
     const forThisConn = orRowsForConnection(listRes, conn.id);
-    if (forThisConn.length === 0) return { unmapped: 0, unmappedWalletIds: [] };
+
+    // Stealth rows are NOT in that response and never will be: they are
+    // sealed under a different envelope in a different store, and Orange
+    // Rails ruled they must not be copied into the non-stealth table. They
+    // come from their own endpoint, which is why this app read zero of them
+    // for as long as it only asked the one above (#305).
+    const stealthRows = conn.is_stealth ? await fetchStealthRows(conn.id) : [];
+
+    if (forThisConn.length === 0 && stealthRows.length === 0) {
+      return { unmapped: 0, unmappedWalletIds: [] };
+    }
 
     const decoded: OrImportTransaction[] = [];
     let decryptFailures = 0;
@@ -1111,6 +1182,20 @@ export function ConnectionsPage() {
         // an absent field rather than an ambiguous one. Without this the
         // bridge counts every stealth row `untagged` and skips it.
         decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
+      } catch {
+        decryptFailures += 1;
+      }
+    }
+
+    // Same key, same decrypt, different framing on the way in. A row that
+    // cannot be reframed or opened is counted as a decrypt failure alongside
+    // the others rather than dropped quietly -- a silently short list is the
+    // failure this whole change exists to remove.
+    for (const row of stealthRows) {
+      try {
+        const json = await decryptOrTxnCipher(sealedRecordToCipherB64(row.sealed_record));
+        const payload = JSON.parse(json) as OrImportTransaction;
+        decoded.push(withStealthSourceWalletId(payload, conn.id, true));
       } catch {
         decryptFailures += 1;
       }

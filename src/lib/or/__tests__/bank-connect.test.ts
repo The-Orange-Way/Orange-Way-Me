@@ -22,6 +22,10 @@
  * watch and the 3000ms discovery poll.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  OR_QUILTT_LINK_COMPLETE,
+  OR_QUILTT_LINK_COMPLETE_NULL_CONN,
+} from "./__fixtures__/or-connect-messages";
 
 const invokeMock = vi.fn();
 
@@ -116,10 +120,13 @@ describe("openBankPopup", () => {
     const { openBankPopup } = await import("../bank-connect");
     const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
 
-    postMessage({ type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" });
+    postMessage(OR_QUILTT_LINK_COMPLETE);
     const result = await pending;
 
-    expect(result).toMatchObject({ type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" });
+    expect(result).toMatchObject({
+      type: "OR_QUILTT_LINK_COMPLETE",
+      quilttConnectionId: OR_QUILTT_LINK_COMPLETE.quilttConnectionId,
+    });
     expect(shim.popup.close).toHaveBeenCalled();
     // Only the baseline snapshot fires (taken the instant the popup opens);
     // the postMessage settles the promise before any 3s poll tick occurs.
@@ -258,5 +265,76 @@ describe("openBankPopup", () => {
     shim.popup.closed = true;
     await vi.advanceTimersByTimeAsync(500);
     await expect(pending).rejects.toThrow(/closed before completion/i);
+  });
+});
+
+// Contract conformance (DL-1114). Every fixture below is posted THROUGH
+// openBankPopup and asserted on what it resolves with. An earlier revision
+// compared the fixture against an object the test built itself, so no
+// consumer code ran and the guards could not go red no matter what
+// bank-connect.ts did with the payload.
+describe("OR_QUILTT_LINK_COMPLETE contract, through the consumer (DL-1114)", () => {
+  let shim: ReturnType<typeof installWindowShim>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    shim = installWindowShim();
+    invokeMock.mockReset();
+  });
+
+  afterEach(() => {
+    shim.restore();
+    vi.useRealTimers();
+  });
+
+  async function resolveWith(fixture: Record<string, unknown>) {
+    invokeMock.mockResolvedValueOnce(accountsResponse([])); // baseline snapshot
+    const { openBankPopup } = await import("../bank-connect");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
+    postMessage(fixture);
+    return pending;
+  }
+
+  it("carries the OR ids through to the caller, not just quilttConnectionId", async () => {
+    // The regression DL-1114 names. The pre-fixture literal posted only
+    // { type, quilttConnectionId }, so it could never have caught the OR ids
+    // being dropped between the message handler and the resolved value.
+    const result = (await resolveWith({ ...OR_QUILTT_LINK_COMPLETE })) as unknown as Record<
+      string,
+      unknown
+    >;
+
+    expect(result.type).toBe("OR_QUILTT_LINK_COMPLETE");
+    expect(result.quilttConnectionId).toBe(OR_QUILTT_LINK_COMPLETE.quilttConnectionId);
+    expect(result.orConnectionId).toBe(OR_QUILTT_LINK_COMPLETE.orConnectionId);
+    expect(result.orSubaccountId).toBe(OR_QUILTT_LINK_COMPLETE.orSubaccountId);
+    expect(shim.popup.close).toHaveBeenCalled();
+  });
+
+  it("resolves with a NULL quilttConnectionId, which BankLinkComplete declares as string", async () => {
+    // The declared-type gap, now demonstrated rather than asserted about the
+    // fixture. bank-connect.ts resolves with `event.data as BankLinkComplete`,
+    // an unchecked cast, so the null the sender puts on the wire reaches the
+    // caller through a field typed `string`. TypeScript cannot catch this: the
+    // cast is where the guarantee is lost.
+    //
+    // Why it matters downstream: "" is meaningful to
+    // fetchQuilttConnectionAccounts (it means "enumerate every connection"),
+    // and null is neither that nor a usable id. A caller that trusts the
+    // declared type will pass null straight into that call.
+    //
+    // This test pins CURRENT behaviour, and current behaviour is the bug. When
+    // the cast is replaced with a parse that coerces or rejects null, this
+    // goes red on purpose -- change it then, do not delete it.
+    const result = (await resolveWith({
+      ...OR_QUILTT_LINK_COMPLETE_NULL_CONN,
+    })) as unknown as Record<string, unknown>;
+
+    expect(result.quilttConnectionId).toBeNull();
+    expect(typeof result.quilttConnectionId).not.toBe("string");
+    // The OR ids are still good on this path, so the link itself succeeded and
+    // only the Quiltt id is unusable. That is what makes it easy to miss.
+    expect(result.orConnectionId).toBe(OR_QUILTT_LINK_COMPLETE_NULL_CONN.orConnectionId);
+    expect(shim.popup.close).toHaveBeenCalled();
   });
 });
