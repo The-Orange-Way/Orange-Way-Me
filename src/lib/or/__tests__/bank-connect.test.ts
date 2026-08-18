@@ -268,24 +268,70 @@ describe("openBankPopup", () => {
   });
 });
 
-// Contract conformance (DL-1114). Pin OR_QUILTT_LINK_COMPLETE to what OR's
-// /connect/quiltt route actually posts: quilttConnectionId (which may be null)
-// plus orConnectionId and orSubaccountId. The wrong-shape guard is red against
-// the pre-fixture inline literal (which dropped the OR ids) and green here.
-describe("OR_QUILTT_LINK_COMPLETE contract (DL-1114)", () => {
-  it("real fixture carries the OR ids the sender posts", () => {
-    expect(OR_QUILTT_LINK_COMPLETE.type).toBe("OR_QUILTT_LINK_COMPLETE");
-    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orConnectionId");
-    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orSubaccountId");
+// Contract conformance (DL-1114). Every fixture below is posted THROUGH
+// openBankPopup and asserted on what it resolves with. An earlier revision
+// compared the fixture against an object the test built itself, so no
+// consumer code ran and the guards could not go red no matter what
+// bank-connect.ts did with the payload.
+describe("OR_QUILTT_LINK_COMPLETE contract, through the consumer (DL-1114)", () => {
+  let shim: ReturnType<typeof installWindowShim>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    shim = installWindowShim();
+    invokeMock.mockReset();
   });
 
-  it("rejects the pre-fixture invented shape that dropped the OR ids", () => {
-    const invented = { type: "OR_QUILTT_LINK_COMPLETE", quilttConnectionId: "conn-1" };
-    expect(invented).not.toHaveProperty("orConnectionId");
-    expect(OR_QUILTT_LINK_COMPLETE).toHaveProperty("orConnectionId");
+  afterEach(() => {
+    shim.restore();
+    vi.useRealTimers();
   });
 
-  it("sender may post a null quilttConnectionId", () => {
-    expect(OR_QUILTT_LINK_COMPLETE_NULL_CONN.quilttConnectionId).toBeNull();
+  async function resolveWith(fixture: Record<string, unknown>) {
+    invokeMock.mockResolvedValueOnce(accountsResponse([])); // baseline snapshot
+    const { openBankPopup } = await import("../bank-connect");
+    const pending = openBankPopup("https://connect.orangerails.com/connect/quiltt#x=1");
+    postMessage(fixture);
+    return pending;
+  }
+
+  it("carries the OR ids through to the caller, not just quilttConnectionId", async () => {
+    // The regression DL-1114 names. The pre-fixture literal posted only
+    // { type, quilttConnectionId }, so it could never have caught the OR ids
+    // being dropped between the message handler and the resolved value.
+    const result = (await resolveWith({ ...OR_QUILTT_LINK_COMPLETE })) as unknown as Record<string, unknown>;
+
+    expect(result.type).toBe("OR_QUILTT_LINK_COMPLETE");
+    expect(result.quilttConnectionId).toBe(OR_QUILTT_LINK_COMPLETE.quilttConnectionId);
+    expect(result.orConnectionId).toBe(OR_QUILTT_LINK_COMPLETE.orConnectionId);
+    expect(result.orSubaccountId).toBe(OR_QUILTT_LINK_COMPLETE.orSubaccountId);
+    expect(shim.popup.close).toHaveBeenCalled();
+  });
+
+  it("resolves with a NULL quilttConnectionId, which BankLinkComplete declares as string", async () => {
+    // The declared-type gap, now demonstrated rather than asserted about the
+    // fixture. bank-connect.ts resolves with `event.data as BankLinkComplete`,
+    // an unchecked cast, so the null the sender puts on the wire reaches the
+    // caller through a field typed `string`. TypeScript cannot catch this: the
+    // cast is where the guarantee is lost.
+    //
+    // Why it matters downstream: "" is meaningful to
+    // fetchQuilttConnectionAccounts (it means "enumerate every connection"),
+    // and null is neither that nor a usable id. A caller that trusts the
+    // declared type will pass null straight into that call.
+    //
+    // This test pins CURRENT behaviour, and current behaviour is the bug. When
+    // the cast is replaced with a parse that coerces or rejects null, this
+    // goes red on purpose -- change it then, do not delete it.
+    const result = (await resolveWith({
+      ...OR_QUILTT_LINK_COMPLETE_NULL_CONN,
+    })) as unknown as Record<string, unknown>;
+
+    expect(result.quilttConnectionId).toBeNull();
+    expect(typeof result.quilttConnectionId).not.toBe("string");
+    // The OR ids are still good on this path, so the link itself succeeded and
+    // only the Quiltt id is unusable. That is what makes it easy to miss.
+    expect(result.orConnectionId).toBe(OR_QUILTT_LINK_COMPLETE_NULL_CONN.orConnectionId);
+    expect(shim.popup.close).toHaveBeenCalled();
   });
 });
