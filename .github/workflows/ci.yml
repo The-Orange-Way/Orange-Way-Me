@@ -81,9 +81,21 @@ jobs:
           set -uo pipefail
           MIG_DIR="supabase/migrations"
 
+          # Fail loudly rather than green when there is nothing to inspect.
+          # Both no-directory and no-*.sql previously printed a success, so the
+          # step could not tell "examined 59 files, none duplicated" from
+          # "examined nothing because the path or the checkout is wrong". This
+          # repo does have migrations, so either case is a broken job and not a
+          # clean tree. Same shape as the zero-file guard in the Deno job below.
           if [ ! -d "$MIG_DIR" ]; then
-            echo "no migrations directory; nothing to check"
-            exit 0
+            echo "::error::${MIG_DIR} does not exist -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          COUNT=$(ls "$MIG_DIR"/*.sql 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No .sql files found under ${MIG_DIR} -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
           fi
 
           # The one duplicate that predates this guard. Pinned as an exact
@@ -100,7 +112,7 @@ jobs:
           DUPES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | cut -d_ -f1 | sort | uniq -d)
 
           if [ -z "$DUPES" ]; then
-            echo "no duplicate migration version prefixes"
+            echo "examined ${COUNT} migration files; no duplicate version prefixes"
             exit 0
           fi
 
@@ -140,6 +152,9 @@ jobs:
             echo "::error::duplicate migration version ${V}: ${FILES}"
           done
 
+          if [ "$FAILED" -eq 0 ]; then
+            echo "examined ${COUNT} migration files; no unbaselined duplicate version prefixes"
+          fi
           exit $FAILED
 
   deno-typecheck:
