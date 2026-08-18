@@ -42,3 +42,30 @@ export function buildDeletePlan(args: {
     payload: { subaccount_id: args.subaccountId, connection_id: args.connectionId },
   };
 }
+
+/**
+ * Outcome of reading the connection list back after a 2xx delete.
+ *
+ * A 2xx is not proof the row is gone: the endpoint can acknowledge a delete
+ * that did not take, and the optimistic removal in the UI would otherwise hide
+ * it. So the list is read back and this classifies the result:
+ *
+ *  - "silent-failure": the row is STILL present after a 2xx. Never claim
+ *    success here. This is the case DL-1181 exists to catch.
+ *  - "confirmed-gone": the row is absent from a list we could read. Safe to say
+ *    "disconnected".
+ *  - "unconfirmed": the list could not be read back (rows is null/undefined).
+ *    We only know the endpoint returned 2xx, so say that and no more, do not
+ *    claim a verified delete.
+ *
+ * Pure so the decision can be tested without standing up a DOM harness.
+ */
+export type DeleteReadback = "silent-failure" | "confirmed-gone" | "unconfirmed";
+
+export function classifyDeleteReadback(
+  rows: { id: string }[] | null | undefined,
+  connectionId: string,
+): DeleteReadback {
+  if (!rows) return "unconfirmed";
+  return rows.some((c) => c.id === connectionId) ? "silent-failure" : "confirmed-gone";
+}
