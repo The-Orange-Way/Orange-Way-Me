@@ -130,7 +130,7 @@ describe("reportSyncAll", () => {
       ...base,
       requestedIds: ["a", "b"],
       returned: [
-        { connection_id: "a", synced: 5 },
+        { connection_id: "a", synced: 8 },
         { connection_id: "b", synced: 0, error: "boom" },
       ],
       synced: 5,
@@ -162,7 +162,7 @@ describe("reportSyncAll", () => {
     const report = reportSyncAll({
       ...base,
       requestedIds: ["a"],
-      returned: [{ connection_id: "a", synced: 1 }],
+      returned: [{ connection_id: "a", synced: 2 }],
       synced: 1,
     });
     expect(report.toasts[0]?.message).toBe("Sync all: 1 transaction across 1 wallet.");
