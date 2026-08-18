@@ -14,6 +14,7 @@ import {
   buildStealthSyncInit,
   startStealthSync,
   describeStealthProgress,
+  shouldShowScanProgress,
   describeStealthFailure,
   STEALTH_WIDGET_PATH,
   type StealthCursorKnowledge,
@@ -529,5 +530,29 @@ describe("startStealthSync", () => {
       });
       expect(unseen.retryNote).toBe(said.retryNote);
     });
+  });
+});
+
+/**
+ * #313. The row used to gate its scan-progress line on "is this row private
+ * and syncing", which is a different question from "is a scan running". While
+ * the stealth entry is off, the generic server-side path syncs private rows and
+ * does no scanning, so the old gate opened and the row told the customer a
+ * first scan was under way for a request that had already been rejected.
+ *
+ * These cases are the regression. The middle one is the bug itself.
+ */
+describe("shouldShowScanProgress", () => {
+  it("shows the line while a stealth scan is actually running", () => {
+    expect(shouldShowScanProgress({ scanActive: true, isStealth: true })).toBe(true);
+  });
+
+  it("shows NOTHING for a private row synced by the generic path", () => {
+    expect(shouldShowScanProgress({ scanActive: false, isStealth: true })).toBe(false);
+  });
+
+  it("shows nothing for a non-private row, scan flag notwithstanding", () => {
+    expect(shouldShowScanProgress({ scanActive: true, isStealth: false })).toBe(false);
+    expect(shouldShowScanProgress({ scanActive: false, isStealth: false })).toBe(false);
   });
 });

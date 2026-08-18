@@ -100,6 +100,16 @@ export function humanizeError(
   if (lower.includes("institution_unavailable") || lower.includes("institution unavailable")) {
     return "Your bank's connection service is down right now. Try again in a few minutes.";
   }
+  // A private (stealth) connection is scanned in this browser by the OR
+  // widget. The server-side sync endpoint rejects it by design, because the
+  // row lives in the stealth store and that endpoint cannot see it. So this
+  // message means the in-browser path did not run, and "try again" is bad
+  // advice: the identical click fails the identical way. Measured on
+  // production 2026-08-18, where the specific reason was replaced by the
+  // generic fallback and the customer was invited to retry a dead button.
+  if (lower.includes("cannot be synced via this endpoint")) {
+    return "Private connections can't be synced from here yet. Nothing was changed.";
+  }
   if (
     lower.includes("vault_metadata") &&
     (lower.includes("duplicate key") || lower.includes("unique constraint"))
