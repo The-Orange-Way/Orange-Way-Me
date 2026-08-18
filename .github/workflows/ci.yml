@@ -51,6 +51,112 @@ jobs:
       - name: Test
         run: bun run test
 
+  migration-hygiene:
+    name: Migration filename hygiene
+    runs-on: ubuntu-latest
+    # Why this job exists: two files in supabase/migrations share the version
+    # prefix 20260812000000, and nothing in this repo would ever have told us.
+    # CI here has never looked at supabase/migrations at all -- there is no
+    # drift report and no apply step, so a duplicate version is invisible until
+    # someone wonders why a migration that is plainly on disk never took.
+    #
+    # Why a duplicate is not cosmetic. `supabase_migrations.schema_migrations`
+    # holds ONE row per version. Two files sharing a prefix means at most one of
+    # them can ever be recorded, and every tool that keys on version -- the
+    # applier, any future drift report -- then treats the other as done whether
+    # it ran or not. The two involved here are both privilege changes
+    # (reasserting an admin-only function, revoking table grants), so the
+    # failure mode is a revocation that silently never happened.
+    #
+    # Ported from the equivalent guard in the Orange Rails deploy workflow,
+    # where it lives inside the drift report because that is the check a
+    # duplicate invalidates. This repo has no drift report yet, so it stands on
+    # its own as a pre-merge lint: cheap, no credentials, no network.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Refuse duplicate migration version prefixes
+        run: |
+          set -uo pipefail
+          MIG_DIR="supabase/migrations"
+
+          # Fail loudly rather than green when there is nothing to inspect.
+          # Both no-directory and no-*.sql previously printed a success, so the
+          # step could not tell "examined 59 files, none duplicated" from
+          # "examined nothing because the path or the checkout is wrong". This
+          # repo does have migrations, so either case is a broken job and not a
+          # clean tree. Same shape as the zero-file guard in the Deno job below.
+          if [ ! -d "$MIG_DIR" ]; then
+            echo "::error::${MIG_DIR} does not exist -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          COUNT=$(ls "$MIG_DIR"/*.sql 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No .sql files found under ${MIG_DIR} -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          # The one duplicate that predates this guard. Pinned as an exact
+          # (version, sorted filenames) pair rather than as a bare version, so
+          # a THIRD file landing on the same prefix still fails. Renaming one
+          # of these is NOT safe to do from here: if the version is already
+          # recorded in the ledger, a rename makes it pending again and the
+          # body re-runs. Which file moves, and whether it needs to be a no-op
+          # rewrite instead, is the DBA's call -- asked, and this entry comes
+          # out in the same change that settles it.
+          BASELINE_VERSION="20260812000000"
+          BASELINE_FILES="20260812000000_reassert_redeem_invite_code_auth_admin_only.sql 20260812000000_revoke_invite_codes_table_grants.sql"
+
+          DUPES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | cut -d_ -f1 | sort | uniq -d)
+
+          if [ -z "$DUPES" ]; then
+            echo "examined ${COUNT} migration files; no duplicate version prefixes"
+            exit 0
+          fi
+
+          FAILED=0
+          for V in $DUPES; do
+            FILES=$(ls "$MIG_DIR"/${V}_*.sql 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')
+            if [ "$V" = "$BASELINE_VERSION" ] && [ "$FILES" = "$BASELINE_FILES" ]; then
+              {
+                echo "### Known duplicate migration version (baselined)"
+                echo ""
+                echo "\`${V}\` is shared by two files that predate this guard:"
+                echo ""
+                for F in $FILES; do echo "- \`${F}\`"; done
+                echo ""
+                echo "Not failing on this pair, because renaming one of them is a"
+                echo "DBA decision: if the version is already recorded, a rename"
+                echo "makes it pending again and the body re-runs. Remove this"
+                echo "baseline in the change that settles it."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::known duplicate migration version ${V} (baselined, awaiting a DBA ruling)"
+              continue
+            fi
+
+            FAILED=1
+            {
+              echo "### :rotating_light: Duplicate migration version \`${V}\`"
+              echo ""
+              echo "Used by more than one file:"
+              echo ""
+              for F in $FILES; do echo "- \`${F}\`"; done
+              echo ""
+              echo "\`supabase_migrations.schema_migrations\` stores one row per"
+              echo "version, so at most one of these can ever be tracked and the"
+              echo "rest count as applied whether they ran or not. Give the newer"
+              echo "file an unused timestamp before merging."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::duplicate migration version ${V}: ${FILES}"
+          done
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo "examined ${COUNT} migration files; no unbaselined duplicate version prefixes"
+          fi
+          exit $FAILED
+
   deno-typecheck:
     name: Typecheck edge functions (Deno)
     runs-on: ubuntu-latest
