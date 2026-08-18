@@ -223,9 +223,16 @@ printf "  repo: %s\n\n" "$REPO_ROOT"
 printf "\033[1m1. Reserved terms\033[0m\n"
 
 if [[ -n "$RESERVED_TERMS" ]]; then
+  # The -i pairs this tree scan with the case-insensitive commit-metadata
+  # scan in .github/workflows/post-merge-identity-scan.yml (grep -qEi over
+  # the same OW_RESERVED_TERMS list). Both guards read one list, so they must
+  # apply one matching semantics; the only safe direction to align two guards
+  # is up, toward the stricter (case-insensitive) one. The structural
+  # categories below stay case-sensitive on purpose: their patterns are
+  # acronyms and milestone tags where case carries the meaning.
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
-       "" \
+       "-i" \
        ""
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
