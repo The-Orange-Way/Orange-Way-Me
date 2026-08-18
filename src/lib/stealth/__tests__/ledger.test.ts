@@ -214,6 +214,60 @@ describe("stealthPageFromResponse", () => {
     const page = stealthPageFromResponse(res, CONN);
     expect(page.rows.map((r) => r.id)).toEqual(["ok"]);
     expect(page.total).toBe(2);
+    expect(page.skipped).toBe(1);
+  });
+
+  it("still reports a skipped row when the server omits total", () => {
+    // The case that made the previous "the count mismatch shows" claim false.
+    // With no server `total`, total used to be derived from the SURVIVING
+    // rows, so it agreed with rows.length by construction and the dropped row
+    // left no trace anywhere. Two things now prevent that: total falls back to
+    // the DELIVERED length, and the skip is counted outright.
+    const res = {
+      connection_id: CONN,
+      transactions: [
+        stealthRow("ok"),
+        stealthRow("future", 799998, { sealed_record: sealed({ version: 2 }) }),
+      ],
+    };
+    const page = stealthPageFromResponse(res, CONN);
+    expect(page.rows.map((r) => r.id)).toEqual(["ok"]);
+    expect(page.skipped).toBe(1);
+    expect(page.total).toBe(2);
+    // The load-bearing assertion: the two must NOT agree, or the page looks
+    // complete while a row is missing.
+    expect(page.total).not.toBe(page.rows.length);
+  });
+
+  it("does not count a de-duplicated row as skipped", () => {
+    // A duplicate is collapsed, not lost, so nothing is missing from the
+    // customer's view and it must not inflate the "you are not seeing
+    // everything" signal.
+    const page = stealthPageFromResponse(
+      { connection_id: CONN, transactions: [stealthRow("dup"), stealthRow("dup")] },
+      CONN,
+    );
+    expect(page.rows).toHaveLength(1);
+    expect(page.skipped).toBe(0);
+  });
+
+  it("counts a structurally malformed entry as skipped", () => {
+    const page = stealthPageFromResponse(
+      { connection_id: CONN, transactions: [stealthRow("ok"), null, {}, { id: "no-record" }] },
+      CONN,
+    );
+    expect(page.rows.map((r) => r.id)).toEqual(["ok"]);
+    expect(page.skipped).toBe(3);
+    expect(page.total).toBe(4);
+  });
+
+  it("reports zero skipped on a clean page", () => {
+    const page = stealthPageFromResponse(
+      { connection_id: CONN, transactions: [stealthRow("a"), stealthRow("b", 799999)] },
+      CONN,
+    );
+    expect(page.skipped).toBe(0);
+    expect(page.total).toBe(2);
   });
 
   it("skips a row whose algorithm is not the one we can open", () => {
@@ -223,7 +277,9 @@ describe("stealthPageFromResponse", () => {
         stealthRow("x", 800000, { sealed_record: sealed({ algorithm: "ChaCha20-Poly1305" }) }),
       ],
     };
-    expect(stealthPageFromResponse(res, CONN).rows).toEqual([]);
+    const page = stealthPageFromResponse(res, CONN);
+    expect(page.rows).toEqual([]);
+    expect(page.skipped).toBe(1);
   });
 
   it("de-duplicates by row id", () => {

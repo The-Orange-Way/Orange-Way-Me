@@ -1115,6 +1115,7 @@ export function ConnectionsPage() {
     const MAX_PAGES = 25;
     const out: StealthSealedRow[] = [];
     let cursor: StealthPageCursor | null = null;
+    let skipped = 0;
 
     for (let i = 0; i < MAX_PAGES; i += 1) {
       let res: unknown;
@@ -1129,8 +1130,19 @@ export function ConnectionsPage() {
       }
       const page = stealthPageFromResponse(res, connectionId);
       out.push(...page.rows);
+      skipped += page.skipped;
       if (!page.hasMore || !page.nextCursor) break;
       cursor = page.nextCursor;
+    }
+
+    // A skipped row is a row the customer paid for and cannot see. It is not
+    // an error the server can tell us about -- it means this build does not
+    // understand an envelope version the widget wrote -- so the only place it
+    // can surface is here. Counted, never silent.
+    if (skipped > 0) {
+      console.warn(
+        `[Connections] ${skipped} stealth transaction(s) skipped: unreadable or an unsupported sealed_record version`,
+      );
     }
     return out;
   }

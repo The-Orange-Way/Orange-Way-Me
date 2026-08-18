@@ -256,8 +256,32 @@ export interface StealthPageCursor {
 /** What a caller needs to decide whether to ask for another page. */
 export interface StealthPage {
   rows: StealthSealedRow[];
-  /** Total rows the server holds for this connection, across all pages. */
+  /**
+   * Total rows the server holds for this connection, across all pages, when
+   * the server said so. When it did not, this falls back to the number of
+   * entries actually delivered in `transactions` -- INCLUDING the ones that
+   * failed validation -- so it never silently shrinks to match what survived.
+   */
   total: number;
+  /**
+   * Entries that were present in `transactions` but did not survive
+   * validation: a malformed row, or a sealed record with a version or
+   * algorithm this build cannot open.
+   *
+   * This exists because a skipped row is otherwise invisible. The original
+   * reasoning for skipping was that "the count mismatch shows", but that only
+   * holds when the server sends `total`. When it omits it, `total` is derived
+   * locally, and deriving it from the surviving rows would have made the two
+   * agree by construction and the page look complete. So the count is reported
+   * directly rather than inferred, and `total` is derived from the delivered
+   * length instead. Callers should surface a non-zero value rather than drop
+   * it: it means this build is not showing the customer everything the server
+   * holds.
+   *
+   * Duplicate ids are NOT counted here. A duplicate is de-duplicated, not
+   * lost, so nothing is missing from the customer's view.
+   */
+  skipped: number;
   hasMore: boolean;
   nextCursor: StealthPageCursor | null;
 }
@@ -282,7 +306,8 @@ function isSealedRecord(value: unknown): value is StealthSealedRecord {
  * An unknown `version` or `algorithm` is skipped rather than attempted. A
  * future envelope decrypted under today's assumptions would either throw or,
  * worse, authenticate against the wrong framing; neither is better than
- * leaving the row out and letting the count mismatch show.
+ * leaving the row out. Skipping is only acceptable because the skip is
+ * counted and reported -- see `StealthPage.skipped`.
  */
 function isStealthRow(value: unknown): value is StealthSealedRow {
   if (!value || typeof value !== "object") return false;
@@ -322,7 +347,7 @@ function readCursor(value: unknown): StealthPageCursor | null {
  * the caller into a loop re-fetching page one.
  */
 export function stealthPageFromResponse(response: unknown, connectionId: string): StealthPage {
-  const empty: StealthPage = { rows: [], total: 0, hasMore: false, nextCursor: null };
+  const empty: StealthPage = { rows: [], total: 0, skipped: 0, hasMore: false, nextCursor: null };
   if (!response || typeof response !== "object") return empty;
   const body = response as Record<string, unknown>;
   if (body.connection_id !== connectionId) return empty;
@@ -330,8 +355,12 @@ export function stealthPageFromResponse(response: unknown, connectionId: string)
 
   const seen = new Set<string>();
   const rows: StealthSealedRow[] = [];
+  let skipped = 0;
   for (const row of body.transactions) {
-    if (!isStealthRow(row)) continue;
+    if (!isStealthRow(row)) {
+      skipped += 1;
+      continue;
+    }
     if (seen.has(row.id)) continue;
     seen.add(row.id);
     rows.push(row);
@@ -340,7 +369,12 @@ export function stealthPageFromResponse(response: unknown, connectionId: string)
   const nextCursor = readCursor(body.next_cursor);
   return {
     rows,
-    total: typeof body.total === "number" ? body.total : rows.length,
+    // Fall back to the DELIVERED length, not the surviving length. Deriving
+    // this from `rows` would make total === rows.length whenever the server
+    // omits `total`, which is exactly the case where a skipped row would
+    // otherwise vanish without trace.
+    total: typeof body.total === "number" ? body.total : body.transactions.length,
+    skipped,
     hasMore: body.has_more === true && nextCursor !== null,
     nextCursor,
   };
