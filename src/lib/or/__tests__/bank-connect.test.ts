@@ -299,7 +299,10 @@ describe("OR_QUILTT_LINK_COMPLETE contract, through the consumer (DL-1114)", () 
     // The regression DL-1114 names. The pre-fixture literal posted only
     // { type, quilttConnectionId }, so it could never have caught the OR ids
     // being dropped between the message handler and the resolved value.
-    const result = (await resolveWith({ ...OR_QUILTT_LINK_COMPLETE })) as unknown as Record<string, unknown>;
+    const result = (await resolveWith({ ...OR_QUILTT_LINK_COMPLETE })) as unknown as Record<
+      string,
+      unknown
+    >;
 
     expect(result.type).toBe("OR_QUILTT_LINK_COMPLETE");
     expect(result.quilttConnectionId).toBe(OR_QUILTT_LINK_COMPLETE.quilttConnectionId);
