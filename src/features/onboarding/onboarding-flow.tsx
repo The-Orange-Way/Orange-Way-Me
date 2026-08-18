@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { OnboardingStateContext } from "./onboarding-state";
 import type { OnboardingStateValue } from "./onboarding-state";
@@ -131,6 +131,23 @@ export function OnboardingFlow({
   onComplete: () => void;
 }) {
   const [index, setIndex] = useState(0);
+
+  // Trap browser back/forward so it cannot escape the onboarding flow.
+  // On mount we push one sentinel history entry. On every popstate we
+  // translate the event to an in-app Back and immediately re-push so the
+  // next browser-back gesture is also intercepted. The functional setIndex
+  // form avoids a stale-closure on `index`.
+  useEffect(() => {
+    history.pushState({ onboarding: true }, "");
+
+    const handlePopState = () => {
+      setIndex((current) => Math.max(current - 1, 0));
+      history.pushState({ onboarding: true }, "");
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Lives here rather than inside each step, because the container unmounts a
   // step the moment it advances and anything the step owned goes with it.
