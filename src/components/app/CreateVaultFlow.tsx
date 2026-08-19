@@ -197,10 +197,29 @@ export function CreateVaultFlow() {
                   {strength ? STRENGTH_LABELS[score] : "Enter a password"}
                 </span>
               </div>
-              {strength && score < 4 && (strength.warning || strength.suggestions.length > 0) && (
+              {/*
+                The submit button is gated on `strongEnough`, so anything short
+                of Very strong leaves it disabled. This block used to render
+                only when the scorer had a warning or a suggestion to offer,
+                and at score 3 it frequently has neither -- so the customer got
+                a dead button and no reason for it. Reported from the real
+                signup flow, 2026-08-19: "the Create Vault button wasn't active
+                and it didn't give a reason why."
+
+                So the requirement is stated unconditionally whenever the gate
+                is closed, and the scorer's advice is added underneath when it
+                has any. The onCreate toast that says the same thing is
+                unreachable while the button is disabled, which is why it never
+                helped.
+              */}
+              {pw.length > 0 && !strongEnough && (
                 <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2 text-xs text-yellow-900 dark:text-yellow-200">
-                  {strength.warning && <p className="font-medium">{strength.warning}</p>}
-                  {strength.suggestions.map((s, i) => (
+                  <p className="font-medium">
+                    Your password needs to reach Very strong before you can continue.
+                  </p>
+                  <p>Add a few more unrelated words, or use Generate strong passphrase above.</p>
+                  {strength?.warning && <p>{strength.warning}</p>}
+                  {strength?.suggestions.map((s, i) => (
                     <p key={i}>{s}</p>
                   ))}
                 </div>
