@@ -38,7 +38,12 @@ export async function loadRuntimeFlags(): Promise<void> {
   if (loaded) return;
   loaded = true;
   try {
-    const { data, error } = await supabase
+    // app_flags was added by the DL-1394 migration and the generated Supabase
+    // types have not been regenerated to include it, so a typed .from() call
+    // fails the build. Query it through an untyped handle until the types are
+    // regenerated; the runtime row shape ({ enabled: boolean }) is stable.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .from("app_flags")
       .select("enabled")
       .eq("key", "stealth_sync_enabled")
