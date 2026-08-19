@@ -72,7 +72,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import {
   orRowsForConnection,
@@ -849,13 +849,13 @@ export function ConnectionsPage() {
     // endpoint". It is a rejection, not an empty success, and it is raised
     // before or-sync ever selects anything.
     //
-    // DL-1047: STEALTH_SYNC_ENABLED is this app's own kill switch. It is now
-    // ON for both dev and prod, set per environment in
-    // .github/workflows/deploy.yml, so this branch is the live path rather
-    // than a dark one. An unset or empty value still folds to false, and a
-    // build that lands here with the flag off gives the customer the 400 above
-    // rather than a graceful skip.
-    if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
+    // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
+    // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
+    // environment in .github/workflows/deploy.yml), and public.app_flags can
+    // override it at runtime with no redeploy. isStealthSyncEnabled() returns
+    // the effective value. A build that lands here with the switch off gives
+    // the customer the 400 above rather than a graceful skip.
+    if (isStealthSyncEnabled() && conn.is_stealth) {
       await handleStealthSync(conn);
       return;
     }
@@ -994,7 +994,7 @@ export function ConnectionsPage() {
         returned,
         synced,
         skippedPrivateCount: plan.skippedPrivateIds.length,
-        stealthSyncEnabled: STEALTH_SYNC_ENABLED,
+        stealthSyncEnabled: isStealthSyncEnabled(),
         firstErrorMessage:
           errs.length > 0
             ? humanizeError(errs[0]?.error ?? "", "Something went wrong.")
