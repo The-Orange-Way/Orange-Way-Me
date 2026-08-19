@@ -113,7 +113,8 @@ function friendlyProviderName(providerType: string): string {
     sparrow: "Sparrow",
     xpub_stealth: "Private wallet",
   };
-  return map[providerType.toLowerCase()] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
+  const key = providerType.toLowerCase();
+  return map[key] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
 }
 
 interface RawSourceWallet {
