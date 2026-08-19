@@ -1210,16 +1210,55 @@ export function ConnectionsPage() {
       }
     }
 
-    // Same key, same decrypt, different framing on the way in. A row that
-    // cannot be reframed or opened is counted as a decrypt failure alongside
-    // the others rather than dropped quietly -- a silently short list is the
-    // failure this whole change exists to remove.
+    // NOT the same key. This comment used to say "same key, same decrypt"
+    // and that sentence cost a working feature.
+    //
+    // Stealth envelopes are sealed with the CREDENTIALS subkey
+    // (orangerails-creds-v1), not the transactions subkey
+    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
+    // flow hands OR `credKeyB64` in the /connect fragment as
+    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
+    // it was handed. So every stealth envelope that exists was sealed under
+    // creds, while this loop was opening them with txns. An envelope only
+    // opens with the key it was sealed under, so every row failed, the
+    // import received an empty list, and the run summary reported zero rows
+    // with zero decrypt failures -- because the bridge counts its own
+    // failures, not ours. On production that surfaced as the toast
+    // "Wallet ledger: 14 undecryptable" and nothing else.
+    //
+    // The fix is here rather than in sync.ts on purpose. Changing which key
+    // is handed to the widget would orphan every envelope already stored:
+    // they would still be creds-sealed and nothing would ever open them
+    // again. sync.ts says exactly this and it is right.
+    //
+    // Both keys are tried, creds first. Creds is what today's rows use; txns
+    // is attempted second so that if any row anywhere was ever sealed the
+    // other way it still opens, rather than being counted as corrupt. Both
+    // keys belong to this user and are already in memory, so the second
+    // attempt discloses nothing and costs one AES-GCM tag check on a path
+    // that only runs when the first attempt already failed.
     for (const row of stealthRows) {
+      const cipherB64 = sealedRecordToCipherB64(row.sealed_record);
+      let json: string | null;
       try {
-        const json = await decryptOrTxnCipher(sealedRecordToCipherB64(row.sealed_record));
+        json = await decryptOrCipher(cipherB64);
+      } catch {
+        try {
+          json = await decryptOrTxnCipher(cipherB64);
+        } catch {
+          json = null;
+        }
+      }
+      if (json === null) {
+        decryptFailures += 1;
+        continue;
+      }
+      try {
         const payload = JSON.parse(json) as OrImportTransaction;
         decoded.push(withStealthSourceWalletId(payload, conn.id, true));
       } catch {
+        // Opened but not parseable: still a failure, and a different one.
+        // Counted together because the customer-facing outcome is the same.
         decryptFailures += 1;
       }
     }
