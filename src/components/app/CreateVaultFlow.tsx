@@ -212,12 +212,16 @@ export function CreateVaultFlow() {
                 unreachable while the button is disabled, which is why it never
                 helped.
               */}
-              {pw.length > 0 && !strongEnough && (
+              {pw.length > 0 && !lengthOk && (
+                <p className="text-xs text-destructive">
+                  Passphrase is too short. Keep adding characters.
+                </p>
+              )}
+              {lengthOk && !strongEnough && (
                 <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2 text-xs text-yellow-900 dark:text-yellow-200">
                   <p className="font-medium">
-                    Your password needs to reach Very strong before you can continue.
+                    Your passphrase needs to be stronger to protect your vault. Use Generate strong passphrase or keep adding characters.
                   </p>
-                  <p>Add a few more unrelated words, or use Generate strong passphrase above.</p>
                   {strength?.warning && <p>{strength.warning}</p>}
                   {strength?.suggestions.map((s, i) => (
                     <p key={i}>{s}</p>
@@ -242,6 +246,9 @@ export function CreateVaultFlow() {
                 autoComplete="new-password"
               />
             </div>
+            {lengthOk && strongEnough && confirm.length > 0 && pw !== confirm && (
+              <p className="text-xs text-destructive">Passphrases don't match. Re-type to confirm.</p>
+            )}
             <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
               Argon2id protects your vault against GPU brute-force. With a Very strong passphrase,
               even a $1M attack farm needs 180,000+ years to crack it.
@@ -257,6 +264,9 @@ export function CreateVaultFlow() {
                 I understand this password cannot be recovered without my recovery kit.
               </span>
             </label>
+            {lengthOk && strongEnough && pw === confirm && !understood && (
+              <p className="text-xs text-muted-foreground">Confirm you understand that losing your passphrase means losing access to your vault.</p>
+            )}
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {busy ? "Creating..." : "Create vault"}
             </Button>
