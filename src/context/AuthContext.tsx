@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { Session, User } from "@supabase/supabase-js";
 import posthog from "posthog-js";
 import { supabase } from "@/integrations/supabase/client";
+import { buildSignUpOptions } from "@/lib/signup-options";
 
 interface AuthContextValue {
   session: Session | null;
@@ -13,11 +14,20 @@ interface AuthContextValue {
    * configured with Cloudflare Turnstile, supplying a valid token is
    * required. Pass `null` when the project does not enforce captcha
    * (dev project today, or when `VITE_TURNSTILE_SITE_KEY` is unset).
+   *
+   * `inviteCode` is the /join route's invite code. It has to travel as
+   * signUp user metadata because the Before-User-Created auth hook
+   * (`public.enforce_beta_signup`) reads it from
+   * `event.user.user_metadata.invite_code` and rejects the signup outright
+   * when it is absent and the email is not allowlisted. Client-supplied
+   * metadata grants no bypass: the hook decides against the invite_codes
+   * table, so a forged code fails the predicate.
    */
   signUp: (
     email: string,
     password: string,
     captchaToken: string | null,
+    inviteCode?: string | null,
   ) => Promise<{ error: Error | null; isNew: boolean }>;
   /** Same captcha contract as signUp. */
   signIn: (
@@ -77,22 +87,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Consume a pending invite code once the session is first established.
-      // JoinPage writes the code to localStorage before calling signUp() so
-      // it survives the email-confirmation link opening in a new tab
-      // (sessionStorage does not survive that hop). The key is removed before
-      // the RPC fires so a fast double-fire of SIGNED_IN does not double-spend.
-      // Failure is non-fatal: the Before-User-Created auth hook is the
-      // authoritative enforcement and the account is not rolled back.
+      // There is deliberately no invite-code redemption here any more.
+      //
+      // This used to read `ow_pending_invite_code` out of localStorage on
+      // SIGNED_IN and call redeem_invite_code. That was correct only while
+      // the client was the sole redeemer. The Before-User-Created auth hook
+      // now consumes the code at user creation, so a second redeem here
+      // spends a second use: harmless on a max_uses = 1 code, but a group
+      // invite of max_uses = 10 would be exhausted by five people. Leaving
+      // one writer -- the hook -- is also what removes the double-consume
+      // race the old client redeem created.
+      //
+      // Sweep the stale key so browsers that already have one do not carry
+      // it around forever. It is never written any more.
       if (event === "SIGNED_IN" && newSession?.user) {
         try {
-          const pendingCode = localStorage.getItem("ow_pending_invite_code");
-          if (pendingCode) {
-            localStorage.removeItem("ow_pending_invite_code");
-            // @ts-expect-error supabase types are generated against the deployed
-            // schema; redeem_invite_code regenerates on the next `supabase gen types` pass.
-            void supabase.rpc("redeem_invite_code", { p_code: pendingCode });
-          }
+          localStorage.removeItem("ow_pending_invite_code");
         } catch {
           /* localStorage blocked: non-fatal */
         }
@@ -108,15 +118,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const signUp: AuthContextValue["signUp"] = async (email, password, captchaToken) => {
+  const signUp: AuthContextValue["signUp"] = async (email, password, captchaToken, inviteCode) => {
     const redirectUrl = `${window.location.origin}/`;
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        ...(captchaToken ? { captchaToken } : {}),
-      },
+      options: buildSignUpOptions({ emailRedirectTo: redirectUrl, captchaToken, inviteCode }),
     });
     return {
       error: error as Error | null,

@@ -20,17 +20,18 @@ import type { TurnstileInstance } from "@marsidev/react-turnstile";
  * The code is the gate on this route, in place of the email allowlist used by
  * the standard AuthScreen. It does not bypass the allowlist; it is a separate
  * door with its own authorization. The authoritative, unbypassable check is
- * the Supabase Before-User-Created auth hook (follow-up): it will verify an
- * allowlisted email OR a valid code at user creation. Until it lands, the two
- * client RPCs here are the pre-check and a best-effort redemption, the same
- * posture the allowlist path already runs.
+ * the Supabase Before-User-Created auth hook, `public.enforce_beta_signup`,
+ * which verifies an allowlisted email OR a valid code at user creation. The
+ * is_invite_code_valid call below is only a pre-check so a dead link says so
+ * before asking for an email and a password.
  *
- * Redemption sequence: the code is written to localStorage before signUp() so
- * it survives the email-confirmation link opening in a new tab. The SIGNED_IN
- * handler in AuthContext reads the key and calls redeem_invite_code as the
- * authenticated user. This ensures the RPC always fires in an authenticated
- * context, which is required once the anon EXECUTE grant on redeem_invite_code
- * is revoked.
+ * Redemption: the hook redeems. It reads the code from
+ * `event.user.user_metadata.invite_code`, so the code has to ride along on
+ * signUp as metadata, which is what the fourth argument to signUp() does.
+ * There is no client redeem call and no localStorage hop any more. The old
+ * sequence stashed the code in localStorage and redeemed it from the
+ * SIGNED_IN handler; with the hook live that spent a second use of the same
+ * code, which quietly halved every group invite. One writer only.
  */
 type Phase = "checking" | "invalid" | "form" | "done";
 
@@ -71,23 +72,13 @@ export function JoinPage({ code }: { code: string }) {
     e.preventDefault();
     setBusy(true);
 
-    // Stash the code before signUp() so it survives the email-confirmation
-    // link opening in a new tab. AuthContext's SIGNED_IN handler picks it up
-    // and calls redeem_invite_code once a real session exists.
-    try {
-      localStorage.setItem("ow_pending_invite_code", code);
-    } catch {
-      /* localStorage blocked: redemption falls back to auth hook enforcement */
-    }
-
-    const { error, isNew } = await signUp(email, password, captchaToken);
+    // The code rides along as signUp user metadata. The auth hook reads it
+    // there and is the thing that actually redeems it, so nothing is stashed
+    // and nothing has to survive the email-confirmation hop: authorization
+    // and redemption both happen at user creation, before this promise
+    // resolves. A signup the hook rejects consumes nothing.
+    const { error, isNew } = await signUp(email, password, captchaToken, code);
     if (error) {
-      // Clear the stashed code so a retry starts clean.
-      try {
-        localStorage.removeItem("ow_pending_invite_code");
-      } catch {
-        /* non-fatal */
-      }
       setBusy(false);
       toastError(error);
       resetCaptcha();
