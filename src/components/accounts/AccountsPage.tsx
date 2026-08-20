@@ -7,7 +7,12 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useConnectionAccountMap } from "@/hooks/useConnectionAccountMap";
 import { useOrConnectionsList } from "@/hooks/useOrConnectionsList";
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_ORDER } from "@/lib/connectors/constants";
-import { formatTotalsWithMode, sumByCurrency } from "@/lib/format";
+import {
+  formatTotalsWithMode,
+  isBitcoinCurrency,
+  normalizeBitcoinToSats,
+  sumByCurrency,
+} from "@/lib/format";
 import { AccountCard, type AccountConnectionStatus } from "@/components/accounts/AccountCard";
 import { AddAccountDialog } from "@/components/accounts/AddAccountDialog";
 import { WalletStatementSheet } from "@/components/accounts/WalletStatementSheet";
@@ -41,15 +46,27 @@ export function AccountsPage() {
   }, []);
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const { items: allTxns } = useTransactions({ startDate: fiveYearsAgo, endDate: today });
+  const currencyByAccount = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.id, a.currency);
+    return m;
+  }, [accounts]);
   const txnSumByAccount = useMemo(() => {
     const m = new Map<string, number>();
     for (const t of allTxns) {
       const n = Number(t.amount);
       if (!Number.isFinite(n)) continue;
-      m.set(t.account_id, (m.get(t.account_id) ?? 0) + n);
+      // Normalize each row BEFORE adding it. One bitcoin account can hold a
+      // hand-entered decimal BTC row next to imported sats rows, and adding
+      // those raw gives a number in no unit at all, which the display
+      // heuristic then reads as decimal BTC and inflates by 1e8. Bitcoin
+      // accounts accumulate in sats; everything else stays in its own unit.
+      const cur = currencyByAccount.get(t.account_id);
+      const v = cur && isBitcoinCurrency(cur) ? normalizeBitcoinToSats(n, cur) : n;
+      m.set(t.account_id, (m.get(t.account_id) ?? 0) + v);
     }
     return m;
-  }, [allTxns]);
+  }, [allTxns, currencyByAccount]);
   const loc = numberLocale(prefs.numberFormat);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [statementAccount, setStatementAccount] = useState<Account | null>(null);
@@ -57,7 +74,7 @@ export function AccountsPage() {
   // Per-account OR connection status. Walks every active mapping, looks
   // up the connection it points at, and aggregates statuses (worst
   // status wins: error > disconnected > active). Accounts not fed by
-  // any OR connection don't appear in the map — AccountCard hides the
+  // any OR connection don't appear in the map, and AccountCard hides the
   // badge when status is undefined.
   const accountConnectionStatus = useMemo(() => {
     const out = new Map<string, AccountConnectionStatus>();
@@ -192,14 +209,19 @@ export function AccountsPage() {
             // net worth in sync with what the user sees on each card.
             const stored = Number(a.balance);
             const txnSum = txnSumByAccount.get(a.id);
-            const effective =
+            const useTxnLive =
               Number.isFinite(stored) &&
               stored === 0 &&
               typeof txnSum === "number" &&
-              Math.abs(txnSum) > 0.005
-                ? String(txnSum)
-                : a.balance;
-            return { amount: effective, currency: a.currency };
+              Math.abs(txnSum) > 0.005;
+            if (!useTxnLive) return { amount: a.balance, currency: a.currency };
+            // txnSumByAccount has already reduced a bitcoin account to sats,
+            // so declare that unit rather than handing the value back to a
+            // heuristic that infers the unit from the magnitude.
+            return {
+              amount: String(txnSum),
+              currency: isBitcoinCurrency(a.currency) ? "sats" : a.currency,
+            };
           }),
         ),
         prefs.btcDisplayMode,
