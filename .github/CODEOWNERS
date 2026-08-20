@@ -1,24 +1,29 @@
 # CODEOWNERS — who gets auto-requested as a reviewer for each area.
 # Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Each line names the reviewing account as well as the team. A team owner only
+# produces a review request when the team exists, has write access, and has a
+# member other than the pull request author, so naming the account directly is
+# what guarantees the request lands.
 
 # Default owner — every path, unless overridden below.
-*                               @The-Orange-Way/maintainers
+*                               @The-Orange-Way/maintainers @Making-the-World-Orange
 
 # Cryptographic primitives — require a crypto-aware reviewer.
-/src/lib/                       @The-Orange-Way/maintainers
+/src/lib/                       @The-Orange-Way/maintainers @Making-the-World-Orange
 
 # Vault context + unlock flow.
-/src/context/                   @The-Orange-Way/maintainers
-/src/components/app/            @The-Orange-Way/maintainers
+/src/context/                   @The-Orange-Way/maintainers @Making-the-World-Orange
+/src/components/app/            @The-Orange-Way/maintainers @Making-the-World-Orange
 
 # Supabase schema + RLS — migrations are the source of truth.
-/supabase/                      @The-Orange-Way/maintainers
+/supabase/                      @The-Orange-Way/maintainers @Making-the-World-Orange
 
 # Docs — narrative surface of the project.
-/README.md                      @The-Orange-Way/maintainers
-/CONTRIBUTING.md                @The-Orange-Way/maintainers
-/SECURITY.md                    @The-Orange-Way/maintainers
-/CODE_OF_CONDUCT.md             @The-Orange-Way/maintainers
+/README.md                      @The-Orange-Way/maintainers @Making-the-World-Orange
+/CONTRIBUTING.md                @The-Orange-Way/maintainers @Making-the-World-Orange
+/SECURITY.md                    @The-Orange-Way/maintainers @Making-the-World-Orange
+/CODE_OF_CONDUCT.md             @The-Orange-Way/maintainers @Making-the-World-Orange
 
 # GitHub workflows + community health files.
-/.github/                       @The-Orange-Way/maintainers
+/.github/                       @The-Orange-Way/maintainers @Making-the-World-Orange
