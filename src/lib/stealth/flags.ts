@@ -3,8 +3,9 @@
  *
  * handleSync routes a stealth connection to the OR widget only when this is
  * true. While it is false, a stealth connection does NOT open the widget and
- * falls through to the honest or-sync no-op path, exactly as before this entry
- * existed.
+ * falls through to the or-sync path. That fallthrough is NOT a no-op. It was
+ * measured on production 2026-08-18, and what it does is documented further
+ * down under "What this seat did verify on production".
  *
  * Environment derived, same shape and reasoning as VITE_OR_CONNECT_ENABLED in
  * ConnectionsPage.tsx. Both arms are now on, dev and prod, each stated

@@ -62,7 +62,7 @@ import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
 import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
-import { buildDeletePlan } from "@/lib/or/connection-delete";
+import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import {
   startStealthSync,
@@ -72,7 +72,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { STEALTH_SYNC_ENABLED } from "@/lib/stealth/flags";
+import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import {
   orRowsForConnection,
@@ -111,8 +111,10 @@ function friendlyProviderName(providerType: string): string {
     blink: "Blink",
     strike: "Strike",
     sparrow: "Sparrow",
+    xpub_stealth: "Private wallet",
   };
-  return map[providerType] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
+  const key = providerType.toLowerCase();
+  return map[key] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
 }
 
 interface RawSourceWallet {
@@ -834,17 +836,26 @@ export function ConnectionsPage() {
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, so it matches nothing and honestly returns
-    // { synced: 0 }. Routing them below would ask a function that cannot see
-    // this row whether this row is up to date. Same shape as the quiltt branch
-    // above: a provider whose sync lives somewhere else gets sent there.
-    // DL-1047: the stealth sync entry ships dark. STEALTH_SYNC_ENABLED is this
-    // app's own kill switch (default off). While it is off, a stealth
-    // connection does NOT open the OR widget and falls through to the or-sync
-    // no-op path below, exactly as before this entry existed. Flipping it on
-    // is a separate one-line PR gated on the OR-side sync mode confirmed live
-    // plus a wire observation of is_stealth.
-    if (STEALTH_SYNC_ENABLED && conn.is_stealth) {
+    // `connections` table, which does not contain this row. Routing them below
+    // would ask a function that cannot see this row whether this row is up to
+    // date. Same shape as the quiltt branch above: a provider whose sync lives
+    // somewhere else gets sent there.
+    //
+    // Do NOT read the branch below as a safe fallthrough. This comment used to
+    // say or-sync "matches nothing and honestly returns { synced: 0 }". That
+    // was never measured and it is wrong. Observed on production 2026-08-18,
+    // signed in, with the network recorded: one request, or-sync via the
+    // proxy, answered 400 "stealth connections cannot be synced via this
+    // endpoint". It is a rejection, not an empty success, and it is raised
+    // before or-sync ever selects anything.
+    //
+    // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
+    // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
+    // environment in .github/workflows/deploy.yml), and public.app_flags can
+    // override it at runtime with no redeploy. isStealthSyncEnabled() returns
+    // the effective value. A build that lands here with the switch off gives
+    // the customer the 400 above rather than a graceful skip.
+    if (isStealthSyncEnabled() && conn.is_stealth) {
       await handleStealthSync(conn);
       return;
     }
@@ -983,7 +994,7 @@ export function ConnectionsPage() {
         returned,
         synced,
         skippedPrivateCount: plan.skippedPrivateIds.length,
-        stealthSyncEnabled: STEALTH_SYNC_ENABLED,
+        stealthSyncEnabled: isStealthSyncEnabled(),
         firstErrorMessage:
           errs.length > 0
             ? humanizeError(errs[0]?.error ?? "", "Something went wrong.")
@@ -1199,16 +1210,55 @@ export function ConnectionsPage() {
       }
     }
 
-    // Same key, same decrypt, different framing on the way in. A row that
-    // cannot be reframed or opened is counted as a decrypt failure alongside
-    // the others rather than dropped quietly -- a silently short list is the
-    // failure this whole change exists to remove.
+    // NOT the same key. This comment used to say "same key, same decrypt"
+    // and that sentence cost a working feature.
+    //
+    // Stealth envelopes are sealed with the CREDENTIALS subkey
+    // (orangerails-creds-v1), not the transactions subkey
+    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
+    // flow hands OR `credKeyB64` in the /connect fragment as
+    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
+    // it was handed. So every stealth envelope that exists was sealed under
+    // creds, while this loop was opening them with txns. An envelope only
+    // opens with the key it was sealed under, so every row failed, the
+    // import received an empty list, and the run summary reported zero rows
+    // with zero decrypt failures -- because the bridge counts its own
+    // failures, not ours. On production that surfaced as the toast
+    // "Wallet ledger: 14 undecryptable" and nothing else.
+    //
+    // The fix is here rather than in sync.ts on purpose. Changing which key
+    // is handed to the widget would orphan every envelope already stored:
+    // they would still be creds-sealed and nothing would ever open them
+    // again. sync.ts says exactly this and it is right.
+    //
+    // Both keys are tried, creds first. Creds is what today's rows use; txns
+    // is attempted second so that if any row anywhere was ever sealed the
+    // other way it still opens, rather than being counted as corrupt. Both
+    // keys belong to this user and are already in memory, so the second
+    // attempt discloses nothing and costs one AES-GCM tag check on a path
+    // that only runs when the first attempt already failed.
     for (const row of stealthRows) {
+      const cipherB64 = sealedRecordToCipherB64(row.sealed_record);
+      let json: string | null;
       try {
-        const json = await decryptOrTxnCipher(sealedRecordToCipherB64(row.sealed_record));
+        json = await decryptOrCipher(cipherB64);
+      } catch {
+        try {
+          json = await decryptOrTxnCipher(cipherB64);
+        } catch {
+          json = null;
+        }
+      }
+      if (json === null) {
+        decryptFailures += 1;
+        continue;
+      }
+      try {
         const payload = JSON.parse(json) as OrImportTransaction;
         decoded.push(withStealthSourceWalletId(payload, conn.id, true));
       } catch {
+        // Opened but not parseable: still a failure, and a different one.
+        // Counted together because the customer-facing outcome is the same.
         decryptFailures += 1;
       }
     }
@@ -1369,7 +1419,8 @@ export function ConnectionsPage() {
     // silent failure: refreshList has already restored the row, so say so
     // rather than claim success.
     const rows = await refreshList();
-    if (rows && rows.some((c) => c.id === conn.id)) {
+    const readback = classifyDeleteReadback(rows, conn.id);
+    if (readback === "silent-failure") {
       console.error("[Connections] delete returned ok but the connection is still listed", {
         connection_id: conn.id,
       });
@@ -1389,7 +1440,7 @@ export function ConnectionsPage() {
     // Read-back confirmed the connection is gone. When the list could not be
     // refreshed, say only what we know, exactly as the add path does.
     toast.success(
-      rows
+      readback === "confirmed-gone"
         ? `${name} disconnected`
         : `${name} disconnected. We couldn't refresh the list just now.`,
     );

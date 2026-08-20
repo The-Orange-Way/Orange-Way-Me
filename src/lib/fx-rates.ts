@@ -7,6 +7,7 @@
  * BTC and sats are tracked alongside fiat (1 BTC = 1e8 sats).
  */
 import { getLiveBTCRate } from "./orbi-rates";
+import { normalizeBitcoinToSats } from "./format";
 
 export type SupportedCurrency = "USD" | "CAD" | "EUR" | "GBP" | "BTC" | "sats";
 
@@ -45,10 +46,20 @@ function usdPerUnit(c: SupportedCurrency): number {
 
 /** Convert `amount` from currency `from` to currency `to`. */
 export function convert(amount: number, from: string, to: string): number {
-  const f = (from as SupportedCurrency) in USD_PER_UNIT ? (from as SupportedCurrency) : "USD";
+  let f = (from as SupportedCurrency) in USD_PER_UNIT ? (from as SupportedCurrency) : "USD";
   const t = (to as SupportedCurrency) in USD_PER_UNIT ? (to as SupportedCurrency) : "USD";
   if (!Number.isFinite(amount)) return 0;
-  const usd = amount * usdPerUnit(f);
+  let value = amount;
+  if (f === "BTC") {
+    // A "BTC"-labelled balance may be stored as integer sats (automated import)
+    // or decimal BTC (manual entry). Normalize to sats using the same heuristic
+    // the display path uses, then convert as sats so we never multiply raw sats
+    // by the full BTC-USD price. Flipping `f` to "sats" also prevents any
+    // double-normalization downstream.
+    value = normalizeBitcoinToSats(amount, "BTC");
+    f = "sats";
+  }
+  const usd = value * usdPerUnit(f);
   return usd / usdPerUnit(t);
 }
 

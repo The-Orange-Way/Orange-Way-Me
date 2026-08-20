@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildDeletePlan } from "../connection-delete";
+import { buildDeletePlan, classifyDeleteReadback } from "../connection-delete";
 
 const BASE = { connectionId: "conn-123", subaccountId: "sub-abc" };
 
@@ -51,5 +51,31 @@ describe("buildDeletePlan", () => {
     expect(buildDeletePlan({ ...BASE, isStealth: undefined }).endpoint).toBe(
       "or-connection-delete",
     );
+  });
+});
+
+describe("classifyDeleteReadback", () => {
+  it("is a silent failure when the row is STILL present after a 2xx delete", () => {
+    // The core DL-1181 case: the endpoint returned 2xx, the optimistic UI
+    // removed the row, but the read-back shows it is still there. This must
+    // never be reported as success.
+    const rows = [{ id: "conn-123" }, { id: "conn-other" }];
+    expect(classifyDeleteReadback(rows, "conn-123")).toBe("silent-failure");
+  });
+
+  it("is confirmed-gone when the row is absent from a list we could read", () => {
+    const rows = [{ id: "conn-other" }];
+    expect(classifyDeleteReadback(rows, "conn-123")).toBe("confirmed-gone");
+  });
+
+  it("is confirmed-gone against an empty list", () => {
+    expect(classifyDeleteReadback([], "conn-123")).toBe("confirmed-gone");
+  });
+
+  it("is unconfirmed when the list could not be read back", () => {
+    // rows null/undefined means refreshList failed. We only know the endpoint
+    // returned 2xx, so we must not claim a verified delete.
+    expect(classifyDeleteReadback(null, "conn-123")).toBe("unconfirmed");
+    expect(classifyDeleteReadback(undefined, "conn-123")).toBe("unconfirmed");
   });
 });
