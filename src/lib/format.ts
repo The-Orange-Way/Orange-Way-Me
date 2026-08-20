@@ -22,7 +22,7 @@ export type BtcDisplayMode = "sats" | "btc" | "btc_easy" | "primary";
  * 1e8); a whole integer ≥ 1 is already sats (leave it). Nobody enters a
  * whole BTC by typing a bare integer — they'd type "1.00000000".
  */
-function normalizeBitcoinToSats(amount: number, currency: string): number {
+export function normalizeBitcoinToSats(amount: number, currency: string): number {
   if (currency === "sats") return Math.round(amount);
   // currency === "BTC"
   if (Number.isInteger(amount) && Math.abs(amount) >= 1) {
