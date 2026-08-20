@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { AlertTriangle, Copy, Check, Download, Printer, Sparkles } from "lucide-react";
 import { MIN_VAULT_PASSWORD_LENGTH } from "@/lib/vault";
+import { vaultGateBlocker } from "@/lib/vault-gate";
 import { generatePassphrase, preloadWordlist } from "@/lib/passphrase";
 
 type Step = "create" | "reveal" | "verify";
@@ -84,6 +85,23 @@ export function CreateVaultFlow() {
   const isHighEntropyGenerated = generatedHint !== null && generatedHint >= 60;
   const strongEnough = (strength !== null && strength.score >= 4) || isHighEntropyGenerated;
   const canSubmit = lengthOk && strongEnough && pw === confirm && understood && !busy;
+  // Which of those conditions to say out loud, decided in one place.
+  //
+  // The hints below used to carry their own guard expressions, assembled by
+  // hand out of the same booleans canSubmit uses. That is how the first
+  // version of this fix ended up explaining one condition out of four while
+  // looking complete, and how a short password got told it needed to be
+  // stronger rather than longer. Keeping the choice in a tested function
+  // means the disabled state and the explanation cannot drift apart again;
+  // the wording and the placement stay here, next to the field each one is
+  // about. See src/lib/vault-gate.ts.
+  const blocker = vaultGateBlocker({
+    password: pw,
+    confirm,
+    strongEnough,
+    understood,
+    minLength: MIN_VAULT_PASSWORD_LENGTH,
+  });
 
   const onGenerate = async () => {
     try {
@@ -197,10 +215,34 @@ export function CreateVaultFlow() {
                   {strength ? STRENGTH_LABELS[score] : "Enter a password"}
                 </span>
               </div>
-              {strength && score < 4 && (strength.warning || strength.suggestions.length > 0) && (
+              {/*
+                The submit button is gated on `strongEnough`, so anything short
+                of Very strong leaves it disabled. This block used to render
+                only when the scorer had a warning or a suggestion to offer,
+                and at score 3 it frequently has neither -- so the customer got
+                a dead button and no reason for it. Reported from the real
+                signup flow, 2026-08-19: "the Create Vault button wasn't active
+                and it didn't give a reason why."
+
+                So the requirement is stated unconditionally whenever the gate
+                is closed, and the scorer's advice is added underneath when it
+                has any. The onCreate toast that says the same thing is
+                unreachable while the button is disabled, which is why it never
+                helped.
+              */}
+              {blocker === "length" && (
+                <p className="text-xs text-destructive">
+                  Passphrase is too short. Keep adding characters.
+                </p>
+              )}
+              {blocker === "strength" && (
                 <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2 text-xs text-yellow-900 dark:text-yellow-200">
-                  {strength.warning && <p className="font-medium">{strength.warning}</p>}
-                  {strength.suggestions.map((s, i) => (
+                  <p className="font-medium">
+                    Your passphrase needs to be stronger to protect your vault. Use Generate strong
+                    passphrase or keep adding characters.
+                  </p>
+                  {strength?.warning && <p>{strength.warning}</p>}
+                  {strength?.suggestions.map((s, i) => (
                     <p key={i}>{s}</p>
                   ))}
                 </div>
@@ -223,6 +265,11 @@ export function CreateVaultFlow() {
                 autoComplete="new-password"
               />
             </div>
+            {blocker === "mismatch" && (
+              <p className="text-xs text-destructive">
+                Passphrases don't match. Re-type to confirm.
+              </p>
+            )}
             <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
               Argon2id protects your vault against GPU brute-force. With a Very strong passphrase,
               even a $1M attack farm needs 180,000+ years to crack it.
@@ -238,6 +285,12 @@ export function CreateVaultFlow() {
                 I understand this password cannot be recovered without my recovery kit.
               </span>
             </label>
+            {blocker === "acknowledgement" && (
+              <p className="text-xs text-muted-foreground">
+                Confirm you understand that losing your passphrase means losing access to your
+                vault.
+              </p>
+            )}
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {busy ? "Creating..." : "Create vault"}
             </Button>
