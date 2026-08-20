@@ -4,7 +4,7 @@ import { BudgetsPage } from "@/components/budgets/BudgetsPage";
 
 export const Route = createFileRoute("/budgets")({
   head: () => ({
-    meta: [{ title: "Budgets | Orange Way" }],
+    meta: [{ title: "Budget | Orange Way" }],
   }),
   component: () => (
     <AppGate>

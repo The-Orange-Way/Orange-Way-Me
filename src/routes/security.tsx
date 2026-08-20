@@ -10,7 +10,7 @@ import { ShieldCheck, EyeOff, KeyRound, Users, Link2 } from "lucide-react";
 export const Route = createFileRoute("/security")({
   head: () => ({
     ...pageMeta({
-      title: "Security, Orange Way",
+      title: "Security | Orange Way",
       description:
         "What we can see (basically nothing). What happens if we get hacked. What happens if you forget your password. Plain English answers about how your data stays yours.",
       path: "/security",
