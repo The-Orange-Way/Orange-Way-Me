@@ -16,7 +16,7 @@
 - Enterprise: White-label / SSO / custom domain available for Bitcoin-native firms (https://orangeway.app/enterprise).
 
 ## Pages
-- [Home](https://orangeway.app/): The private finance app for people who own Bitcoin.
+- [Home](https://orangeway.app/): The only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold.
 - [Features](https://orangeway.app/features): Everyday money, Bitcoin, and Privacy — three pillars.
 - [Security](https://orangeway.app/security): Plain-English story for non-engineers, technical detail collapsed at the bottom.
 - [Bitcoin](https://orangeway.app/bitcoin): Sats next to your checking account.

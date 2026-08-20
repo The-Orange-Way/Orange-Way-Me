@@ -63,7 +63,8 @@ export function MarketingShell({ children }: { children: ReactNode }) {
               <span className="font-semibold">Orange Way</span>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              The private finance app for people who own Bitcoin.
+              The only finance app that connects to your bank and your Bitcoin and locks them with a
+              key only you hold.
             </p>
           </div>
           <FooterCol
