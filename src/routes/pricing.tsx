@@ -27,7 +27,8 @@ export const Route = createFileRoute("/pricing")({
         "@context": "https://schema.org",
         "@type": "Product",
         name: "Orange Way",
-        description: "The only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold.",
+        description:
+          "The only finance app that connects to your bank and your Bitcoin and locks them with a key only you hold.",
         brand: { "@type": "Brand", name: "Orange Way" },
         offers: [
           {
