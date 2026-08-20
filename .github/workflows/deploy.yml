@@ -63,9 +63,13 @@ jobs:
       - name: Build
         run: bun run build
         env:
-          VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID }}
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Per-env Supabase target: dev builds against the dev project, prod
+          # against prod. Same branch-derived shape as VITE_SENTRY_DSN below.
+          # The *_DEV repo variables must be set before this lands, or the dev
+          # arm builds empty. (DL-1096)
+          VITE_SUPABASE_PROJECT_ID: ${{ github.ref_name == 'prod' && vars.VITE_SUPABASE_PROJECT_ID || vars.VITE_SUPABASE_PROJECT_ID_DEV }}
+          VITE_SUPABASE_URL: ${{ github.ref_name == 'prod' && vars.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL_DEV }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ github.ref_name == 'prod' && vars.VITE_SUPABASE_PUBLISHABLE_KEY || vars.VITE_SUPABASE_PUBLISHABLE_KEY_DEV }}
           VITE_POSTHOG_KEY: ${{ vars.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
           VITE_ORBI_SUPABASE_URL: ${{ vars.VITE_ORBI_SUPABASE_URL }}
