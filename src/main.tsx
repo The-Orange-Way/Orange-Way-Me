@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getRouter } from "./router";
 import { initSentry } from "./lib/observability/sentry";
 import { installChunkReloadHandler } from "./lib/chunk-reload";
+import { loadRuntimeFlags } from "./lib/stealth/runtimeFlags";
 import { initChatwoot } from "./lib/chatwoot";
 import "./styles.css";
 
@@ -15,6 +16,11 @@ void initSentry();
 // Stale-deploy chunk recovery: one hard reload when a lazy chunk 404s after
 // a deploy renamed the hashed files. Rationale + loop guard in the module.
 installChunkReloadHandler();
+
+// DL-1378: read runtime feature flags (the stealth-sync kill switch) once at
+// boot. Fired in the background so it never delays first paint; the runtime
+// module keeps the build-time value until this resolves.
+void loadRuntimeFlags();
 
 const router = getRouter();
 
