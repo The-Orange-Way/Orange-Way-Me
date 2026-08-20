@@ -26,10 +26,24 @@ create table if not exists public.app_flags (
 alter table public.app_flags enable row level security;
 
 -- Public read: anyone (anon or authenticated) may read flag values.
-create policy "app_flags public read"
-  on public.app_flags for select
-  to anon, authenticated
-  using (true);
+-- Guarded: prod and dev already carry this policy from an out-of-band table
+-- create, and CREATE POLICY has no IF NOT EXISTS, so a bare create errors 42710
+-- on apply. The NOT EXISTS guard keeps this a no-op on the live DBs and safe on
+-- a fresh replay.
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'app_flags'
+      and policyname = 'app_flags public read'
+  ) then
+    create policy "app_flags public read"
+      on public.app_flags for select
+      to anon, authenticated
+      using (true);
+  end if;
+end $$;
 
 -- No insert/update/delete policy is defined on purpose: with RLS enabled that
 -- denies every client write. Only the service role can change a flag.
