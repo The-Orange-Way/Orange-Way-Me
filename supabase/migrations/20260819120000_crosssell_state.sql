@@ -1,4 +1,4 @@
--- crosssell_state — one row per user, backing the OWM to Children's Books
+-- crosssell_state, one row per user, backing the Orange Way Me to Children's Books
 -- cross-sell email (DL-0886). It records that a user has been queued for
 -- the cross-sell send and whether they have opted out.
 --
