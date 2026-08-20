@@ -21,13 +21,13 @@ const C = {
 export const Route = createFileRoute("/landing-classic")({
   head: () => ({
     meta: [
-      { title: "OrangeWay, The only finance app we can't read." },
+      { title: "OrangeWay, The finance app we can't read." },
       {
         name: "description",
         content:
           "A private finance tracker for households that hold fiat and Bitcoin. Zero knowledge encrypted in your browser. Built for families, not advertisers.",
       },
-      { property: "og:title", content: "OrangeWay, The only finance app we can't read." },
+      { property: "og:title", content: "OrangeWay, The finance app we can't read." },
       {
         property: "og:description",
         content:
@@ -37,11 +37,11 @@ export const Route = createFileRoute("/landing-classic")({
       { property: "og:image", content: "https://orangeway.app/og-image.jpg" },
       { property: "og:image:width", content: "1200" },
       { property: "og:image:height", content: "630" },
-      { property: "og:image:alt", content: "OrangeWay, the only finance app we can't read." },
+      { property: "og:image:alt", content: "OrangeWay, the finance app we can't read." },
       { property: "og:type", content: "website" },
       { property: "og:site_name", content: "OrangeWay" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "OrangeWay, The only finance app we can't read." },
+      { name: "twitter:title", content: "OrangeWay, The finance app we can't read." },
       {
         name: "twitter:description",
         content: "Zero knowledge personal finance for households that hold fiat and Bitcoin.",
