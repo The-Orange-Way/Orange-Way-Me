@@ -25,11 +25,11 @@ const QA = [
   },
   {
     q: "Can I track my Bitcoin?",
-    a: "Yes. You can add an xpub for read only address watching, import via Orange Rails, or enter transactions manually. Sats and BTC display are first-class.",
+    a: "Yes. You can add an xpub for read only address watching, import via our connector (Orange Rails), or enter transactions manually. Sats and BTC display are first-class.",
   },
   {
     q: "Do you support Plaid?",
-    a: "No. Plaid sells transaction data, which conflicts with our model. We support SimpleFIN (which you bring) and Orange Rails for Bitcoin auto-import.",
+    a: "No. Plaid sells transaction data, which conflicts with our model. We support SimpleFIN (which you bring) and our connector (Orange Rails) for Bitcoin auto-import.",
   },
   {
     q: "Is the cryptography audited?",
