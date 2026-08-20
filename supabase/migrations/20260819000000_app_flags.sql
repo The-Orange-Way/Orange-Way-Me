@@ -34,13 +34,16 @@ create policy "app_flags public read"
 -- No insert/update/delete policy is defined on purpose: with RLS enabled that
 -- denies every client write. Only the service role can change a flag.
 
--- Seed the stealth-sync kill switch OFF. The feature ships dark and is enabled
--- deliberately by setting this row to true. A missing row also folds to false
--- in the client, so this seed is belt-and-braces, not the only guard.
+-- Seed the stealth-sync kill switch ON. Prod already runs stealth sync ON via
+-- the build-time VITE_STEALTH_SYNC_ENABLED fallback, so once the client reads
+-- this row a false seed would be a live feature kill on apply. Seeding true
+-- preserves current behavior; operations flips this row to false to go dark
+-- with no rebuild. A missing row still folds to false in the client, so this
+-- seed is the explicit guard, not the only one.
 insert into public.app_flags (key, enabled, description)
 values (
   'stealth_sync_enabled',
-  false,
+  true,
   'DL-1378 runtime kill switch for the stealth (private-connection) sync entry. When false, stealth connections do not open the OR widget.'
 )
 on conflict (key) do nothing;
