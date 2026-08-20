@@ -41,7 +41,7 @@ interface QuilttSealedPayload {
 interface EncryptedTxRow {
   id: string;
   connection_id: string;
-  external_id: string;
+  external_id: string | null;
   encrypted_payload: string;
   occurred_at: string;
 }
@@ -124,7 +124,7 @@ function toImportTransaction(
   const magnitude = Number.isFinite(rawAmount) ? Math.abs(rawAmount) : 0;
   const merchant = extractMerchant(payload.description);
   return {
-    id: row.external_id,
+    id: row.external_id ?? row.id,
     direction,
     type: "bank",
     amount: magnitude,
