@@ -97,7 +97,12 @@ export function AccountsSummary() {
         <div className="flex items-center justify-between border-t border-border pt-3">
           <span className="text-sm font-semibold">Net</span>
           <span className="font-mono text-base font-semibold tabular-nums">
-            {formatPrimary(summary.net, prefs.primaryCurrency, prefs.numberFormat, prefs.btcDisplayMode)}
+            {formatPrimary(
+              summary.net,
+              prefs.primaryCurrency,
+              prefs.numberFormat,
+              prefs.btcDisplayMode,
+            )}
           </span>
         </div>
       </CardContent>
