@@ -195,20 +195,6 @@ scan() {
     printf "      ... %d more\n" "$((count - 30))"
   fi
 
-  # Report WHICH substring of each finding matched, so a contributor can see the
-  # exact offending token and remove it without needing to read the pattern
-  # (the reserved-term list is injected from a secret and is unreadable by anyone).
-  # Strip the leading "path:line:" prefix so we isolate matched file content, then
-  # re-run the same pattern and flags with -o. This discloses nothing new: the full
-  # line is already printed above and already public, and a term absent from the
-  # tree never matches and never prints.
-  local matched
-  matched=$(printf '%s\n' "$filtered" \
-              | sed 's/^[^:]*:[0-9]*://' \
-              | grep -oE $flags "$pattern" 2>/dev/null | sort -u || true)
-  if [[ -n "$matched" ]]; then
-    printf '%s\n' "$matched" | sed 's/^/      matched: /' | head -30
-  fi
   EXIT_CODE=1
 }
 
