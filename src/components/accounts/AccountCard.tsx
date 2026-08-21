@@ -9,6 +9,7 @@ import { formatCurrencyWithMode } from "@/lib/format";
 import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { useNow } from "@/hooks/useNow";
+import { timeAgoCompact, timeAgoShort } from "./sync-age";
 
 /**
  * Per-account OR connection status passed in from the AccountsPage
@@ -106,6 +107,7 @@ export function AccountCard({
  *   active       → small green "Synced" pill (only shown if recent;
  *                  hidden for accounts that haven't synced in > 24h to
  *                  avoid badge clutter on every wallet)
+ *
  *   error        → red "Reconnect" pill with the decrypted error in a
  *                  tooltip and a click-through to /connections
  *   disconnected → muted "Disconnected" pill with click-through to
@@ -221,26 +223,16 @@ function ConnectionBadge({
             className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400"
           >
             <Zap className="h-3 w-3" />
-            Synced
+            Synced {timeAgoCompact(status.lastSyncAt, now)}
           </Link>
         </TooltipTrigger>
         <TooltipContent side="top" align="start" className="text-xs">
           <p>
-            Synced via OrangeRails {timeAgoShort(status.lastSyncAt)}. Click to view connections.
+            Synced via OrangeRails {timeAgoShort(status.lastSyncAt, now)}. Click to view
+            connections.
           </p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
-}
-
-function timeAgoShort(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
