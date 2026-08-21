@@ -48,8 +48,43 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Test-file inventory (pre-test guard)
+        # Counts every *.test.ts and *.test.tsx under src/ before running
+        # vitest. Fails immediately if zero files exist -- that means the
+        # include glob is wrong or the checkout is broken, not that there
+        # are no tests. Saves the count for the post-test verify step.
+        # Same silent-success guard pattern as migration-hygiene and deno-typecheck.
+        run: |
+          set -euo pipefail
+          DISK=$(find src \( -name '*.test.ts' -o -name '*.test.tsx' \) | wc -l | tr -d ' ')
+          if [ "$DISK" -eq 0 ]; then
+            echo "::error::No test files found under src/ -- the vitest include glob is broken or there are no tests. Fix the glob rather than let it report green."
+            exit 1
+          fi
+          echo "Found $DISK test file(s) under src/ on disk"
+          echo "EXPECTED_TEST_FILES=$DISK" >> "$GITHUB_ENV"
+
       - name: Test
-        run: bun run test
+        run: bun run test -- --reporter=verbose --reporter=json --outputFile="$RUNNER_TEMP/vitest-results.json"
+
+      - name: Test-collection verify (post-test guard)
+        # Compares the number of test SUITES vitest actually collected against
+        # the file count from the inventory step. If vitest collected fewer
+        # than exist on disk, the include glob is silently dropping tests.
+        # This is the exact failure the widened glob in vitest.config.ts fixes,
+        # and this step ensures the fix cannot silently regress.
+        run: |
+          set -euo pipefail
+          if [ ! -f "$RUNNER_TEMP/vitest-results.json" ]; then
+            echo "::error::vitest JSON output not found at $RUNNER_TEMP/vitest-results.json -- the test step may not have written it."
+            exit 1
+          fi
+          COLLECTED=$(node -e "const r=require('$RUNNER_TEMP/vitest-results.json'); console.log(r.testResults ? r.testResults.length : 0)")
+          if [ "$COLLECTED" -lt "$EXPECTED_TEST_FILES" ]; then
+            echo "::error::Vitest collected $COLLECTED test suite(s) but $EXPECTED_TEST_FILES file(s) exist on disk. The include glob is silently dropping tests -- widen it in vitest.config.ts."
+            exit 1
+          fi
+          echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
   migration-hygiene:
     name: Migration filename hygiene
