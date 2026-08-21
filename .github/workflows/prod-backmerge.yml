@@ -155,6 +155,13 @@ jobs:
           # "non-fast-forward" -- a message that points the reader at prod
           # history rather than at the automation branch. This guard checks
           # ancestry first and prints the actionable fix instead.
+          # Fetch the automation branch explicitly so the rev-parse below has
+          # a real ref to work from. Without this, a runner whose clone never
+          # saw the branch takes the else path and exits zero -- the same
+          # silent pass the guard exists to prevent. The || true keeps the
+          # genuine first-run case clean.
+          git fetch --no-tags --quiet origin \
+            "+refs/heads/${BACKMERGE_BRANCH}:refs/remotes/origin/${BACKMERGE_BRANCH}" || true
           if git rev-parse --verify "origin/${BACKMERGE_BRANCH}" >/dev/null 2>&1; then
             if ! git merge-base --is-ancestor \
                    "origin/${BACKMERGE_BRANCH}" \
