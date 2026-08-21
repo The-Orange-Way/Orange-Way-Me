@@ -14,14 +14,16 @@
  *     on the amount ("+1.00" / "-1.00"), matching the convention
  *     `useTransactions.buildEncryptedRow` already uses.
  *   - Idempotency: relies on the unique index idx_transactions_external
- *     on `(user_id, external_source, external_id)`. NOTE: the deployed
- *     index is PLAIN (no WHERE predicate) in both dev and prod, verified
- *     via pg_indexes, even though migration
- *     20260423130000_transactions_external_id.sql declares it partial
- *     (`WHERE external_id IS NOT NULL`). Being plain is load-bearing: a
- *     partial index would not be inferrable as the ON CONFLICT target by
- *     supabase-js, so the upsert only works because the deployed index is
- *     plain. Re-running on the same OR batch is a no-op: Supabase `upsert`
+ *     on `(user_id, external_source, external_id)`. This index is PLAIN
+ *     (no WHERE predicate) by design, and the deployed index matches the
+ *     migration history exactly: migration
+ *     20260423130000_transactions_external_id.sql first created it partial
+ *     (`WHERE external_id IS NOT NULL`), then migration
+ *     20260428000000_fix_transactions_external_id_index.sql deliberately
+ *     dropped and recreated it plain, because supabase-js cannot infer a
+ *     partial index as the ON CONFLICT target (Postgres error 42P10). So
+ *     being plain is intentional and load-bearing, not drift. Re-running on
+ *     the same OR batch is a no-op: Supabase `upsert`
  *     with `ignoreDuplicates: true` translates to `ON CONFLICT DO NOTHING`
  *     so user edits to imported rows are preserved. Caveat: because the
  *     index is plain, rows with `external_id IS NULL` are all distinct and
