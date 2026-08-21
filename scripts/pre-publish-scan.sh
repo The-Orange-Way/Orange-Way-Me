@@ -151,6 +151,7 @@ scan() {
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
+  local redact="$5"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -190,7 +191,13 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31m✗\033[0m  %s (%d findings)\n" "$name" "$count"
-  printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
+  local display="$filtered"
+  if [[ "$redact" == "redact" ]]; then
+    # Reserved-term category: print file:line and category only, never the
+    # matched content, so a red run on a public repo does not leak the term.
+    display=$(printf '%s\n' "$filtered" | cut -d: -f1,2)
+  fi
+  printf '%s\n' "$display" | sed 's/^/      /' | head -30
   if [[ "$count" -gt 30 ]]; then
     printf "      ... %d more\n" "$((count - 30))"
   fi
@@ -226,7 +233,8 @@ if [[ -n "$RESERVED_TERMS" ]]; then
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
        "" \
-       ""
+       "" \
+       "redact"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
