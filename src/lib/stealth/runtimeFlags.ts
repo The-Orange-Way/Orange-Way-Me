@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { STEALTH_SYNC_ENABLED } from "./flags";
 
 /**
  * Runtime override for the stealth-sync kill switch (DL-1378).
@@ -9,17 +8,26 @@ import { STEALTH_SYNC_ENABLED } from "./flags";
  * value from public.app_flags once at boot and lets it override the build-time
  * constant, giving operations a kill switch that needs no redeploy.
  *
- * Fallback is deliberately conservative so infra problems never change
- * behavior on their own:
- *   - Until the read resolves, and if the query itself FAILS (table absent,
- *     network error), we keep the build-time value. A transient failure must
- *     not kill a live feature.
- *   - If the query SUCCEEDS with no row, the flag is undefined server-side and
- *     folds to false (matches the seed migration).
- *   - If the query SUCCEEDS with a row, that row is authoritative.
+ * FAILS CLOSED (DL-1466). This module used to fall back to the build-time
+ * constant, which was `true` on prod, so the gate read true until the row
+ * resolved and stayed true forever if the read failed. Measured on production:
+ * a 507ms window on a cold load, unbounded on a query error. A kill switch that
+ * resurrects a disabled feature when infrastructure hiccups is not a kill
+ * switch, and the old comment calling that "conservative" had the polarity
+ * backwards for a switch whose whole job is to turn something OFF.
+ *
+ * The rule now has no exceptions: the gate is false unless a successful read
+ * returned a row that says otherwise.
+ *   - Before the read resolves: false.
+ *   - Query FAILS (table absent, network, throw): false.
+ *   - Query SUCCEEDS with no row: false (matches the seed migration).
+ *   - Query SUCCEEDS with a row: that row is authoritative, both ways.
+ *
+ * Note this makes the build-time constant irrelevant to the gate. Turning
+ * stealth on is now a database change and nothing else, on every environment.
  */
 
-let stealthSyncEnabled: boolean = STEALTH_SYNC_ENABLED;
+let stealthSyncEnabled = false;
 let loaded = false;
 
 /**
@@ -49,13 +57,16 @@ export async function loadRuntimeFlags(): Promise<void> {
       .eq("key", "stealth_sync_enabled")
       .maybeSingle();
     if (error) {
-      // Query failed (table absent, network). Keep the build-time fallback.
+      // Query failed (table absent, network). Fail closed, do not inherit a
+      // build-time default that may be true.
+      stealthSyncEnabled = false;
       return;
     }
     // Query succeeded. A present row is authoritative; an absent row folds to
     // false because the flag is undefined server-side.
     stealthSyncEnabled = data?.enabled === true;
   } catch {
-    // Keep the build-time fallback.
+    // Same reasoning as the error branch: an unreadable flag is an off flag.
+    stealthSyncEnabled = false;
   }
 }
