@@ -29,6 +29,7 @@ create table if not exists public.crosssell_state (
 alter table public.crosssell_state enable row level security;
 
 -- Users can read their own cross-sell state.
+drop policy if exists "users read own crosssell_state" on public.crosssell_state;
 create policy "users read own crosssell_state"
   on public.crosssell_state for select
   using (user_id = auth.uid());
@@ -36,6 +37,7 @@ create policy "users read own crosssell_state"
 -- Users can update their own row to set opted_out from the in-app control.
 -- Inserts happen only through the service-role client inside the crosssell
 -- Function; no client-side insert path is needed.
+drop policy if exists "users update own crosssell_state" on public.crosssell_state;
 create policy "users update own crosssell_state"
   on public.crosssell_state for update
   using (user_id = auth.uid())
