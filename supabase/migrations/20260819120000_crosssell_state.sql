@@ -15,6 +15,13 @@
 -- zero-knowledge surface here.
 --
 -- Reversal: additive only. DROP TABLE public.crosssell_state reverses it.
+--
+-- Re-runnable: this file may run against a database where the table and its
+-- policies already exist. "create table if not exists" and "enable row level
+-- security" are safe to repeat, but Postgres has no CREATE POLICY IF NOT
+-- EXISTS, so each policy is dropped if present immediately before it is
+-- created. Both statements run in the same migration transaction, so the
+-- table is never readable without its policy in place.
 
 create table if not exists public.crosssell_state (
   -- The user this cross-sell state belongs to. PRIMARY KEY makes it NOT
@@ -29,6 +36,7 @@ create table if not exists public.crosssell_state (
 alter table public.crosssell_state enable row level security;
 
 -- Users can read their own cross-sell state.
+drop policy if exists "users read own crosssell_state" on public.crosssell_state;
 create policy "users read own crosssell_state"
   on public.crosssell_state for select
   using (user_id = auth.uid());
@@ -36,6 +44,7 @@ create policy "users read own crosssell_state"
 -- Users can update their own row to set opted_out from the in-app control.
 -- Inserts happen only through the service-role client inside the crosssell
 -- Function; no client-side insert path is needed.
+drop policy if exists "users update own crosssell_state" on public.crosssell_state;
 create policy "users update own crosssell_state"
   on public.crosssell_state for update
   using (user_id = auth.uid())
