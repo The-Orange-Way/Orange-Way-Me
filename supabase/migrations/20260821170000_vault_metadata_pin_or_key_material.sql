@@ -26,6 +26,17 @@
 --                          the MEK alone would not be enough: the salt has to
 --                          be pinned with it or the subkeys still move.
 --
+--   or_key_epoch           which generation of the pair above this is. Today
+--                          it is always 1. It exists so that a client meeting
+--                          material it does not understand refuses instead of
+--                          unwrapping bytes whose meaning has moved. That is
+--                          the whole failure mode this change is closing, so
+--                          shipping the fix without a way to detect a future
+--                          instance of it would be careless. Refusal is in
+--                          BOTH directions: a newer generation means the
+--                          client is stale, an older one means a migration was
+--                          written and not run.
+--
 -- Why this is not a new pattern and not a new risk. enc_hmac_key already does
 -- exactly this, and its comment gives exactly this reason: it decouples the
 -- HMAC key from the vault password so blind indexes stay valid after a
@@ -37,23 +48,29 @@
 -- is not secret: kdf_salt itself is already stored in plaintext in this table,
 -- and a salt is not key material on its own.
 --
--- Both columns are nullable on purpose. A null pair means "not established
--- yet", which is every existing row, and the client establishes it on the next
--- unlock, at the one moment it can still derive the legacy value correctly.
--- Nothing here backfills, because the server cannot: it would need the
--- password.
+-- All three columns are nullable on purpose. All-null means "not established
+-- yet", which is every existing row, and the client establishes them together
+-- on the next unlock, at the one moment it can still derive the legacy value
+-- correctly. Nothing here backfills, because the server cannot: it would need
+-- the password. A partially populated row is not a state this code can produce
+-- and the client refuses it rather than repairing it, because both possible
+-- repairs silently yield a key that opens nothing.
 --
 -- This does not recover already-orphaned rows. Nothing can.
 
 alter table public.vault_metadata
   add column if not exists enc_or_mek_ciphertext text,
-  add column if not exists or_subkey_salt text;
+  add column if not exists or_subkey_salt text,
+  add column if not exists or_key_epoch integer;
 
 comment on column public.vault_metadata.enc_or_mek_ciphertext is
   'Orange Rails MEK bytes sealed under the vault MEK (base64 iv||ct||tag). Null until first established by the client. Never derivable by the server.';
 
 comment on column public.vault_metadata.or_subkey_salt is
   'The kdf_salt in force when enc_or_mek_ciphertext was established. Pinned so the Orange Rails subkeys stop moving when kdf_salt rotates. Not secret.';
+
+comment on column public.vault_metadata.or_key_epoch is
+  'Generation of the pinned pair (enc_or_mek_ciphertext, or_subkey_salt). Always 1 today. A client that meets a generation it does not know refuses rather than guessing. Not secret.';
 
 -- Neither column may be readable or writable by anyone but the owner. The
 -- table's existing row level security already scopes every policy to

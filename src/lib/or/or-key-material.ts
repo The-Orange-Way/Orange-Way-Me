@@ -30,12 +30,31 @@
  * vault. The caller performs whichever of the three it is told.
  */
 
+/**
+ * The generation of the pinned Orange Rails key material this build writes and
+ * understands.
+ *
+ * Why a number and not a boolean "is pinned". The pinned pair is a contract
+ * between whatever sealed the rows and whatever opens them, and the one
+ * failure this whole change exists to remove is a client confidently using key
+ * material whose meaning has moved underneath it. A version makes that
+ * detectable rather than silent: a client that meets an epoch it does not know
+ * refuses, instead of unwrapping bytes that are no longer what it assumes.
+ *
+ * Bump this ONLY when the meaning of the pinned pair changes, never for an
+ * unrelated schema change. Bumping it makes every older client refuse, which
+ * is correct on a genuine format change and gratuitous otherwise.
+ */
+export const CURRENT_OR_KEY_EPOCH = 1;
+
 /** The stored state, as read from `vault_metadata`. */
 export interface OrKeyMaterialRow {
   /** Orange Rails MEK sealed under the vault MEK. Null until established. */
   enc_or_mek_ciphertext: string | null;
   /** The kdf_salt in force when the above was established. Null until then. */
   or_subkey_salt: string | null;
+  /** Generation of the pinned pair. Null until established. */
+  or_key_epoch: number | null;
 }
 
 export type OrKeyMaterialPlan =
@@ -44,11 +63,11 @@ export type OrKeyMaterialPlan =
        * Nothing is pinned yet. Derive the legacy value exactly as before and
        * pin it. This is correct only at a moment when the password and the
        * current salt still produce the value that existing rows were sealed
-       * under, which means an unlock, a vault creation, or a password change
-       * BEFORE the salt is rotated.
+       * under, which means an unlock or a vault creation.
        */
       mode: "derive-and-pin";
       saltContext: string;
+      epoch: number;
     }
   | {
       /** Pinned. Use it, and never mind what the password or kdf_salt now are. */
@@ -58,9 +77,14 @@ export type OrKeyMaterialPlan =
     }
   | {
       /**
-       * The stored state cannot be trusted. The caller must NOT fall back to
+       * The stored state cannot be used. The caller must NOT fall back to
        * deriving: after a rotation, deriving produces a key that opens nothing
        * while looking exactly like success, which is the original defect.
+       *
+       * The caller also must not fail the unlock over this. The customer's
+       * vault is not in question here, only the Orange Rails namespace, and
+       * locking someone out of their own finances is a worse outcome than the
+       * bug being fixed. The namespace is disabled and said so, loudly.
        */
       mode: "refuse";
       reason: string;
@@ -70,7 +94,7 @@ export type OrKeyMaterialPlan =
  * Decide, from what is stored, how to obtain the Orange Rails key material.
  *
  * The half-established cases are refusals rather than repairs on purpose. One
- * column without the other means something wrote a partial state, and the two
+ * column without the others means something wrote a partial state, and the two
  * possible repairs (derive a fresh key, or reuse the current salt) both
  * silently produce a key that opens nothing if the salt has since rotated.
  * Guessing here is how a data-loss bug hides itself for months; refusing is
@@ -83,8 +107,21 @@ export function planOrKeyMaterial(row: OrKeyMaterialRow, kdfSalt: string): OrKey
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
+  const hasEpoch = typeof row.or_key_epoch === "number" && Number.isFinite(row.or_key_epoch);
 
-  if (hasCiphertext && hasSalt) {
+  if (hasCiphertext && hasSalt && hasEpoch) {
+    const epoch = row.or_key_epoch as number;
+    if (epoch !== CURRENT_OR_KEY_EPOCH) {
+      // Deliberately refuses in BOTH directions. A newer epoch means this
+      // build is the stale one and must not guess at a format it predates. An
+      // older epoch means a migration exists that has not been written, and
+      // treating the material as current would be assuming the migration was a
+      // no-op.
+      return {
+        mode: "refuse",
+        reason: `Orange Rails key material is generation ${epoch} and this app understands generation ${CURRENT_OR_KEY_EPOCH}.`,
+      };
+    }
     return {
       mode: "unwrap",
       ciphertext: row.enc_or_mek_ciphertext as string,
@@ -92,19 +129,16 @@ export function planOrKeyMaterial(row: OrKeyMaterialRow, kdfSalt: string): OrKey
     };
   }
 
-  if (hasCiphertext && !hasSalt) {
+  const anyPresent = hasCiphertext || hasSalt || hasEpoch;
+  if (anyPresent) {
+    const missing = [
+      hasCiphertext ? null : "the sealed key",
+      hasSalt ? null : "its salt",
+      hasEpoch ? null : "its generation",
+    ].filter((x): x is string => x !== null);
     return {
       mode: "refuse",
-      reason:
-        "Orange Rails key material is sealed but its salt is missing, so the subkeys cannot be reproduced.",
-    };
-  }
-
-  if (!hasCiphertext && hasSalt) {
-    return {
-      mode: "refuse",
-      reason:
-        "Orange Rails key material has a pinned salt but no sealed key, so what it was pinned against is unknown.",
+      reason: `Orange Rails key material is partly stored: ${missing.join(" and ")} missing, so the subkeys cannot be reproduced.`,
     };
   }
 
@@ -115,5 +149,28 @@ export function planOrKeyMaterial(row: OrKeyMaterialRow, kdfSalt: string): OrKey
     };
   }
 
-  return { mode: "derive-and-pin", saltContext: kdfSalt };
+  return { mode: "derive-and-pin", saltContext: kdfSalt, epoch: CURRENT_OR_KEY_EPOCH };
+}
+
+/**
+ * Thrown by the Orange Rails accessors when the vault IS unlocked but the
+ * Orange Rails namespace is not usable (DL-1506).
+ *
+ * A named class rather than a message convention because the caller's correct
+ * response differs completely from the other failure in this area. "Vault is
+ * locked" means ask for the password. This means the password will not help,
+ * so a surface should disable itself and say why. Matching on message text
+ * would make every consumer depend on wording that a copy edit can break, and
+ * a broad catch would swallow real errors, which is exactly what a banner
+ * built on one must not do.
+ */
+export class OrNamespaceDisabledError extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(`Orange Rails is unavailable in this session: ${reason}`);
+    this.name = "OrNamespaceDisabledError";
+    this.reason = reason;
+    // Required for `instanceof` to survive the ES5 downlevel target.
+    Object.setPrototypeOf(this, OrNamespaceDisabledError.prototype);
+  }
 }

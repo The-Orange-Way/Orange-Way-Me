@@ -1096,6 +1096,7 @@ export type Database = {
           hmac_salt: string;
           kdf_iterations: number;
           kdf_salt: string;
+          or_key_epoch: number | null;
           or_subkey_salt: string | null;
           recovery_ciphertext: string | null;
           user_id: string;
@@ -1111,6 +1112,7 @@ export type Database = {
           hmac_salt: string;
           kdf_iterations?: number;
           kdf_salt: string;
+          or_key_epoch?: number | null;
           or_subkey_salt?: string | null;
           recovery_ciphertext?: string | null;
           user_id: string;
@@ -1126,6 +1128,7 @@ export type Database = {
           hmac_salt?: string;
           kdf_iterations?: number;
           kdf_salt?: string;
+          or_key_epoch?: number | null;
           or_subkey_salt?: string | null;
           recovery_ciphertext?: string | null;
           user_id?: string;
