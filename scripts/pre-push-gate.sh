@@ -12,6 +12,7 @@
 #   3. No private-host / private-wiki URL leaks in the commits being pushed
 #      (commit messages + diff).
 #   4. No secret-shaped strings in the diff that gitleaks would catch.
+#   5. Every non-merge commit body ends with a Seat: <name> trailer.
 #
 # Override (escape hatch — emits a loud warning, do not use casually):
 #   PR_THIS_BYPASS=1 git push
@@ -202,6 +203,47 @@ if command -v gitleaks >/dev/null; then
   else
     FAIL=1
   fi
+fi
+
+# ---- Check 5: Seat trailer on every pushed non-merge commit ----
+# Every non-merge commit body's last non-empty line must name the seat that
+# authored it: "Seat: <seat-name>", matching ^Seat: [a-z0-9-]+$. This keeps
+# public authorship legible without publishing anything internal (a seat name
+# is a role, not a secret). A missing or malformed trailer refuses the push.
+# Same push_base as the scans above, so it measures only the commits this push
+# adds. Merge commits are skipped, exactly as the CI seat-line-check job does,
+# so local and server enforcement cannot drift.
+SEAT_PATTERN='^Seat: [a-z0-9-]+$'
+# GitHub injects a Claude co-author trailer on squash/rebase merges; that is a
+# public identifier, not a seat, so it is dropped before the last-line check,
+# mirroring the reserved-term scan's exemption so the two cannot drift.
+SEAT_COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+SEAT_FAIL=0
+for i in "${!LOCAL_SHAS[@]}"; do
+  sha="${LOCAL_SHAS[$i]}"
+  base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
+  if [ -n "$base" ]; then RANGE="$base..$sha"; else RANGE="$sha"; fi
+  while read -r commit; do
+    [ -z "$commit" ] && continue
+    # Skip merge commits (2+ parents), mirroring the CI seat-line-check job:
+    # merges are automation, not seat work.
+    PARENTS=$(git cat-file -p "$commit" | grep -c '^parent ' || true)
+    if [ "$PARENTS" -ge 2 ]; then
+      continue
+    fi
+    last_line="$(git log -1 --format='%B' "$commit" \
+      | grep -viE "$SEAT_COAUTHOR_EXEMPT" \
+      | grep -vE '^[[:space:]]*$' | tail -1 || true)"
+    if ! printf '%s\n' "$last_line" | grep -qE "$SEAT_PATTERN"; then
+      red "✗ Commit ${commit:0:8} lacks a valid Seat: trailer as its last body line."
+      red "  End the commit body with 'Seat: <your-seat>' (matches ^Seat: [a-z0-9-]+\$)."
+      FAIL=1
+      SEAT_FAIL=1
+    fi
+  done < <(git rev-list "$RANGE" 2>/dev/null)
+done
+if [ "$SEAT_FAIL" = "0" ]; then
+  green "✓ Every pushed non-merge commit carries a Seat: trailer."
 fi
 
 if [ "$FAIL" != "0" ]; then
