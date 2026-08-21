@@ -341,7 +341,7 @@ export async function widenAccountOpeningDates(
  * fields that don't apply to imported data:
  *   - `enc_merchant`, `enc_category_id`, `enc_memo`, `enc_tags`:
  *     null on first import. The user can edit afterward; the
- *     unique partial index makes future re-syncs ignore the row,
+ *     unique index makes future re-syncs ignore the row,
  *     so user edits are never overwritten.
  *   - `hmac_*`: null. Computed when the user later sets a
  *     merchant/category via the standard transaction edit flow.
@@ -456,7 +456,7 @@ export async function importOrTransactions(
     }
     // 1:N mapping support (rare in Phase 4 but the schema allows
     // it): we write one row per destination. Each gets its own
-    // external_id collision check from the unique partial index.
+    // external_id collision check from the unique index.
     // Phase 5 ships exactly this — split routing UX comes later.
     for (const accountId of accountIds) {
       try {
