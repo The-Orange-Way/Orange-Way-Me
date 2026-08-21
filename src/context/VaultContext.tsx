@@ -49,8 +49,16 @@ import {
   importMekFromRaw,
   randomBytesB64,
   unwrapMekWithRecovery,
+  unwrapOrMekWithVaultMek,
   wrapMekWithRecovery,
+  wrapOrMekWithVaultMek,
 } from "@/lib/vault";
+import {
+  CURRENT_OR_KEY_EPOCH,
+  OrNamespaceDisabledError,
+  planOrKeyMaterial,
+  type OrKeyMaterialRow,
+} from "@/lib/or/or-key-material";
 import {
   ensureUserKeypair,
   rewrapUserKeypair,
@@ -207,6 +215,159 @@ async function queueHouseholdReadyEmail(userId: string, householdId: string): Pr
 
 const vaultTable = () => supabase.from("vault_metadata");
 
+/** The refs the Orange Rails namespace lives in, bundled so the install and
+ *  teardown paths cannot fall out of step with each other. */
+interface OrKeyRefs {
+  creds: { current: CryptoKey | null };
+  txns: { current: CryptoKey | null };
+  opk: { current: Uint8Array | null };
+  stealth: { current: Uint8Array | null };
+  disabledReason: { current: string | null };
+}
+
+/**
+ * Install the four Orange Rails subkeys for this session, or disable the
+ * namespace and leave the rest of the vault working.
+ *
+ * Shared by unlock and recovery so the two cannot drift apart. The failure is
+ * deliberately loud in the console and deliberately quiet about the vault: an
+ * unlock that succeeded is not reported as an unlock that failed.
+ *
+ * Module level, taking its refs and setter as arguments, so the callers stay
+ * dependency-free stable callbacks.
+ */
+async function applyOrKeyMaterial(
+  material: OrKeyMaterial,
+  refs: OrKeyRefs,
+  setReason: (reason: string | null) => void,
+): Promise<void> {
+  if (!material.ok) {
+    refs.creds.current = null;
+    refs.txns.current = null;
+    refs.opk.current = null;
+    refs.stealth.current = null;
+    refs.disabledReason.current = material.reason;
+    setReason(material.reason);
+    console.error("[vault] Orange Rails namespace disabled:", material.reason);
+    return;
+  }
+  const { orMekBytes, saltContext } = material;
+  refs.creds.current = await deriveOrCredsKeyFromMek(orMekBytes, saltContext);
+  refs.txns.current = await deriveOrTxnsKeyFromMek(orMekBytes, saltContext);
+  refs.opk.current = await deriveOrOpkSeedFromMek(orMekBytes, saltContext);
+  refs.stealth.current = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, saltContext);
+  refs.disabledReason.current = null;
+  setReason(null);
+}
+
+/**
+ * Throw the precise DL-1506 signal when the vault is unlocked but the Orange
+ * Rails namespace is not usable.
+ *
+ * This exists so callers never have to distinguish the two failures by reading
+ * a message string. Without it every Orange Rails accessor would report "Vault
+ * is locked" for a vault that is demonstrably unlocked, which sends the
+ * customer to re-enter a password that cannot help.
+ *
+ * Module level, and takes the ref rather than closing over it, so the
+ * accessors that call it stay dependency-free stable callbacks.
+ */
+function assertOrAvailable(reasonRef: { current: string | null }): void {
+  if (reasonRef.current) throw new OrNamespaceDisabledError(reasonRef.current);
+}
+
+type OrKeyMaterial =
+  | { ok: true; orMekBytes: Uint8Array; saltContext: string }
+  | { ok: false; reason: string };
+
+/**
+ * Where the Orange Rails key material comes from (DL-1506).
+ *
+ * Every caller below used to do the same thing: derive it from the password
+ * and whatever kdf_salt happened to be current. That is the bug. kdf_salt is
+ * regenerated on a password change and on a recovery, so all four Orange Rails
+ * subkeys changed with it and every row already sealed under the old ones
+ * became unopenable by anyone, us included.
+ *
+ * Now the material is pinned once and reused. The pinning moment is any moment
+ * the legacy derivation is still correct: vault creation, or an unlock, where
+ * the password is in hand and the salt has not yet rotated.
+ *
+ * There is NO exclusion for the pre-wrapped-MEK vault shape. Pinning under a
+ * password derived vault MEK decouples less than pinning under a random one,
+ * but it is not worse than deriving directly, and no row in the system has
+ * that shape, so a second code path would be a branch no test could reach.
+ *
+ * A refusal disables the Orange Rails namespace for the session and must never
+ * be turned into a fall back to derivation. After a rotation, deriving yields
+ * a well formed key that opens nothing and reports success, which is precisely
+ * the failure being removed.
+ */
+async function resolveOrKeyMaterial(params: {
+  userId: string;
+  password: string;
+  mek: CryptoKey;
+  row: OrKeyMaterialRow;
+  kdfSalt: string;
+}): Promise<OrKeyMaterial> {
+  const { userId, password, mek, row, kdfSalt } = params;
+
+  const plan = planOrKeyMaterial(row, kdfSalt);
+
+  // A refusal disables the Orange Rails namespace and does NOT fail the
+  // unlock. Two reasons, and the second is the important one. First, the
+  // customer's vault is not in question here; locking them out of their own
+  // finances because one namespace cannot be reproduced is a worse outcome
+  // than the bug being fixed. Second, the tempting alternative, falling back
+  // to deriving, is the original defect: after a rotation it produces a key
+  // that opens nothing while looking exactly like success.
+  if (plan.mode === "refuse") {
+    return { ok: false, reason: plan.reason };
+  }
+
+  if (plan.mode === "unwrap") {
+    try {
+      return {
+        ok: true,
+        orMekBytes: await unwrapOrMekWithVaultMek(plan.ciphertext, mek),
+        saltContext: plan.saltContext,
+      };
+    } catch (e) {
+      // The stored blob exists and did not open. Deriving instead would give a
+      // key that seals new rows nothing can later read, so this stays a
+      // refusal.
+      return {
+        ok: false,
+        reason: `Orange Rails key material is stored but could not be opened: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      };
+    }
+  }
+
+  const orMekBytes = await deriveOrMekBytes(password, userId, plan.saltContext);
+
+  // Persisting the pin must never break an unlock. The value just derived is
+  // correct for this session either way, and the next unlock retries the pin.
+  // What must not happen is the reverse: treating a failed WRITE as a reason to
+  // stop using the correct value we already hold.
+  try {
+    const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
+    const { error } = await vaultTable()
+      .update({
+        enc_or_mek_ciphertext: ciphertext,
+        or_subkey_salt: plan.saltContext,
+        or_key_epoch: plan.epoch,
+      })
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.warn("[vault] could not pin Orange Rails key material; will retry next unlock", e);
+  }
+
+  return { ok: true, orMekBytes, saltContext: plan.saltContext };
+}
+
 interface VaultMetadataRow {
   user_id: string;
   kdf_salt: string;
@@ -216,8 +377,20 @@ interface VaultMetadataRow {
   hmac_salt: string;
   enc_mek_ciphertext: string | null;
   enc_hmac_key: string | null;
-  /** Nullable for legacy rows. Treat null as version 2. */
+  /**
+   * Which generation of the vault key architecture this row was written under.
+   * Every row that exists is generation 1: the MEK is random and wrapped, and
+   * the earlier password-derived shape was renumbered out of existence rather
+   * than left in the registry (see the CURRENT_VAULT_KEY_VERSION comment).
+   * Nullable only because the column predates that renumbering.
+   */
   vault_key_version: number | null;
+  /** DL-1506. Orange Rails MEK sealed under the vault MEK. Null until pinned. */
+  enc_or_mek_ciphertext: string | null;
+  /** DL-1506. The kdf_salt in force when the above was pinned. */
+  or_subkey_salt: string | null;
+  /** DL-1506. Generation of the pinned pair above. Null until pinned. */
+  or_key_epoch: number | null;
 }
 
 interface CreateVaultResult {
@@ -235,11 +408,19 @@ interface VaultContextType {
    */
   vaultCheckError: boolean;
   /**
-   * Which KDF currently protects the MEK wrapper: 2 = PBKDF2, 3 = Argon2id.
-   * Null before the row is fetched. Used by the Security page to show/hide
-   * the upgrade prompt.
+   * Which generation of the vault key architecture protects the MEK wrapper.
+   * Null before the row is fetched. Every vault that exists reads 1; the
+   * Security page keys its upgrade prompt off this.
    */
   vaultKeyVersion: number | null;
+  /**
+   * Non-null when the vault is unlocked but the Orange Rails namespace is NOT
+   * available, because its pinned key material could not be reproduced
+   * (DL-1506). The rest of the vault works normally. Consumers must hide or
+   * disable Orange Rails surfaces and show this reason rather than letting a
+   * call fail later with something that reads like a lock.
+   */
+  orNamespaceDisabledReason: string | null;
   unlock: (password: string) => Promise<void>;
   createVault: (password: string) => Promise<CreateVaultResult>;
   finalizeVaultSetup: () => void;
@@ -354,6 +535,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // cannot insert a duplicate vault_metadata row on a transient error.
   const [vaultCheckError, setVaultCheckError] = useState(false);
   const [vaultKeyVersion, setVaultKeyVersion] = useState<number | null>(null);
+  // DL-1506. Set when the vault unlocks but the Orange Rails namespace cannot
+  // be reproduced. Held as BOTH state and a ref: the state drives the UI, the
+  // ref is what the subkey accessors read, because they are stable callbacks
+  // that must not go stale between renders.
+  const [orNamespaceDisabledReason, setOrNamespaceDisabledReason] = useState<string | null>(null);
   const mekRef = useRef<CryptoKey | null>(null);
   const mekBytesRef = useRef<Uint8Array | null>(null);
   const hmacRef = useRef<CryptoKey | null>(null);
@@ -371,7 +557,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // lifetime rules as the OPK seed: zeroed and nulled on lock, on sign-out and
   // on no-user, and never written to storage or sent to any server.
   const orStealthKeyBytesRef = useRef<Uint8Array | null>(null);
-  // Phase 4.2: active household + unwrapped DEK. Populated on unlock
+
+  const orDisabledReasonRef = useRef<string | null>(null); // Phase 4.2: active household + unwrapped DEK. Populated on unlock
   // when the user has a membership row + a wrap we can open with their
   // private key. Stays null for solo users — all scope='household'
   // writes then fall back to the personal MEK (see scope-encryption.ts).
@@ -426,6 +613,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orTxnsKeyRef.current = null;
         orOpkSeedRef.current = null;
         orStealthKeyBytesRef.current = null;
+        orDisabledReasonRef.current = null;
+        setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
@@ -485,6 +674,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orTxnsKeyRef.current = null;
         orOpkSeedRef.current = null;
         orStealthKeyBytesRef.current = null;
+        orDisabledReasonRef.current = null;
+        setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
@@ -523,8 +714,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     const kdfSalt = randomBytesB64(32);
     const hmacSalt = randomBytesB64(32);
-    // kdf_iterations is meaningful only for v2 vaults. For v3 we keep the
-    // column populated for backward display/compat but the value is unused.
+    // kdf_iterations is not read by the Argon2id wrapper every vault now
+    // uses. The column is kept populated because it is still displayed and
+    // still written by the legacy paths below.
     const iterations = 600_000;
 
     // Generate a random MEK (independent of password).
@@ -532,7 +724,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const mek = await importMekFromRaw(mekRawArr);
 
     const verifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
-    // New vaults ship on the current version (Argon2id / v3).
+    // New vaults ship on the current version, which is the only version.
     const strategy = KEY_DERIVATION_STRATEGIES[CURRENT_VAULT_KEY_VERSION];
     const encMekCiphertext = await strategy.wrapMekWithPassword(
       mekRawArr.buffer as ArrayBuffer,
@@ -554,6 +746,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       ["sign"],
     );
 
+    // OrangeRails subkeys, derived here so they are available immediately
+    // after finalizeVaultSetup() flips isUnlocked to true.
+    //
+    // Pinned in the SAME insert as everything else (DL-1506). A vault created
+    // today is the one case with no legacy value to preserve, so there is no
+    // reason to make it wait for its first unlock to be protected, and doing it
+    // here means a brand new vault can never enter the half pinned state that
+    // planOrKeyMaterial has to refuse.
+    const orMekBytes = await deriveOrMekBytes(password, user.id, kdfSalt);
+    const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, kdfSalt);
+    const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, kdfSalt);
+    const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, kdfSalt);
+    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, kdfSalt);
+    const encOrMek = await wrapOrMekWithVaultMek(orMekBytes, mek);
+
     const { error } = await vaultTable().insert({
       user_id: user.id,
       kdf_salt: kdfSalt,
@@ -564,16 +771,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       enc_mek_ciphertext: encMekCiphertext,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
+      enc_or_mek_ciphertext: encOrMek,
+      or_subkey_salt: kdfSalt,
+      or_key_epoch: CURRENT_OR_KEY_EPOCH,
     });
     if (error) throw new Error(error.message);
-
-    // OrangeRails subkeys — derive at vault creation so they're available
-    // immediately after finalizeVaultSetup() flips isUnlocked to true.
-    const orMekBytes = await deriveOrMekBytes(password, user.id, kdfSalt);
-    const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, kdfSalt);
-    const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, kdfSalt);
-    const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, kdfSalt);
-    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, kdfSalt);
 
     mekRef.current = mek;
     mekBytesRef.current = mekRawArr;
@@ -582,6 +784,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orTxnsKeyRef.current = orTxnsKey;
     orOpkSeedRef.current = orOpkSeed;
     orStealthKeyBytesRef.current = orStealthKeyBytes;
+    orDisabledReasonRef.current = null;
+    setOrNamespaceDisabledReason(null);
     kdfSaltRef.current = kdfSalt;
     setVaultKeyVersion(CURRENT_VAULT_KEY_VERSION);
 
@@ -718,7 +922,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     const { data, error } = await vaultTable()
       .select(
-        "kdf_salt,kdf_iterations,verifier_ciphertext,hmac_salt,enc_mek_ciphertext,enc_hmac_key,vault_key_version",
+        "kdf_salt,kdf_iterations,verifier_ciphertext,hmac_salt,enc_mek_ciphertext,enc_hmac_key,vault_key_version,enc_or_mek_ciphertext,or_subkey_salt,or_key_epoch",
       )
       .eq("user_id", user.id)
       .maybeSingle();
@@ -734,6 +938,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       | "enc_mek_ciphertext"
       | "enc_hmac_key"
       | "vault_key_version"
+      | "enc_or_mek_ciphertext"
+      | "or_subkey_salt"
+      | "or_key_epoch"
     >;
 
     let mek: CryptoKey;
@@ -764,8 +971,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Wrong vault password");
       }
     } else {
-      // Legacy (pre-enc_mek_ciphertext): MEK IS the PBKDF2-derived key.
-      // Always v2 — legacy vaults predate the strategy map.
+      // Legacy shape (pre-enc_mek_ciphertext): the MEK IS the password
+      // derived key rather than a random key wrapped by one. This predates
+      // the strategy map, so no version in the registry describes it.
       mek = await deriveMek(password, row.kdf_salt, row.kdf_iterations);
       try {
         const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
@@ -782,28 +990,50 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (row.enc_hmac_key) {
       hmacKey = await decryptHmacKey(row.enc_hmac_key, mek);
     } else {
-      // Legacy HMAC derivation — only reachable for pre-enc_hmac_key vaults,
-      // which are always v2, so the PBKDF2 iteration count is meaningful.
+      // Legacy HMAC derivation, only reachable for pre-enc_hmac_key vaults.
+      // Those predate the strategy map, so the stored iteration count is the
+      // real parameter here rather than a display-only column.
       hmacKey = await deriveHmacKey(password, row.kdf_salt, row.hmac_salt, row.kdf_iterations);
     }
 
-    // OrangeRails subkeys — derived from a separate Argon2id with a stable
-    // salt prefix, so OR data survives vault version upgrades and is
-    // consistent regardless of the vault's own MEK shape. Uses the per-user
-    // kdf_salt as the salt-context (Personal has no orgs concept).
-    const orMekBytes = await deriveOrMekBytes(password, user.id, row.kdf_salt);
-    const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, row.kdf_salt);
-    const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, row.kdf_salt);
-    const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, row.kdf_salt);
-    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, row.kdf_salt);
+    // OrangeRails subkeys. Pinned rather than re-derived (DL-1506): this used
+    // to take row.kdf_salt, which is regenerated on every password change, so
+    // the four subkeys moved and every row sealed under the previous ones was
+    // orphaned. saltContext is the salt these keys were FIRST established
+    // against and does not move again.
+    //
+    // The pre-enc_mek_ciphertext shape handled above is NOT excluded here. It
+    // would pin the Orange Rails material under a MEK that is itself password
+    // derived, which is weaker than pinning under a random wrapped MEK, but it
+    // is not worse than the status quo, where that material is password
+    // derived directly. Writing a second code path for a shape no row in the
+    // system has would mean shipping a branch no test can reach.
+    const orMaterial = await resolveOrKeyMaterial({
+      userId: user.id,
+      password,
+      mek,
+      row,
+      kdfSalt: row.kdf_salt,
+    });
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
     hmacRef.current = hmacKey;
-    orCredsKeyRef.current = orCredsKey;
-    orTxnsKeyRef.current = orTxnsKey;
-    orOpkSeedRef.current = orOpkSeed;
-    orStealthKeyBytesRef.current = orStealthKeyBytes;
+    // The bundle is built here rather than at component scope so that these
+    // callbacks keep an empty dependency array: a fresh object literal at
+    // render time would make them, and every consumer memoised on them,
+    // rebuild on every render.
+    await applyOrKeyMaterial(
+      orMaterial,
+      {
+        creds: orCredsKeyRef,
+        txns: orTxnsKeyRef,
+        opk: orOpkSeedRef,
+        stealth: orStealthKeyBytesRef,
+        disabledReason: orDisabledReasonRef,
+      },
+      setOrNamespaceDisabledReason,
+    );
     kdfSaltRef.current = row.kdf_salt;
     setVaultKeyVersion(version);
     setIsUnlocked(true);
@@ -876,8 +1106,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     if (!mekBytesRef.current || mekBytesRef.current.length === 0)
       throw new Error("Cannot change password for a legacy vault. Please recreate your vault.");
 
-    // Fetch the current wrapper so we can verify the old password using the
-    // stored KDF version (v2 for pre-upgrade vaults, v3 afterwards).
+    // Fetch the current wrapper so the old password is verified against the
+    // KDF version this row actually stores, rather than the current default.
     const { data, error } = await vaultTable()
       .select("kdf_salt,kdf_iterations,enc_mek_ciphertext,vault_key_version")
       .eq("user_id", user.id)
@@ -905,8 +1135,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Opportunistic upgrade: every password change lands the vault on the
-    // current best KDF. Fresh salt, v3 wrapper. kdf_iterations is ignored by
-    // Argon2id but we keep the column populated for back-compat.
+    // current best KDF. Fresh salt, current wrapper. kdf_iterations is not
+    // read by Argon2id but the column stays populated for back-compat.
     const newSalt = randomBytesB64(16);
     const iterations = 600_000;
     const mekBytes = mekBytesRef.current;
@@ -995,7 +1225,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // Phase 4.1 keypair wrap and the user would lose household access
     // permanently on next unlock.
     const { data, error } = await vaultTable()
-      .select("kdf_salt,recovery_ciphertext,hmac_salt,enc_hmac_key,enc_private_key")
+      .select(
+        "kdf_salt,recovery_ciphertext,hmac_salt,enc_hmac_key,enc_private_key,enc_or_mek_ciphertext,or_subkey_salt,or_key_epoch",
+      )
       .eq("user_id", user.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -1090,20 +1322,44 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       .eq("user_id", user.id);
     if (upErr) throw new Error(upErr.message);
 
-    // OrangeRails subkeys — newSalt is the salt-context for this user post-recover.
-    const orMekBytes = await deriveOrMekBytes(newPassword, user.id, newSalt);
-    const orCredsKey = await deriveOrCredsKeyFromMek(orMekBytes, newSalt);
-    const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, newSalt);
-    const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, newSalt);
-    const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, newSalt);
+    // OrangeRails subkeys. THIS IS THE LINE THAT DESTROYED DATA (DL-1506): it
+    // used newSalt, so recovery produced four different subkeys and every row
+    // the customer had already synced stopped opening, silently, forever.
+    // Recovery reaches the vault MEK through the recovery code, so anything
+    // sealed under that MEK is reachable too, and the pinned material opens
+    // exactly what it opened before. If nothing was pinned before the recovery
+    // there is nothing to restore, and that is the honest outcome rather than
+    // a fresh key pretending otherwise.
+    const orMaterial = await resolveOrKeyMaterial({
+      userId: user.id,
+      password: newPassword,
+      mek,
+      row: {
+        enc_or_mek_ciphertext: data.enc_or_mek_ciphertext ?? null,
+        or_subkey_salt: data.or_subkey_salt ?? null,
+        or_key_epoch: data.or_key_epoch ?? null,
+      },
+      kdfSalt: newSalt,
+    });
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
     hmacRef.current = hmacKey;
-    orCredsKeyRef.current = orCredsKey;
-    orTxnsKeyRef.current = orTxnsKey;
-    orOpkSeedRef.current = orOpkSeed;
-    orStealthKeyBytesRef.current = orStealthKeyBytes;
+    // The bundle is built here rather than at component scope so that these
+    // callbacks keep an empty dependency array: a fresh object literal at
+    // render time would make them, and every consumer memoised on them,
+    // rebuild on every render.
+    await applyOrKeyMaterial(
+      orMaterial,
+      {
+        creds: orCredsKeyRef,
+        txns: orTxnsKeyRef,
+        opk: orOpkSeedRef,
+        stealth: orStealthKeyBytesRef,
+        disabledReason: orDisabledReasonRef,
+      },
+      setOrNamespaceDisabledReason,
+    );
     kdfSaltRef.current = newSalt;
     setVaultKeyVersion(CURRENT_VAULT_KEY_VERSION);
     setIsUnlocked(true);
@@ -1127,6 +1383,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orTxnsKeyRef.current = null;
     orOpkSeedRef.current = null;
     orStealthKeyBytesRef.current = null;
+    orDisabledReasonRef.current = null;
+    setOrNamespaceDisabledReason(null);
     currentHouseholdRef.current = null;
     // Phase 4.4: clear HSK cache + retained salt on lock.
     kdfSaltRef.current = null;
@@ -1202,16 +1460,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // as cryptoEncryptText/cryptoDecryptText (IV[12] + ciphertext, base64).
 
   const encryptOrCipher = useCallback(async (plaintext: string): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orCredsKeyRef.current) throw new Error("Vault is locked");
     return cryptoEncryptText(plaintext, orCredsKeyRef.current);
   }, []);
 
   const decryptOrCipher = useCallback(async (ciphertext: string): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orCredsKeyRef.current) throw new Error("Vault is locked");
     return cryptoDecryptText(ciphertext, orCredsKeyRef.current);
   }, []);
 
   const decryptOrTxnCipher = useCallback(async (ciphertext: string): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orTxnsKeyRef.current) throw new Error("Vault is locked");
     return cryptoDecryptText(ciphertext, orTxnsKeyRef.current);
   }, []);
@@ -1232,6 +1493,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // about a third of the 32-byte key material was visible to any console
   // reader / browser extension / PostHog session recording.
   const exportOrCredsKey = useCallback(async (): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orCredsKeyRef.current) throw new Error("Vault is locked");
     const raw = await crypto.subtle.exportKey("raw", orCredsKeyRef.current);
     // DEV-only diagnostic. Fingerprint is one-way (8 hex of SHA-256) but
@@ -1245,6 +1507,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const exportOrTxnsKey = useCallback(async (): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orTxnsKeyRef.current) throw new Error("Vault is locked");
     const raw = await crypto.subtle.exportKey("raw", orTxnsKeyRef.current);
     if (import.meta.env.DEV) {
@@ -1270,6 +1533,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
    * value never reaches a console surface at all.
    */
   const exportOrStealthKeyB64 = useCallback(async (): Promise<string> => {
+    assertOrAvailable(orDisabledReasonRef);
     const bytes = orStealthKeyBytesRef.current;
     if (!bytes) throw new Error("Vault is locked");
     return arrayBufferToBase64(
@@ -1282,6 +1546,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // OR seals background-synced bank transactions to it. Private half stays
   // here and unseals via crypto_box_seal_open. Lazily imports libsodium.
   const getOpkKeypair = useCallback(async (): Promise<OpkKeypair> => {
+    assertOrAvailable(orDisabledReasonRef);
     if (!orOpkSeedRef.current) throw new Error("Vault is locked");
     return opkKeypairFromSeed(orOpkSeedRef.current);
   }, []);
@@ -1467,6 +1732,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         hasVault,
         vaultCheckError,
         vaultKeyVersion,
+        orNamespaceDisabledReason,
         unlock,
         createVault,
         finalizeVaultSetup,
