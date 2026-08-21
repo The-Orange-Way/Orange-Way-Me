@@ -12,7 +12,7 @@ import {
 } from "@/lib/goals-math";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
-import { PiggyBank, Banknote, Calendar, TrendingUp } from "lucide-react";
+import { PiggyBank, Banknote, Calendar, TrendingUp, AlertCircle } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useLocaleFormat } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
@@ -67,21 +67,43 @@ export function GoalCard({ goal, accounts, txns }: Props) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-              <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
-              <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
+          {prog.untrackableReason ? (
+            /*
+             * DL-1425. Showing a 0% bar here would be a claim we cannot support:
+             * it reads as "you have saved nothing", when the truth is "we have
+             * nothing to measure". Say which, and say what would fix it.
+             */
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
+                <span className="text-muted-foreground text-base">Not tracking yet</span>
+                <span className="text-muted-foreground">target {fmtUSD(prog.target)}</span>
+              </div>
+              <div className="flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
+                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                <span>
+                  {prog.untrackableReason === "no_accounts_linked"
+                    ? "No accounts are linked to this goal, so there is no balance to measure. Open the goal and link one."
+                    : "The accounts linked to this goal no longer exist, so there is no balance to measure. Open the goal and link one."}
+                </span>
+              </div>
             </div>
-            <Progress value={prog.pct * 100} className="h-2" />
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">
-                {goal.type === "save_up"
-                  ? `${fmtUSD(prog.remaining)} to go`
-                  : `${fmtUSD(prog.remaining)} remaining`}
-              </span>
-              <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
+                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
+              </div>
+              <Progress value={prog.pct * 100} className="h-2" />
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {goal.type === "save_up"
+                    ? `${fmtUSD(prog.remaining)} to go`
+                    : `${fmtUSD(prog.remaining)} remaining`}
+                </span>
+                <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {countdown && (
