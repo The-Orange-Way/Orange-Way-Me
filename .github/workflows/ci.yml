@@ -304,6 +304,8 @@ jobs:
           # local and server enforcement share the same exemption and cannot drift.
           COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
 
+          TOTAL=$(git rev-list --count "$BASE..$HEAD")
+
           FAIL=0
           COUNT=0
           while read -r commit; do
@@ -325,9 +327,14 @@ jobs:
             fi
           done < <(git rev-list "$BASE..$HEAD")
 
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::No non-merge commits found in range $BASE..$HEAD -- the check ran over nothing. Verify BASE/HEAD are correct."
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "::error::Commit range $BASE..$HEAD is empty -- the check ran over nothing. Verify BASE/HEAD are correct."
             exit 1
+          fi
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::notice::All $TOTAL commit(s) in range are merge commits, which are exempt. Nothing to check."
+            exit 0
           fi
 
           if [ "$FAIL" -ne 0 ]; then
