@@ -40,6 +40,11 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useConnectionAccountMap } from "@/hooks/useConnectionAccountMap";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/connectors/constants";
 import { InlineCreateAccountDialog } from "./InlineCreateAccountDialog";
+import {
+  createButtonLabel,
+  emptyStateMessage,
+  suggestedAccountName,
+} from "./destination-picker-copy";
 import type { Account } from "@/lib/connectors/types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -76,6 +81,9 @@ export function DestinationPickerDialog({
   // wallet.external_wallet_id → selected Personal accounts.id (or empty string for none)
   const [selection, setSelection] = useState<Record<string, string>>({});
   const [createOpenForWallet, setCreateOpenForWallet] = useState<string | null>(null);
+  // Whatever the customer typed in the picker's search box, carried into the
+  // create dialog so she does not type the same name twice.
+  const [createNameSuggestion, setCreateNameSuggestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Hydrate selection from existing mappings (edit-mapping flow) and reapply
@@ -145,7 +153,10 @@ export function DestinationPickerDialog({
                   onSelect={(id) =>
                     setSelection((prev) => ({ ...prev, [w.external_wallet_id]: id }))
                   }
-                  onRequestCreate={() => setCreateOpenForWallet(w.external_wallet_id)}
+                  onRequestCreate={(suggestedName) => {
+                    setCreateNameSuggestion(suggestedName ?? "");
+                    setCreateOpenForWallet(w.external_wallet_id);
+                  }}
                 />
               ))}
             </div>
@@ -172,16 +183,22 @@ export function DestinationPickerDialog({
             wallets.find((w) => w.external_wallet_id === createOpenForWallet)?.currency ?? "USD"
           }
           defaultName={(() => {
+            // What the customer typed into the search box wins. She was looking
+            // for an account by that name, did not find one, and asked to create
+            // it; retyping it would be the second time we made her say it.
             const w = wallets.find((x) => x.external_wallet_id === createOpenForWallet);
-            if (!w) return "";
-            const base = w.label?.trim() || `${w.currency} wallet`;
-            return base;
+            const walletFallback = w ? w.label?.trim() || `${w.currency} wallet` : "";
+            return suggestedAccountName(createNameSuggestion, walletFallback);
           })()}
-          onCancel={() => setCreateOpenForWallet(null)}
+          onCancel={() => {
+            setCreateOpenForWallet(null);
+            setCreateNameSuggestion("");
+          }}
           onCreated={async (newId) => {
             // Auto-select the new account in the picker for the requesting wallet.
             const walletId = createOpenForWallet;
             setCreateOpenForWallet(null);
+            setCreateNameSuggestion("");
             if (walletId) {
               setSelection((prev) => ({ ...prev, [walletId]: newId }));
             }
@@ -203,7 +220,11 @@ interface WalletDestinationRowProps {
   accountsLoading: boolean;
   selectedAccountId: string;
   onSelect: (accountId: string) => void;
-  onRequestCreate: () => void;
+  /**
+   * Opens the create-account dialog. The argument is what the customer typed
+   * into the search box, so the new account can be pre-filled with it.
+   */
+  onRequestCreate: (suggestedName?: string) => void;
 }
 
 /**
@@ -243,6 +264,7 @@ function WalletDestinationRow({
   onRequestCreate,
 }: WalletDestinationRowProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const selected = useMemo(
     () => accounts.find((a) => a.id === selectedAccountId) ?? null,
     [accounts, selectedAccountId],
@@ -292,20 +314,28 @@ function WalletDestinationRow({
           </PopoverTrigger>
           <PopoverContent className="w-[260px] p-0" align="end">
             <Command>
-              <CommandInput placeholder="Search accounts…" />
+              <CommandInput
+                placeholder="Search accounts…"
+                value={search}
+                onValueChange={setSearch}
+              />
               <CommandList>
                 <CommandEmpty>
                   <div className="px-2 py-3 text-center text-sm">
-                    <p className="text-muted-foreground">No accounts yet.</p>
+                    <p className="text-muted-foreground">
+                      {search.trim()
+                        ? `No account matches "${search.trim()}".`
+                        : "No accounts yet."}
+                    </p>
                     <button
                       type="button"
                       className="mt-2 text-xs font-medium text-primary hover:underline"
                       onClick={() => {
                         setOpen(false);
-                        onRequestCreate();
+                        onRequestCreate(search.trim() || undefined);
                       }}
                     >
-                      + Create a new account
+                      {createButtonLabel(search)}
                     </button>
                   </div>
                 </CommandEmpty>
@@ -343,11 +373,18 @@ function WalletDestinationRow({
           type="button"
           variant="outline"
           size="sm"
-          onClick={onRequestCreate}
+          onClick={() => onRequestCreate()}
           title="Create a new account"
+          aria-label="Create a new account"
         >
           <Plus className="h-3 w-3" />
-          <span className="ml-1 hidden sm:inline">New</span>
+          {/*
+           * This label used to be `hidden sm:inline`, so on a phone the control
+           * was a bare "+" glyph with no text at all. The reporter could not
+           * tell what it did. The row is a column at that width, so there is
+           * room to just say it.
+           */}
+          <span className="ml-1">New account</span>
         </Button>
       </div>
     </div>
