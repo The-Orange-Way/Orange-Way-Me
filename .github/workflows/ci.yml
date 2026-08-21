@@ -275,3 +275,62 @@ jobs:
           if [ "$ERRORS" -lt "$DENO_CHECK_BASELINE" ]; then
             echo "::notice::Error count dropped to ${ERRORS}. Lower DENO_CHECK_BASELINE to ${ERRORS} in .github/workflows/ci.yml in this PR so the ratchet holds the ground you just took."
           fi
+
+  seat-line-check:
+    name: Seat trailer on PR commits
+    runs-on: ubuntu-latest
+    # Server-side mirror of scripts/pre-push-gate.sh Check 5. Local hooks never
+    # fire on commits authored through the GitHub API, so this job catches the
+    # exact path the hook cannot: API-authored commits and commits pushed via
+    # tooling that bypasses local hooks.
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history needed so git rev-list BASE..HEAD works correctly.
+          fetch-depth: 0
+
+      - name: Check Seat trailer on every non-merge PR commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          SEAT_PATTERN='^Seat: [a-z0-9-]+$'
+          # GitHub injects a Claude co-author trailer on squash/rebase merges.
+          # Drop it before the last-line check, mirroring the pre-push hook so
+          # local and server enforcement share the same exemption and cannot drift.
+          COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+
+          FAIL=0
+          COUNT=0
+          while read -r commit; do
+            # Skip merge commits (2+ parents): they are automation, not seat work.
+            PARENTS=$(git cat-file -p "$commit" | grep -c '^parent ' || true)
+            if [ "$PARENTS" -ge 2 ]; then
+              echo "skip (merge) ${commit:0:8}"
+              continue
+            fi
+            COUNT=$((COUNT + 1))
+            LAST_LINE=$(git log -1 --format='%B' "$commit" \
+              | grep -viE "$COAUTHOR_EXEMPT" \
+              | grep -vE '^[[:space:]]*$' | tail -1 || true)
+            if ! printf '%s\n' "$LAST_LINE" | grep -qE "$SEAT_PATTERN"; then
+              echo "::error::Commit ${commit:0:8} lacks a valid Seat: trailer (got: '${LAST_LINE}'). End the commit body with 'Seat: <seat-name>' matching ^Seat: [a-z0-9-]+\$."
+              FAIL=1
+            else
+              echo "ok ${commit:0:8}: $LAST_LINE"
+            fi
+          done < <(git rev-list "$BASE..$HEAD")
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No non-merge commits found in range $BASE..$HEAD -- the check ran over nothing. Verify BASE/HEAD are correct."
+            exit 1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All $COUNT non-merge PR commit(s) carry a valid Seat: trailer."
