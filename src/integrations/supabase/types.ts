@@ -1090,11 +1090,13 @@ export type Database = {
         Row: {
           created_at: string;
           enc_hmac_key: string | null;
+          enc_or_mek_ciphertext: string | null;
           enc_mek_ciphertext: string | null;
           enc_private_key: string | null;
           hmac_salt: string;
           kdf_iterations: number;
           kdf_salt: string;
+          or_subkey_salt: string | null;
           recovery_ciphertext: string | null;
           user_id: string;
           vault_key_version: number;
@@ -1103,11 +1105,13 @@ export type Database = {
         Insert: {
           created_at?: string;
           enc_hmac_key?: string | null;
+          enc_or_mek_ciphertext?: string | null;
           enc_mek_ciphertext?: string | null;
           enc_private_key?: string | null;
           hmac_salt: string;
           kdf_iterations?: number;
           kdf_salt: string;
+          or_subkey_salt?: string | null;
           recovery_ciphertext?: string | null;
           user_id: string;
           vault_key_version?: number;
@@ -1116,11 +1120,13 @@ export type Database = {
         Update: {
           created_at?: string;
           enc_hmac_key?: string | null;
+          enc_or_mek_ciphertext?: string | null;
           enc_mek_ciphertext?: string | null;
           enc_private_key?: string | null;
           hmac_salt?: string;
           kdf_iterations?: number;
           kdf_salt?: string;
+          or_subkey_salt?: string | null;
           recovery_ciphertext?: string | null;
           user_id?: string;
           vault_key_version?: number;

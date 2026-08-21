@@ -407,6 +407,62 @@ export async function createEncryptedHmacKey(
   return { raw, ciphertext };
 }
 
+/**
+ * Seal the Orange Rails MEK bytes under the vault MEK (DL-1506).
+ *
+ * Same wire format and the same reasoning as createEncryptedHmacKey above,
+ * which decouples the HMAC key from the vault password so blind indexes stay
+ * valid after a password change. The Orange Rails namespace needs precisely
+ * that decoupling and never got it: its subkeys are derived from the password
+ * and kdf_salt, so a password change or a recovery rotates them and orphans
+ * every row already sealed under the old ones.
+ *
+ * The value being wrapped here is the CURRENT Orange Rails MEK, not a fresh
+ * one. That is the whole point: a new key would need every sealed row
+ * re-encrypted, and a browser that may never see some of those rows cannot
+ * promise to do it. Preserving the value means nothing has to be re-encrypted
+ * at all.
+ *
+ * The vault MEK is a random key that is wrapped rather than derived, so it is
+ * unchanged by a password change and recoverable from the recovery code.
+ * Anything sealed under it inherits both properties.
+ */
+export async function wrapOrMekWithVaultMek(
+  orMekBytes: Uint8Array,
+  mek: CryptoKey,
+): Promise<string> {
+  if (orMekBytes.length !== 32) {
+    throw new Error("Orange Rails MEK must be 32 bytes");
+  }
+  return encryptText(b64encode(orMekBytes), mek);
+}
+
+/**
+ * Open what wrapOrMekWithVaultMek sealed.
+ *
+ * THROWS rather than returning null, and the caller must not catch this and
+ * derive instead. After a salt rotation, deriving produces a well-formed key
+ * that opens nothing while looking exactly like success, which is the defect
+ * this whole change exists to remove. A thrown error is visible on the first
+ * attempt; a silently wrong key is invisible until a customer notices their
+ * history is gone.
+ *
+ * The length check is not ceremony. A short or long result means the blob is
+ * not what we wrote, and feeding it to HKDF anyway would derive four subkeys
+ * that open nothing, which is the same failure wearing a different hat.
+ */
+export async function unwrapOrMekWithVaultMek(
+  ciphertextB64: string,
+  mek: CryptoKey,
+): Promise<Uint8Array> {
+  const b64 = await decryptText(ciphertextB64, mek);
+  const raw = b64decode(b64);
+  if (raw.length !== 32) {
+    throw new Error("Sealed Orange Rails MEK is not 32 bytes; refusing to use it");
+  }
+  return raw;
+}
+
 export async function decryptHmacKey(ciphertextB64: string, mek: CryptoKey): Promise<CryptoKey> {
   const b64 = await decryptText(ciphertextB64, mek);
   const raw = b64decode(b64);
