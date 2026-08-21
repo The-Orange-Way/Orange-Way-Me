@@ -13,13 +13,21 @@
  *     `connection_account_map`. Direction is encoded as the sign
  *     on the amount ("+1.00" / "-1.00"), matching the convention
  *     `useTransactions.buildEncryptedRow` already uses.
- *   - Idempotency: relies on the unique partial index added in
- *     migration 20260423130000_transactions_external_id.sql,
- *     `(user_id, external_source, external_id) WHERE external_id
- *     IS NOT NULL`. Re-running on the same OR batch is a no-op —
- *     Supabase `upsert` with `ignoreDuplicates: true` translates
- *     to `ON CONFLICT DO NOTHING` so user edits to imported rows
- *     are preserved.
+ *   - Idempotency: relies on the unique index idx_transactions_external
+ *     on `(user_id, external_source, external_id)`. This index is PLAIN
+ *     (no WHERE predicate) by design, and the deployed index matches the
+ *     migration history exactly: migration
+ *     20260423130000_transactions_external_id.sql first created it partial
+ *     (`WHERE external_id IS NOT NULL`), then migration
+ *     20260428000000_fix_transactions_external_id_index.sql deliberately
+ *     dropped and recreated it plain, because supabase-js cannot infer a
+ *     partial index as the ON CONFLICT target (Postgres error 42P10). So
+ *     being plain is intentional and load-bearing, not drift. Re-running on
+ *     the same OR batch is a no-op: Supabase `upsert`
+ *     with `ignoreDuplicates: true` translates to `ON CONFLICT DO NOTHING`
+ *     so user edits to imported rows are preserved. Caveat: because the
+ *     index is plain, rows with `external_id IS NULL` are all distinct and
+ *     are NOT deduplicated by it.
  *   - Unmapped wallets (no active row in connection_account_map
  *     for the OR (connection, source_wallet)) are SKIPPED. They
  *     remain visible in the connection's TransactionList with the
@@ -333,7 +341,7 @@ export async function widenAccountOpeningDates(
  * fields that don't apply to imported data:
  *   - `enc_merchant`, `enc_category_id`, `enc_memo`, `enc_tags`:
  *     null on first import. The user can edit afterward; the
- *     unique partial index makes future re-syncs ignore the row,
+ *     unique index makes future re-syncs ignore the row,
  *     so user edits are never overwritten.
  *   - `hmac_*`: null. Computed when the user later sets a
  *     merchant/category via the standard transaction edit flow.
@@ -448,7 +456,7 @@ export async function importOrTransactions(
     }
     // 1:N mapping support (rare in Phase 4 but the schema allows
     // it): we write one row per destination. Each gets its own
-    // external_id collision check from the unique partial index.
+    // external_id collision check from the unique index.
     // Phase 5 ships exactly this — split routing UX comes later.
     for (const accountId of accountIds) {
       try {
