@@ -74,6 +74,7 @@ import {
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
+import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
   orRowsForConnection,
   sealedRecordToCipherB64,
@@ -1304,17 +1305,24 @@ export function ConnectionsPage() {
       }
     }
 
-    const skipped = result.unmapped + result.untagged + decryptFailures;
-    if (result.imported === 0 && skipped === 0 && result.errored === 0) {
+    // What to say lives in describeImportOutcome, which is pure and tested.
+    // The case it exists for (DL-1506): when a vault password is changed or a
+    // vault is recovered, every key derived from the rotated salt changes and
+    // no previously sealed row opens again, for anyone. That used to reach the
+    // customer as "Wallet ledger: 14 undecryptable", which does not say what
+    // happened, whether it is permanent, or whether their money is affected.
+    const outcome = describeImportOutcome({
+      attempted: forThisConn.length + stealthRows.length,
+      opened: decoded.length,
+      imported: result.imported,
+      unmapped: result.unmapped,
+      untagged: result.untagged,
+      errored: result.errored,
+      unreadable: decryptFailures,
+    });
+    if (outcome.silent) {
       return { unmapped: 0, unmappedWalletIds: [] };
     }
-    const parts: string[] = [];
-    if (result.imported > 0) parts.push(`${result.imported} imported`);
-    if (result.unmapped > 0) parts.push(`${result.unmapped} unmapped`);
-    if (result.untagged > 0) parts.push(`${result.untagged} untagged`);
-    if (decryptFailures > 0) parts.push(`${decryptFailures} undecryptable`);
-    if (result.errored > 0) parts.push(`${result.errored} errored`);
-    const summary = parts.join(", ");
     if (result.unmapped > 0 && result.unmappedWalletIds.length > 0) {
       console.warn(
         `[OW Connections] ${result.unmapped} transaction(s) skipped because these source wallets have no destination mapping:`,
@@ -1322,12 +1330,19 @@ export function ConnectionsPage() {
         "→ Click 'Edit mapping' on the connection card to map them.",
       );
     }
-    if (result.errored > 0 || decryptFailures > 0) {
-      toast.warning(`Wallet ledger: ${summary}.`);
-    } else if (result.unmapped > 0 || result.untagged > 0) {
-      toast.info(`Wallet ledger: ${summary}.`);
+    // Worth a log line of its own: this is the one outcome the customer can do
+    // nothing about, and the one we would want to find afterwards.
+    if (outcome.allUnreadable) {
+      console.warn(
+        `[OW Connections] every sealed row for connection ${conn.id} failed to open (${decryptFailures} of ${forThisConn.length + stealthRows.length}). Consistent with a vault key rotation after these rows were sealed (DL-1506).`,
+      );
+    }
+    if (outcome.level === "warning") {
+      toast.warning(outcome.message);
+    } else if (outcome.level === "info") {
+      toast.info(outcome.message);
     } else {
-      toast.success(`Wallet ledger: ${summary}.`);
+      toast.success(outcome.message);
     }
     return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
   }
