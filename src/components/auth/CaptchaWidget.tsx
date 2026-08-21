@@ -11,15 +11,24 @@
  * Configuration (build-time inlined):
  *   VITE_TURNSTILE_SITE_KEY: public site key for the target env.
  *     Branch-derived in `.github/workflows/deploy.yml`:
- *       dev  → TURNSTILE_SITE_KEY_DEV repo var
+ *       dev  → Cloudflare's published always-passes TEST sitekey,
+ *              hardcoded in the workflow. It is NOT read from a repo
+ *              variable. That key issues a token without presenting a
+ *              challenge, which is what lets an automated sign-in run
+ *              on dev at all.
  *       prod → TURNSTILE_SITE_KEY_PROD repo var
- *     When unset, this component renders null and the form submits
- *     without a captchaToken. The Supabase Auth project should also
- *     be configured to skip captcha verification in that case;
- *     otherwise the form will get rejected at sign-in with a
- *     "captcha protection: request disallowed" error. The dev project
- *     has captcha off by default; prod requires both the SPA widget
- *     AND the Supabase config to be aligned before captcha turns on.
+ *     Because the dev key is the always-passes test key, the dev
+ *     Supabase Auth project MUST carry Cloudflare's matching
+ *     always-passes test secret. If it carries any other secret,
+ *     Cloudflare answers `invalid-input-response` and every dev
+ *     sign-in is rejected even though the widget appears to succeed.
+ *     When the site key is unset, this component renders null and the
+ *     form submits without a captchaToken, so the Supabase Auth
+ *     project must then be configured to skip captcha verification;
+ *     otherwise sign-in is rejected with a "captcha protection:
+ *     request disallowed" error. Captcha is currently ENABLED on both
+ *     the dev and the prod Auth project, so the SPA widget and the
+ *     Supabase config have to stay aligned in both.
  *
  * Imperative API (forwarded ref):
  *   ref.current.reset(): clear the current token + re-issue

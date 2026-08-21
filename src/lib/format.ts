@@ -20,8 +20,16 @@ export type BtcDisplayMode = "sats" | "btc" | "btc_easy" | "primary";
  * Both arrive with currency="BTC" so the label alone can't disambiguate.
  * Heuristic: a value with a fractional part is decimal BTC (multiply by
  * 1e8); a whole integer ≥ 1 is already sats (leave it). Nobody enters a
- * whole BTC by typing a bare integer — they'd type "1.00000000".
+ * whole BTC by typing a bare integer, they would type "1.00000000".
  */
+/**
+ * BTC and sats are one asset in two units, so any total that mixes them has to
+ * pick a unit and convert into it rather than adding the raw numbers.
+ */
+export function isBitcoinCurrency(currency: string): boolean {
+  return currency === "BTC" || currency === "sats";
+}
+
 export function normalizeBitcoinToSats(amount: number, currency: string): number {
   if (currency === "sats") return Math.round(amount);
   // currency === "BTC"
@@ -59,10 +67,10 @@ export function formatCurrencyWithMode(
     case "sats":
       return `${sats.toLocaleString(locale)} sats`;
     case "primary":
-      // "₿ 1,500,000" — sats integer with Bitcoin symbol
+      // "₿ 1,500,000": sats integer with Bitcoin symbol
       return `₿ ${sats.toLocaleString(locale)}`;
     case "btc_easy": {
-      // "0.00 150 000 BTC" — 8-decimal BTC grouped as 2+3+3 for readability
+      // "0.00 150 000 BTC": 8-decimal BTC grouped as 2+3+3 for readability
       const btcStr = (sats / 1e8).toFixed(8);
       const [intPart, fracPart] = btcStr.split(".");
       const grouped = `${fracPart.slice(0, 2)} ${fracPart.slice(2, 5)} ${fracPart.slice(5)}`;
@@ -108,16 +116,49 @@ export function formatCurrency(amount: string, currency: string, locale?: string
   }
 }
 
+/**
+ * Sum amounts into one bucket per currency.
+ *
+ * Bitcoin is summed in SATS, under a single "sats" bucket, and BTC-denominated
+ * and sats-denominated rows land in that same bucket because they are the same
+ * asset. Every bitcoin amount is normalized BEFORE it is added.
+ *
+ * That ordering is the entire point of this function. normalizeBitcoinToSats
+ * decides which unit a number is in from its magnitude, so it is only ever
+ * correct on a value that came from a single account. Summing first and
+ * normalizing the total once reported balances roughly 1e8 times too large:
+ * a sats integer plus a decimal BTC value makes a non-integer, the heuristic
+ * reads any non-integer as decimal BTC and multiplies by 1e8, and the display
+ * divides by 1e8 again, so the wrong number survives the round trip intact.
+ *
+ * The heuristic itself is unchanged here and is still wrong for a holding of a
+ * whole number of BTC entered as a bare integer. That is DL-1449 / issue #343
+ * and it needs the stored unit recorded rather than inferred.
+ */
 export function sumByCurrency(
   amounts: { amount: string; currency: string }[],
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const a of amounts) {
-    out[a.currency] = (out[a.currency] ?? 0) + Number(a.amount || 0);
+    const n = Number(a.amount || 0);
+    // A non-numeric balance used to add NaN, which poisons the whole bucket so
+    // the total renders as "NaN" rather than as the other accounts in it.
+    if (!Number.isFinite(n)) continue;
+    if (isBitcoinCurrency(a.currency)) {
+      out.sats = (out.sats ?? 0) + normalizeBitcoinToSats(n, a.currency);
+    } else {
+      out[a.currency] = (out[a.currency] ?? 0) + n;
+    }
   }
   return out;
 }
 
+/**
+ * Legacy totals formatter with no callers as of this change. It routes through
+ * formatCurrency, which does not normalize bitcoin, so it cannot render the
+ * "sats" bucket sumByCurrency now produces. Use formatTotalsWithMode. If you
+ * are about to call this, delete it instead.
+ */
 export function formatTotals(totals: Record<string, number>): string {
   const entries = Object.entries(totals);
   if (entries.length === 0) return "—";

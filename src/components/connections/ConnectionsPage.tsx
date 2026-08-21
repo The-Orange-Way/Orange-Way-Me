@@ -1255,7 +1255,20 @@ export function ConnectionsPage() {
       }
       try {
         const payload = JSON.parse(json) as OrImportTransaction;
-        decoded.push(withStealthSourceWalletId(payload, conn.id, true));
+        // The OR stealth widget does not seal a stable `id` into the
+        // payload. Without one, tx.id is undefined at runtime despite the
+        // OrImportTransaction type, so buildRow writes external_id = NULL.
+        // The unique index on (user_id, external_source, external_id)
+        // treats every NULL as distinct (NULLS DISTINCT is the Postgres
+        // default on a non-partial index), so every sync inserts fresh
+        // duplicates rather than deduplicating. txid_blind_index_hex is
+        // derived deterministically from the Bitcoin txid (chain data) and
+        // is stable across re-syncs, making it the correct dedup key here.
+        // The sealed (bank) path uses the same pattern: row.external_id ?? row.id.
+        const payloadWithId: OrImportTransaction = payload.id
+          ? payload
+          : { ...payload, id: row.txid_blind_index_hex };
+        decoded.push(withStealthSourceWalletId(payloadWithId, conn.id, true));
       } catch {
         // Opened but not parseable: still a failure, and a different one.
         // Counted together because the customer-facing outcome is the same.
