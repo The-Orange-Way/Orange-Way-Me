@@ -107,6 +107,7 @@ export function AccountCard({
  *   active       → small green "Synced" pill (only shown if recent;
  *                  hidden for accounts that haven't synced in > 24h to
  *                  avoid badge clutter on every wallet)
+ *
  *   error        → red "Reconnect" pill with the decrypted error in a
  *                  tooltip and a click-through to /connections
  *   disconnected → muted "Disconnected" pill with click-through to
