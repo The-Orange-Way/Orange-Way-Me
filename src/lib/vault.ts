@@ -407,6 +407,62 @@ export async function createEncryptedHmacKey(
   return { raw, ciphertext };
 }
 
+/**
+ * Seal the Orange Rails MEK bytes under the vault MEK (DL-1506).
+ *
+ * Same wire format and the same reasoning as createEncryptedHmacKey above,
+ * which decouples the HMAC key from the vault password so blind indexes stay
+ * valid after a password change. The Orange Rails namespace needs precisely
+ * that decoupling and never got it: its subkeys are derived from the password
+ * and kdf_salt, so a password change or a recovery rotates them and orphans
+ * every row already sealed under the old ones.
+ *
+ * The value being wrapped here is the CURRENT Orange Rails MEK, not a fresh
+ * one. That is the whole point: a new key would need every sealed row
+ * re-encrypted, and a browser that may never see some of those rows cannot
+ * promise to do it. Preserving the value means nothing has to be re-encrypted
+ * at all.
+ *
+ * The vault MEK is a random key that is wrapped rather than derived, so it is
+ * unchanged by a password change and recoverable from the recovery code.
+ * Anything sealed under it inherits both properties.
+ */
+export async function wrapOrMekWithVaultMek(
+  orMekBytes: Uint8Array,
+  mek: CryptoKey,
+): Promise<string> {
+  if (orMekBytes.length !== 32) {
+    throw new Error("Orange Rails MEK must be 32 bytes");
+  }
+  return encryptText(b64encode(orMekBytes), mek);
+}
+
+/**
+ * Open what wrapOrMekWithVaultMek sealed.
+ *
+ * THROWS rather than returning null, and the caller must not catch this and
+ * derive instead. After a salt rotation, deriving produces a well-formed key
+ * that opens nothing while looking exactly like success, which is the defect
+ * this whole change exists to remove. A thrown error is visible on the first
+ * attempt; a silently wrong key is invisible until a customer notices their
+ * history is gone.
+ *
+ * The length check is not ceremony. A short or long result means the blob is
+ * not what we wrote, and feeding it to HKDF anyway would derive four subkeys
+ * that open nothing, which is the same failure wearing a different hat.
+ */
+export async function unwrapOrMekWithVaultMek(
+  ciphertextB64: string,
+  mek: CryptoKey,
+): Promise<Uint8Array> {
+  const b64 = await decryptText(ciphertextB64, mek);
+  const raw = b64decode(b64);
+  if (raw.length !== 32) {
+    throw new Error("Sealed Orange Rails MEK is not 32 bytes; refusing to use it");
+  }
+  return raw;
+}
+
 export async function decryptHmacKey(ciphertextB64: string, mek: CryptoKey): Promise<CryptoKey> {
   const b64 = await decryptText(ciphertextB64, mek);
   const raw = b64decode(b64);
@@ -469,8 +525,8 @@ export async function deriveMekArgon2id(password: string, saltB64: string): Prom
 
 /**
  * Wrap raw MEK bytes under an Argon2id-derived KEK. Used at vault creation
- * (v3 vaults) and at upgrade (v2 → v3) to re-wrap the existing MEK without
- * re-encrypting any data.
+ * and at any future re-wrap, which changes only the wrapper: the MEK value
+ * itself is unchanged, so no stored data is re-encrypted.
  */
 export async function wrapMekWithPasswordArgon2id(
   mekRawBytes: ArrayBuffer,
@@ -498,12 +554,27 @@ export async function unwrapMekWithPasswordArgon2id(
 // browser before they ever reach OR's database, using two AES-256-GCM
 // subkeys derived deterministically from the user's vault password.
 //
-// Why a separate derivation (not the vault MEK):
-//   - The vault MEK changes shape across versions (v2 = PBKDF2, v3 = direct
-//     Argon2id, future v4 = random + wrapped). Upgrading vault would
-//     otherwise invalidate all stored OR ciphertexts.
-//   - The per-user `kdf_salt` (vault_metadata.kdf_salt) acts as the salt
-//     context for this namespace.
+// Why a separate namespace (rather than using the vault MEK directly): the
+// HKDF info strings and salt context below are part of a wire contract with
+// OR, so this key material has to be reproducible in exactly that shape.
+//
+// Why it is DERIVED from the password here, and why that was wrong. The
+// original reasoning was that the vault MEK changed shape between key
+// versions, so deriving independently kept OR ciphertexts readable across an
+// upgrade. That reasoning has not held for some time: the registry was
+// renumbered to a single version and the MEK is random and wrapped, so it no
+// longer changes at all. Meanwhile the derivation took `kdf_salt` as its salt
+// context, and `kdf_salt` DOES change, on every password change and every
+// recovery. So the mechanism chosen for durability was the one destroying it:
+// all four subkeys moved and every row sealed under the previous ones became
+// permanently unreadable (DL-1506).
+//
+// The fix does not change these functions. The MEK bytes they produce are now
+// captured once and stored wrapped under the vault MEK, along with the salt
+// context that produced them, so later callers reuse the value instead of
+// re-deriving it. See src/lib/or/or-key-material.ts. The vault MEK is random
+// and wrapped, which is exactly the durability property the original comment
+// wanted and could not get from a derivation.
 //
 // HKDF info strings ('orangerails-creds-v1', 'orangerails-txns-v1') and
 // the salt-context format MUST stay byte-identical to the OR wire contract —
@@ -513,8 +584,12 @@ export async function unwrapMekWithPasswordArgon2id(
 // for the durability gain.
 
 /**
- * Derive 32 raw bytes that act as the OR-namespaced "MEK". Stable across
- * vault key-version upgrades (v2 PBKDF2 → v3 Argon2id → v4 wrapped).
+ * Derive 32 raw bytes that act as the OR-namespaced "MEK".
+ *
+ * NOT stable on its own: the output moves whenever `userVaultSaltB64` moves,
+ * and that salt is regenerated by a password change and by recovery. Callers
+ * must go through the pinned material in src/lib/or/or-key-material.ts, which
+ * calls this exactly once per vault and then reuses the result (DL-1506).
  *
  * @param password         User's vault password (never leaves the browser).
  * @param userId           Supabase auth user.id (uuid string).
@@ -758,9 +833,8 @@ export const decryptString = decryptText;
  * view wrapping the same bytes.
  *
  * OR's deriveMekRaw uses a single-argument (password, salt) signature
- * under Argon2id v3 parameters, which matches deriveMekRawBytesArgon2id
- * byte-for-byte. We route through the Argon2id variant so the co-admin
- * grant flow uses the vault's current KDF (v3), not the legacy PBKDF2 path.
+ * under the Argon2id parameters this vault ships, which matches
+ * deriveMekRawBytesArgon2id byte-for-byte.
  */
 export async function deriveMekRaw(password: string, saltB64: string): Promise<Uint8Array> {
   const buf = await deriveMekRawBytesArgon2id(password, saltB64);

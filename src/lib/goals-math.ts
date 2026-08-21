@@ -15,6 +15,46 @@ export interface GoalProgress {
   pct: number; // 0..1
   isOverdue: boolean;
   daysToTarget: number | null;
+  /**
+   * Why this goal's current amount cannot be believed, or null when it can.
+   *
+   * DL-1425: a goal whose progress is derived from linked accounts returns 0
+   * when there are no accounts to sum. That zero is indistinguishable from
+   * "you have saved nothing yet", and a beta tester read it as the second when
+   * it was the first. A caller that shows a progress bar has to be able to tell
+   * these apart, so the reason travels with the number.
+   *
+   *   "no_accounts_linked"  the goal has no linked account ids at all
+   *   "linked_accounts_missing"  it has ids, but none resolve to a real account
+   */
+  untrackableReason: "no_accounts_linked" | "linked_accounts_missing" | null;
+}
+
+/**
+ * Whether this goal derives its current amount by summing linked accounts.
+ *
+ * A save_up goal on the specific_amount strategy carries a manual allocation
+ * instead, so it is legitimately trackable with nothing linked.
+ */
+export function derivesFromLinkedAccounts(goal: Goal): boolean {
+  return !(goal.type === "save_up" && goal.strategy === "specific_amount");
+}
+
+/**
+ * Why a goal's computed current amount cannot be believed, or null.
+ *
+ * Kept separate from computeCurrent because the sum itself is still a correct
+ * sum of nothing. What is wrong is reporting it as progress.
+ */
+export function untrackableReason(
+  goal: Goal,
+  accounts: Account[],
+): "no_accounts_linked" | "linked_accounts_missing" | null {
+  if (!derivesFromLinkedAccounts(goal)) return null;
+  if (goal.linked_account_ids.length === 0) return "no_accounts_linked";
+  const resolved = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
+  if (resolved.length === 0) return "linked_accounts_missing";
+  return null;
 }
 
 /**
@@ -54,7 +94,15 @@ export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
     daysToTarget = days;
     if (days < 0 && current < target) isOverdue = true;
   }
-  return { current, target, remaining, pct, isOverdue, daysToTarget };
+  return {
+    current,
+    target,
+    remaining,
+    pct,
+    isOverdue,
+    daysToTarget,
+    untrackableReason: untrackableReason(goal, accounts),
+  };
 }
 
 /**
