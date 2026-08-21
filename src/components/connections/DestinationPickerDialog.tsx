@@ -294,7 +294,21 @@ function WalletDestinationRow({
             <Command>
               <CommandInput placeholder="Search accounts…" />
               <CommandList>
-                <CommandEmpty>No accounts yet.</CommandEmpty>
+                <CommandEmpty>
+                  <div className="px-2 py-3 text-center text-sm">
+                    <p className="text-muted-foreground">No accounts yet.</p>
+                    <button
+                      type="button"
+                      className="mt-2 text-xs font-medium text-primary hover:underline"
+                      onClick={() => {
+                        setOpen(false);
+                        onRequestCreate();
+                      }}
+                    >
+                      + Create a new account
+                    </button>
+                  </div>
+                </CommandEmpty>
                 <CommandGroup>
                   {accounts.map((a) => (
                     <CommandItem
@@ -330,7 +344,7 @@ function WalletDestinationRow({
           variant="outline"
           size="sm"
           onClick={onRequestCreate}
-          title="Create a new wallet"
+          title="Create a new account"
         >
           <Plus className="h-3 w-3" />
           <span className="ml-1 hidden sm:inline">New</span>
