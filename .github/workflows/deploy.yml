@@ -270,7 +270,20 @@ jobs:
           # Same shape as VITE_OR_CONNECT_ENABLED above: src/lib/stealth/flags.ts
           # reads `import.meta.env.VITE_STEALTH_SYNC_ENABLED === "true"`, so an
           # unset value folds the compare to a constant false.
-          VITE_STEALTH_SYNC_ENABLED: ${{ (github.ref_name == 'dev' || github.ref_name == 'prod') && 'true' || '' }}
+          #
+          # PROD ARM OFF (DL-1466). The prod arm used to be on here, which made
+          # the build-time constant `true` on prod. That constant is also the
+          # FALLBACK that src/lib/stealth/runtimeFlags.ts keeps until the
+          # app_flags row resolves, and keeps permanently if that read errors.
+          # Measured on production: a 507ms window on a cold load where the gate
+          # reads true regardless of the operator's kill switch, and an unbounded
+          # window if the query fails. A kill switch that resurrects a disabled
+          # feature on a slow or failed read is not a kill switch.
+          #
+          # Prod therefore builds with this unset, so the fallback folds to false
+          # and public.app_flags is the only thing that can turn stealth on.
+          # Dev keeps the arm on so the path stays exercised.
+          VITE_STEALTH_SYNC_ENABLED: ${{ github.ref_name == 'dev' && 'true' || '' }}
 
       - name: Apply CSP policy for this branch
         # public/_headers is the single source and ships Report-Only; vite
