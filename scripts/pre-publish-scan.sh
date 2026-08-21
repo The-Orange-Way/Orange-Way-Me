@@ -145,13 +145,15 @@ EXIT_CODE=0
 #   $2  grep pattern (extended regex)
 #   $3  grep flags (e.g. -i for case-insensitive). Empty string for none.
 #   $4  extra-exemption pattern (extended regex). Empty string for none.
+#   $5  "1" to redact matched text (print file:line only). Empty for none.
+#       Set for any category whose pattern comes from the internal list.
 
 scan() {
   local name="$1"
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
-  local redact="$5"
+  local redact="${5:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -191,13 +193,14 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31m✗\033[0m  %s (%d findings)\n" "$name" "$count"
-  local display="$filtered"
-  if [[ "$redact" == "redact" ]]; then
-    # Reserved-term category: print file:line and category only, never the
-    # matched content, so a red run on a public repo does not leak the term.
-    display=$(printf '%s\n' "$filtered" | cut -d: -f1,2)
+  if [[ -n "$redact" ]]; then
+    # file:line only. The matched text is an internal string by definition;
+    # never print it to a log that may be public.
+    printf '%s\n' "$filtered" | cut -d: -f1,2 | sed 's/^/      /' | head -30
+    printf "      (matched text redacted; re-run this scan locally to see it)\n"
+  else
+    printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
   fi
-  printf '%s\n' "$display" | sed 's/^/      /' | head -30
   if [[ "$count" -gt 30 ]]; then
     printf "      ... %d more\n" "$((count - 30))"
   fi
@@ -234,7 +237,7 @@ if [[ -n "$RESERVED_TERMS" ]]; then
        "$RESERVED_TERMS" \
        "" \
        "" \
-       "redact"
+       "1"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
