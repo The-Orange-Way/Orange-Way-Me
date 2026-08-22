@@ -14,9 +14,9 @@ import { syncBadgeText, timeAgoShort } from "./sync-age";
 /**
  * Per-account OR connection status passed in from the AccountsPage
  * derived map. Undefined means "this account is not fed from any OR
- * connection" — the badge is hidden.
+ * connection": the badge is hidden.
  *
- * If multiple OR connections feed this account (rare — N:M mapping
+ * If multiple OR connections feed this account (rare, N:M mapping
  * supported by the schema), the worst status wins:
  *   error > disconnected > active
  */
@@ -229,8 +229,7 @@ function ConnectionBadge({
         </TooltipTrigger>
         <TooltipContent side="top" align="start" className="text-xs">
           <p>
-            Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view
-            connections.
+            Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view connections.
           </p>
         </TooltipContent>
       </Tooltip>
