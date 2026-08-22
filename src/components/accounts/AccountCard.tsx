@@ -209,7 +209,9 @@ function ConnectionBadge({
 
   // status === 'active': only show the pill if it synced in the last 24h
   // so the badge does not add noise on every OR-fed wallet.
-  const pillText = syncBadgeText(status.lastSyncAt, now);
+  const lastSyncAt = status.lastSyncAt;
+  if (!lastSyncAt) return null;
+  const pillText = syncBadgeText(lastSyncAt, now);
   if (!pillText) return null;
   return (
     <TooltipProvider>
@@ -227,7 +229,7 @@ function ConnectionBadge({
         </TooltipTrigger>
         <TooltipContent side="top" align="start" className="text-xs">
           <p>
-            Synced via OrangeRails {timeAgoShort(status.lastSyncAt!, now)}. Click to view
+            Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view
             connections.
           </p>
         </TooltipContent>
