@@ -228,9 +228,7 @@ function ConnectionBadge({
           </Link>
         </TooltipTrigger>
         <TooltipContent side="top" align="start" className="text-xs">
-          <p>
-            Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view connections.
-          </p>
+          <p>Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view connections.</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
