@@ -56,12 +56,20 @@ jobs:
         # Same silent-success guard pattern as migration-hygiene and deno-typecheck.
         run: |
           set -euo pipefail
-          DISK=$(find src \( -name '*.test.ts' -o -name '*.test.tsx' \) | wc -l | tr -d ' ')
+          # Count every file vitest collects: src/**/*.test.{ts,tsx} plus
+          # supabase/functions/**/*.test.ts -- the same two globs as vitest.config.ts.
+          # Both sides of the guard must count the same set. Counting only src/ here
+          # while the post-test step reads everything vitest collected (including
+          # supabase/functions/) means those files can vanish silently while the
+          # step still reports OK.
+          SRC_COUNT=$(find src \( -name '*.test.ts' -o -name '*.test.tsx' \) | wc -l | tr -d ' ')
+          FUNC_COUNT=$(find supabase/functions -name '*.test.ts' 2>/dev/null | wc -l | tr -d ' ')
+          DISK=$((SRC_COUNT + FUNC_COUNT))
           if [ "$DISK" -eq 0 ]; then
-            echo "::error::No test files found under src/ -- the vitest include glob is broken or there are no tests. Fix the glob rather than let it report green."
+            echo "::error::No test files found under src/ or supabase/functions/ -- the vitest include glob is broken or there are no tests. Fix the glob rather than let it report green."
             exit 1
           fi
-          echo "Found $DISK test file(s) under src/ on disk"
+          echo "Found $DISK test file(s) on disk ($SRC_COUNT under src/, $FUNC_COUNT under supabase/functions/)"
           echo "EXPECTED_TEST_FILES=$DISK" >> "$GITHUB_ENV"
 
       - name: Test
