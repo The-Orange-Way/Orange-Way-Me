@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timeAgoCompact, timeAgoShort } from "../sync-age";
+import { timeAgoCompact, timeAgoShort, syncBadgeText } from "../sync-age";
 
 /**
  * DL-1460. A beta tester opened the app and saw a green "Synced" badge on the
@@ -71,5 +71,28 @@ describe("both helpers read the clock they are given", () => {
     expect(timeAgoShort(ago(2 * HOUR), NOW)).toBe("2 hours ago");
     expect(timeAgoShort(ago(DAY), NOW)).toBe("1 day ago");
     expect(timeAgoShort(ago(2 * DAY), NOW)).toBe("2 days ago");
+  });
+});
+
+describe("syncBadgeText, pill visibility and compact label", () => {
+  it("returns null when lastSyncAt is null (no sync on record)", () => {
+    expect(syncBadgeText(null, NOW)).toBeNull();
+  });
+
+  it("returns compact text when synced recently", () => {
+    expect(syncBadgeText(ago(5 * MIN), NOW)).toBe("5m ago");
+    expect(syncBadgeText(ago(2 * HOUR), NOW)).toBe("2h ago");
+  });
+
+  it("returns null when synced more than 24h ago", () => {
+    // One millisecond past the boundary: pill must disappear.
+    expect(syncBadgeText(ago(DAY + 1), NOW)).toBeNull();
+    expect(syncBadgeText(ago(2 * DAY), NOW)).toBeNull();
+  });
+
+  it("returns '1d ago' at exactly 24h 00m 00s (guard is strictly >)", () => {
+    // syncBadgeText uses `ageMs > 24 * 60 * 60 * 1000` (strictly greater-than).
+    // The pill shows at the exact boundary; >= would break this test.
+    expect(syncBadgeText(ago(DAY), NOW)).toBe("1d ago");
   });
 });
