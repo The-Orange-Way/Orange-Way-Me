@@ -9,7 +9,7 @@ import { formatCurrencyWithMode } from "@/lib/format";
 import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { useNow } from "@/hooks/useNow";
-import { timeAgoCompact, timeAgoShort } from "./sync-age";
+import { syncBadgeText, timeAgoShort } from "./sync-age";
 
 /**
  * Per-account OR connection status passed in from the AccountsPage
@@ -104,15 +104,15 @@ export function AccountCard({
  * Tiny inline badge that surfaces the OR connection health for an
  * account. Four states:
  *
- *   active       → small green "Synced" pill (only shown if recent;
+ *   active       -> small green "Synced" pill (only shown if recent;
  *                  hidden for accounts that haven't synced in > 24h to
  *                  avoid badge clutter on every wallet)
  *
- *   error        → red "Reconnect" pill with the decrypted error in a
+ *   error        -> red "Reconnect" pill with the decrypted error in a
  *                  tooltip and a click-through to /connections
- *   disconnected → muted "Disconnected" pill with click-through to
+ *   disconnected -> muted "Disconnected" pill with click-through to
  *                  /connections to re-add
- *   unknown      → amber "Status unknown" pill, shown when OR was
+ *   unknown      -> amber "Status unknown" pill, shown when OR was
  *                  unreachable so the real status could not be read.
  *                  Distinct from error: not known to be broken.
  *
@@ -207,11 +207,12 @@ function ConnectionBadge({
     );
   }
 
-  // status === 'active' — only show the pill if it synced in the last 24h
-  // so the badge doesn't add noise on every OR-fed wallet.
-  if (!status.lastSyncAt) return null;
-  const ageMs = now - new Date(status.lastSyncAt).getTime();
-  if (ageMs > 24 * 60 * 60 * 1000) return null;
+  // status === 'active': only show the pill if it synced in the last 24h
+  // so the badge does not add noise on every OR-fed wallet.
+  const lastSyncAt = status.lastSyncAt;
+  if (!lastSyncAt) return null;
+  const pillText = syncBadgeText(lastSyncAt, now);
+  if (!pillText) return null;
   return (
     <TooltipProvider>
       <Tooltip>
@@ -223,12 +224,12 @@ function ConnectionBadge({
             className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400"
           >
             <Zap className="h-3 w-3" />
-            Synced {timeAgoCompact(status.lastSyncAt, now)}
+            Synced {pillText}
           </Link>
         </TooltipTrigger>
         <TooltipContent side="top" align="start" className="text-xs">
           <p>
-            Synced via OrangeRails {timeAgoShort(status.lastSyncAt, now)}. Click to view
+            Synced via OrangeRails {timeAgoShort(lastSyncAt, now)}. Click to view
             connections.
           </p>
         </TooltipContent>
