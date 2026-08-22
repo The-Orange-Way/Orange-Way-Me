@@ -28,6 +28,21 @@ export function timeAgoCompact(iso: string, now: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/**
+ * Returns the compact badge text for the active-sync pill, or null when
+ * the pill should be hidden (no sync on record, or sync is older than 24h).
+ *
+ * The 24-hour threshold is strictly greater-than: a sync at exactly
+ * 24h 00m 00s still shows "Synced 1d ago" rather than vanishing silently.
+ * Test the boundary explicitly; an off-by-one here costs a user their badge.
+ */
+export function syncBadgeText(lastSyncAt: string | null, now: number): string | null {
+  if (!lastSyncAt) return null;
+  const ageMs = now - new Date(lastSyncAt).getTime();
+  if (ageMs > 24 * 60 * 60 * 1000) return null;
+  return timeAgoCompact(lastSyncAt, now);
+}
+
 export function timeAgoShort(iso: string, now: number): string {
   const diff = now - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
