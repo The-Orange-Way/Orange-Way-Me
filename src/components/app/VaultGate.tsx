@@ -71,7 +71,11 @@ function UnlockForm() {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   useEffect(() => {
+    const prevTitle = document.title;
     document.title = "Unlock | Orange Way";
+    return () => {
+      document.title = prevTitle;
+    };
   }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
