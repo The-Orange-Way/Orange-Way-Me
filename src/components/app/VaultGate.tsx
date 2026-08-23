@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,10 @@ function UnlockForm() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+
+  useEffect(() => {
+    document.title = "Unlock | Orange Way";
+  }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
