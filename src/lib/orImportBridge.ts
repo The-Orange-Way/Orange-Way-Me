@@ -125,6 +125,14 @@ export interface OrImportResult {
    * "import failed".
    */
   blockedByOpeningDate: number;
+  /**
+   * DL-1424. Rows whose amount unit did not match the destination account's
+   * currency (e.g. a satoshi integer routed into an account kept in whole
+   * BTC). The row is still imported with its own correct `enc_currency`; only
+   * the stored-balance credit is skipped, because adding the raw number would
+   * corrupt the balance by a factor of 1e8. Counted, never guessed.
+   */
+  unitMismatch: number;
 }
 
 /**
@@ -216,6 +224,36 @@ function pickCurrency(tx: OrImportTransaction, accountCurrency: string | undefin
   if (accountCurrency && accountCurrency.trim().length > 0) return accountCurrency;
   if (tx.currency && tx.currency.trim().length > 0) return tx.currency;
   return null;
+}
+
+/**
+ * DL-1424. True when the signed amount we would credit to the account's stored
+ * balance is in the same unit as that balance.
+ *
+ * The balance is stored in the account's own currency. The credited amount is
+ * in the transaction's native unit: a satoshi integer when `amount_sats` is
+ * set, otherwise the tx currency (falling back to the account currency when the
+ * payload omits one). When those units differ, adding the raw number corrupts
+ * the balance, the classic case being a Bitcoin wallet reporting sats imported
+ * into an account the user keeps in whole BTC, which inflates it by 1e8.
+ *
+ * We never guess a conversion. Returns false ONLY for a provable mismatch:
+ * when the account currency is unknown we cannot prove one, so we return true
+ * and preserve the existing behaviour rather than silently stop crediting.
+ */
+function balanceUnitMatches(
+  tx: OrImportTransaction,
+  accountCurrency: string | undefined,
+): boolean {
+  const balanceUnit = accountCurrency?.trim();
+  if (!balanceUnit) return true;
+  const amountUnit =
+    typeof tx.amount_sats === "number" && Number.isFinite(tx.amount_sats)
+      ? "sats"
+      : tx.currency && tx.currency.trim().length > 0
+        ? tx.currency.trim()
+        : balanceUnit;
+  return amountUnit === balanceUnit;
 }
 
 /**
@@ -417,6 +455,7 @@ export async function importOrTransactions(
     netByAccount: {},
     openedAtRepairs: [],
     blockedByOpeningDate: 0,
+    unitMismatch: 0,
   };
 
   // Track plaintext signed amount keyed by "accountId::externalId" so we can
@@ -465,7 +504,28 @@ export async function importOrTransactions(
           rows.push(row);
           // Record the plaintext signed amount so we can update account
           // balances for rows that are actually inserted (not duplicates).
-          amountByKey.set(amountKey(accountId, tx.id), Number(buildSignedAmount(tx)) || 0);
+          // DL-1424: only credit the balance when the amount's unit matches
+          // the account's currency. A mismatch (e.g. a sats integer routed
+          // into a whole-BTC account) would corrupt the balance by 1e8, so we
+          // skip the credit and count it rather than guess a conversion. The
+          // row still lands with its own correct enc_currency.
+          if (balanceUnitMatches(tx, deps.getAccountCurrency?.(accountId))) {
+            amountByKey.set(amountKey(accountId, tx.id), Number(buildSignedAmount(tx)) || 0);
+          } else {
+            result.unitMismatch += 1;
+            // Valueless signal at warn level; values at log level, matching the
+            // breadcrumb split used everywhere else in this module.
+            console.warn(
+              "[orImportBridge] balance credit skipped: amount unit does not match account currency for 1 tx",
+            );
+            console.log("[orImportBridge] unit mismatch detail", {
+              id: tx.id,
+              accountId,
+              accountCurrency: deps.getAccountCurrency?.(accountId),
+              hasSats: typeof tx.amount_sats === "number",
+              currency: tx.currency,
+            });
+          }
         } else {
           result.errored += 1;
           // warn carries no values: warn/error breadcrumbs are kept by
@@ -593,6 +653,7 @@ export async function importOrTransactions(
     decryptFailures: result.decryptFailures,
     openedAtRepairs: result.openedAtRepairs.length,
     blockedByOpeningDate: result.blockedByOpeningDate,
+    unitMismatch: result.unitMismatch,
   });
   return result;
 }
