@@ -317,12 +317,15 @@ jobs:
               echo "CSP: branch=dev, header=Content-Security-Policy (enforcing)"
               ;;
             prod)
-              # prod now ENFORCES (DL-1351). The policy only reaches prod
-              # because the build copies public/_headers into dist/, so verify
-              # that copy, require EXACTLY one Report-Only source header, then
-              # flip the header NAME up to enforcing IN PLACE, touching no
-              # other character of the policy body. Same mechanism as the dev
-              # arm, so there is no second policy file to drift against.
+              # prod ships Report-Only for now. The enforce flip (DL-1351) is
+              # reverted 2026-08-24: prod may only flip to enforcing after dev
+              # has run 48 hours clean under enforcement and QA has passed vault
+              # unlock, Turnstile and the support widget, and that gate is not
+              # yet met. Until then the prod deploy verifies the policy is
+              # present and carries exactly one Report-Only header, and leaves
+              # it Report-Only, so a dev to prod promotion carries no premature
+              # enforcement. Re-apply the name flip here under DL-1351 once the
+              # gate is met.
               if [ ! -f dist/_headers ]; then
                 echo "CSP: dist/_headers missing on prod, refusing to deploy with no policy"
                 exit 1
@@ -332,15 +335,7 @@ jobs:
                 echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $count"
                 exit 1
               fi
-              # Flip the NAME only. The policy body is left byte-for-byte intact.
-              sed -i 's/^  Content-Security-Policy-Report-Only: /  Content-Security-Policy: /' dist/_headers
-              if ! grep -qE '^  Content-Security-Policy: ' dist/_headers; then
-                echo "CSP: enforcing header not present after flip"; exit 1
-              fi
-              if grep -qE '^  Content-Security-Policy-Report-Only: ' dist/_headers; then
-                echo "CSP: Report-Only header still present after flip"; exit 1
-              fi
-              echo "CSP: branch=prod, header=Content-Security-Policy (enforcing)"
+              echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (report-only, enforce deferred DL-1351)"
               ;;
             *)
               echo "CSP: unknown branch '${{ github.ref_name }}', refusing to guess"
