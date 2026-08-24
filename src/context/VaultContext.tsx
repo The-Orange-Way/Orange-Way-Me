@@ -366,21 +366,60 @@ async function resolveOrKeyMaterial(params: {
 
   const orMekBytes = await deriveOrMekBytes(password, userId, plan.saltContext);
 
-  // Persisting the pin must never break an unlock. The value just derived is
-  // correct for this session either way, and the next unlock retries the pin.
-  // What must not happen is the reverse: treating a failed WRITE as a reason to
-  // stop using the correct value we already hold.
+  // Return as soon as the key exists. Persisting the pin is DURABILITY work,
+  // not correctness work: the bytes above are the right key for this session
+  // whether or not the write lands, and the next unlock re-derives and re-pins
+  // if it did not. Awaiting it made a first-pin unlock sit behind up to 800ms
+  // of retry sleeps for a write that nothing on screen depends on.
   //
-  // But a single attempt that is swallowed on failure is how a row stays
-  // unpinned indefinitely, and an unpinned row is exactly what makes a later
-  // recovery unrecoverable. One dropped connection at the wrong moment used to
-  // be enough. So the write is retried with a short backoff before giving up,
-  // and giving up says so at error level rather than as a warning nobody reads.
+  // The rejection is caught HERE as well as inside. Inside covers a failed
+  // write, which is the expected failure. This catch covers the unexpected
+  // one, a throw from the wrap itself, which would otherwise surface as an
+  // unhandled rejection and take the error log down with it in exactly the
+  // case the log exists for.
+  void pinOrKeyMaterial({
+    userId,
+    mek,
+    orMekBytes,
+    saltContext: plan.saltContext,
+    epoch: plan.epoch,
+  }).catch((e) => {
+    console.error("[vault] background pin of Orange Rails key material threw", e);
+  });
+
+  return { ok: true, orMekBytes, saltContext: plan.saltContext };
+}
+
+/**
+ * Writes the Orange Rails pin, off the unlock path, retrying briefly.
+ *
+ * Never rejects and never throws: the caller has already returned and there is
+ * nobody left to handle it. Its whole contract is "try hard, then say so".
+ *
+ * Two properties this relies on and that must stay true.
+ *
+ * The write is a SINGLE update setting all three columns at once, so Postgres
+ * cannot leave a partially written row here. Even if one somehow existed,
+ * `planOrKeyMaterial` refuses a row with only some of the three present rather
+ * than treating it as pinned, so a partial row degrades to a disabled
+ * namespace and never to a wrong key.
+ *
+ * `orMekBytes` is not zeroed anywhere after `applyOrKeyMaterial` derives the
+ * subkeys from it, so holding it across the await is safe. If that ever
+ * changes, this must copy the bytes before returning.
+ */
+async function pinOrKeyMaterial(params: {
+  userId: string;
+  mek: CryptoKey;
+  orMekBytes: Uint8Array;
+  saltContext: string;
+  epoch: number;
+}): Promise<void> {
+  const { userId, mek, orMekBytes, saltContext, epoch } = params;
   const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
-  let pinned = false;
   let lastPinError: unknown = null;
 
-  for (let attempt = 0; attempt < PIN_WRITE_BACKOFF_MS.length && !pinned; attempt += 1) {
+  for (let attempt = 0; attempt < PIN_WRITE_BACKOFF_MS.length; attempt += 1) {
     if (attempt > 0) {
       await sleep(PIN_WRITE_BACKOFF_MS[attempt]);
     }
@@ -388,25 +427,21 @@ async function resolveOrKeyMaterial(params: {
       const { error } = await vaultTable()
         .update({
           enc_or_mek_ciphertext: ciphertext,
-          or_subkey_salt: plan.saltContext,
-          or_key_epoch: plan.epoch,
+          or_subkey_salt: saltContext,
+          or_key_epoch: epoch,
         })
         .eq("user_id", userId);
       if (error) throw new Error(error.message);
-      pinned = true;
+      return;
     } catch (e) {
       lastPinError = e;
     }
   }
 
-  if (!pinned) {
-    console.error(
-      "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
-      lastPinError,
-    );
-  }
-
-  return { ok: true, orMekBytes, saltContext: plan.saltContext };
+  console.error(
+    "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
+    lastPinError,
+  );
 }
 
 interface VaultMetadataRow {
