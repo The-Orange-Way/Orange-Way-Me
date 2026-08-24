@@ -30,9 +30,26 @@ export function isBitcoinCurrency(currency: string): boolean {
   return currency === "BTC" || currency === "sats";
 }
 
-export function normalizeBitcoinToSats(amount: number, currency: string): number {
+export function unitIsExact(formatVersion: number | undefined): boolean {
+  // Absent has to read as 0. A row we have not stamped is a row whose unit we
+  // have not established, and defaulting the other way would silently trust
+  // every legacy row.
+  return (formatVersion ?? 0) >= 1;
+}
+
+export function normalizeBitcoinToSats(
+  amount: number,
+  currency: string,
+  opts?: { unitIsExact?: boolean },
+): number {
   if (currency === "sats") return Math.round(amount);
   // currency === "BTC"
+  if (opts?.unitIsExact) {
+    // The row is stamped, so "BTC" means bitcoin and nothing is inferred from
+    // the shape of the number. This is the branch that stops a balance of
+    // exactly 1 BTC being read as one satoshi and rendering as zero.
+    return Math.round(amount * 1e8);
+  }
   if (Number.isInteger(amount) && Math.abs(amount) >= 1) {
     return amount; // already sats
   }
@@ -136,7 +153,7 @@ export function formatCurrency(amount: string, currency: string, locale?: string
  * and it needs the stored unit recorded rather than inferred.
  */
 export function sumByCurrency(
-  amounts: { amount: string; currency: string }[],
+  amounts: { amount: string; currency: string; format_version?: number }[],
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const a of amounts) {
@@ -145,7 +162,9 @@ export function sumByCurrency(
     // the total renders as "NaN" rather than as the other accounts in it.
     if (!Number.isFinite(n)) continue;
     if (isBitcoinCurrency(a.currency)) {
-      out.sats = (out.sats ?? 0) + normalizeBitcoinToSats(n, a.currency);
+      out.sats =
+        (out.sats ?? 0) +
+        normalizeBitcoinToSats(n, a.currency, { unitIsExact: unitIsExact(a.format_version) });
     } else {
       out[a.currency] = (out[a.currency] ?? 0) + n;
     }
