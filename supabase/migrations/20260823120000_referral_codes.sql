@@ -74,3 +74,50 @@ drop policy if exists "owners create own referral_codes" on public.referral_code
 create policy "owners create own referral_codes"
   on public.referral_codes for insert
   with check (owner_id = auth.uid());
+
+-- Atomic, identity-free redemption. A signed-in redeemer calls this by RPC. It
+-- derives the caller from auth.uid() (NOT a parameter, so the self-redemption
+-- guard cannot be spoofed by passing someone else's id), refuses a code the
+-- caller owns, and increments the counter in a single UPDATE. The caller id is
+-- only compared, never stored: no redeemer identity and no referral graph are
+-- ever persisted. SECURITY DEFINER lets a non-owner increment past RLS; the
+-- WHERE clause scopes the write to exactly the one code row.
+--
+-- Returns: 'ok' (counted), 'self' (caller owns the code, no count),
+-- 'not_found' (no such code), 'unauthenticated' (no caller).
+create or replace function public.redeem_referral_code(p_code text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_owner  uuid;
+  v_caller uuid := auth.uid();
+begin
+  if v_caller is null then
+    return 'unauthenticated';
+  end if;
+
+  select owner_id into v_owner
+    from public.referral_codes
+    where code = p_code;
+
+  if v_owner is null then
+    return 'not_found';
+  end if;
+  if v_owner = v_caller then
+    return 'self';
+  end if;
+
+  update public.referral_codes
+    set redemption_count = redemption_count + 1
+    where code = p_code;
+
+  return 'ok';
+end;
+$$;
+
+-- Only signed-in users may redeem. anon is never granted execute.
+revoke execute on function public.redeem_referral_code(text) from public;
+grant execute on function public.redeem_referral_code(text) to authenticated;
