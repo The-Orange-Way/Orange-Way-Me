@@ -27,3 +27,28 @@ verify_jwt = false
 # itself. Without this override the gateway rejects every delivery.
 [functions.or-webhook-receiver]
 verify_jwt = false
+
+# ============================================================
+# Auth hooks
+# ============================================================
+#
+# before_user_created runs public.enforce_beta_signup(jsonb) as a GoTrue
+# auth hook. It redeems the invite code atomically and rejects a signup
+# that carries no valid code: this is the private-beta gate. The database
+# side (the function plus EXECUTE to supabase_auth_admin) is present on
+# both dev and prod.
+#
+# DECLARATIVE ONLY right now: no OWM workflow runs `supabase config push`,
+# so the hosted project's source of truth for this hook is still the Studio
+# dashboard, not this file. Do NOT assume this block enforces anything on
+# its own.
+#
+# Before wiring `config push` into CI, read this. config push writes the
+# WHOLE auth config, and the Turnstile captcha SECRET lives in dashboard-set
+# Auth config (see .github/workflows/deploy.yml, VITE_TURNSTILE_SITE_KEY).
+# A push from a config.toml that does not also declare captcha would clobber
+# that secret and break sign-in. Declare captcha here first, push dev only,
+# read the Auth settings back, then prod separately. Never push both at once.
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/enforce_beta_signup"
