@@ -153,14 +153,25 @@ export async function deriveHmacKey(
 
 /**
  * Derive a recovery KEK from a recovery code (the 12-word string).
- * Uses PBKDF2 with a fixed app-wide salt label — recovery codes have
+ * Uses PBKDF2 with a fixed app-wide salt label: recovery codes have
  * ~128 bits of entropy on their own, so the salt is just domain
  * separation, not a secret.
+ *
+ * Whitespace between words is collapsed before derivation. People retype
+ * these from paper and paste them out of text files that wrap lines, so a
+ * double space or a newline where a single space was expected is an
+ * ordinary thing to do with a correct code. Without this, that produced a
+ * different key and the vault refused a recovery code that was right,
+ * with no way to tell the user what was wrong and no second chance.
+ *
+ * This only widens what unlocks. A single-spaced code normalizes to
+ * itself, so every code derived before this change derives identically
+ * after it and existing vaults are unaffected.
  */
 export async function deriveRecoveryKek(recoveryCode: string): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(recoveryCode.trim().toLowerCase()),
+    new TextEncoder().encode(recoveryCode.trim().toLowerCase().replace(/\s+/g, " ")),
     "PBKDF2",
     false,
     ["deriveKey"],
