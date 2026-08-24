@@ -26,6 +26,25 @@ function fmtMonths(d: number | null): string | null {
   return `${months} month${months === 1 ? "" : "s"} to go`;
 }
 
+/**
+ * What to tell someone whose goal cannot be measured, one line per cause.
+ *
+ * A lookup rather than a chain of ternaries so that adding a fourth cause to
+ * goals-math is a type error here until the copy exists, instead of silently
+ * falling through to whichever message happens to be last.
+ */
+const UNTRACKABLE_COPY: Record<
+  "no_target_set" | "no_accounts_linked" | "linked_accounts_missing",
+  string
+> = {
+  no_target_set:
+    "This goal has no target amount, so there is nothing to measure progress against. Open the goal and set one.",
+  no_accounts_linked:
+    "No accounts are linked to this goal, so there is no balance to measure. Open the goal and link one.",
+  linked_accounts_missing:
+    "The accounts linked to this goal no longer exist, so there is no balance to measure. Open the goal and link one.",
+};
+
 interface Props {
   goal: Goal;
   accounts: Account[];
@@ -76,15 +95,19 @@ export function GoalCard({ goal, accounts, txns }: Props) {
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
                 <span className="text-muted-foreground text-base">Not tracking yet</span>
-                <span className="text-muted-foreground">target {fmtUSD(prog.target)}</span>
+                {/*
+                 * Only shown when there is a target to show. Printing
+                 * "target $0" for a goal that has none states a figure the
+                 * goal does not carry, which is the same unsupported claim
+                 * as the bar itself.
+                 */}
+                {prog.untrackableReason !== "no_target_set" && (
+                  <span className="text-muted-foreground">target {fmtUSD(prog.target)}</span>
+                )}
               </div>
               <div className="flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
                 <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-                <span>
-                  {prog.untrackableReason === "no_accounts_linked"
-                    ? "No accounts are linked to this goal, so there is no balance to measure. Open the goal and link one."
-                    : "The accounts linked to this goal no longer exist, so there is no balance to measure. Open the goal and link one."}
-                </span>
+                <span>{UNTRACKABLE_COPY[prog.untrackableReason]}</span>
               </div>
             </div>
           ) : (
