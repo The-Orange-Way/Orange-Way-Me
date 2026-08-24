@@ -41,9 +41,7 @@ describe("groupTransactionsByDay (DL-1424)", () => {
 
   it("falls back to the account currency when a row carries none", () => {
     const accounts = [{ id: "acc-btc", currency: "BTC" }] as unknown as Account[];
-    const items = [
-      txn({ id: "1", amount: "-0.01", currency: undefined, account_id: "acc-btc" }),
-    ];
+    const items = [txn({ id: "1", amount: "-0.01", currency: undefined, account_id: "acc-btc" })];
 
     const [bucket] = groupTransactionsByDay(items, accounts);
 
