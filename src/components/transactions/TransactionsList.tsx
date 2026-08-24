@@ -43,6 +43,35 @@ export interface RowAction {
   onSetCategory?: (t: DecryptedTxn, categoryId: string | null) => Promise<void>;
 }
 
+/**
+ * Group already-sorted (newest-first) transactions into day buckets, summing
+ * amounts PER CURRENCY. A single day can hold both fiat and bitcoin rows, and
+ * adding a dollar amount to a bitcoin amount produces a meaningless number
+ * (DL-1424). Keeping one subtotal per currency is the only correct sum.
+ */
+export interface DayBucket {
+  date: string;
+  totals: Map<string, number>;
+  rows: DecryptedTxn[];
+}
+
+export function groupTransactionsByDay(items: DecryptedTxn[], accounts: Account[]): DayBucket[] {
+  const currencyOf = (t: DecryptedTxn) =>
+    t.currency || accounts.find((a) => a.id === t.account_id)?.currency || "USD";
+  return items.reduce<DayBucket[]>((acc, t) => {
+    const last = acc[acc.length - 1];
+    const curr = currencyOf(t);
+    const n = Number(t.amount);
+    if (last && last.date === t.date) {
+      last.totals.set(curr, (last.totals.get(curr) ?? 0) + n);
+      last.rows.push(t);
+    } else {
+      acc.push({ date: t.date, totals: new Map([[curr, n]]), rows: [t] });
+    }
+    return acc;
+  }, []);
+}
+
 export function TransactionsList({
   items,
   accounts,
@@ -78,20 +107,7 @@ export function TransactionsList({
 
   // Day-grouped buckets feed the Monarch-style mobile card view. Same items,
   // different shell. Items are already sorted newest-first by the caller.
-  const dayBuckets = items.reduce<Array<{ date: string; total: number; rows: DecryptedTxn[] }>>(
-    (acc, t) => {
-      const last = acc[acc.length - 1];
-      const n = Number(t.amount);
-      if (last && last.date === t.date) {
-        last.total += n;
-        last.rows.push(t);
-      } else {
-        acc.push({ date: t.date, total: n, rows: [t] });
-      }
-      return acc;
-    },
-    [],
-  );
+  const dayBuckets = groupTransactionsByDay(items, accounts);
 
   return (
     <>
@@ -101,20 +117,23 @@ export function TransactionsList({
           <div key={bucket.date} className="overflow-hidden rounded-lg border border-border">
             <div className="flex items-center justify-between bg-muted/40 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <span>{format(parseISO(bucket.date), "EEE, MMM d")}</span>
-              <span
-                className={cn(
-                  "font-mono tabular-nums",
-                  bucket.total < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
-                )}
-              >
-                {`${bucket.total < 0 ? "-" : "+"}${formatCurrencyWithMode(
-                  Math.abs(bucket.total),
-                  bucket.rows[0]?.currency ||
-                    accountById.get(bucket.rows[0]?.account_id ?? "")?.currency ||
-                    "USD",
-                  prefs.btcDisplayMode,
-                  loc,
-                )}`}
+              <span className="flex flex-col items-end gap-0.5">
+                {Array.from(bucket.totals.entries()).map(([currency, total]) => (
+                  <span
+                    key={currency}
+                    className={cn(
+                      "font-mono tabular-nums",
+                      total < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+                    )}
+                  >
+                    {`${total < 0 ? "-" : "+"}${formatCurrencyWithMode(
+                      Math.abs(total),
+                      currency,
+                      prefs.btcDisplayMode,
+                      loc,
+                    )}`}
+                  </span>
+                ))}
               </span>
             </div>
             <ul className="divide-y divide-border">
