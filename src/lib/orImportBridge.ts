@@ -241,10 +241,7 @@ function pickCurrency(tx: OrImportTransaction, accountCurrency: string | undefin
  * when the account currency is unknown we cannot prove one, so we return true
  * and preserve the existing behaviour rather than silently stop crediting.
  */
-function balanceUnitMatches(
-  tx: OrImportTransaction,
-  accountCurrency: string | undefined,
-): boolean {
+function balanceUnitMatches(tx: OrImportTransaction, accountCurrency: string | undefined): boolean {
   const balanceUnit = accountCurrency?.trim();
   if (!balanceUnit) return true;
   const amountUnit =
