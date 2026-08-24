@@ -32,6 +32,11 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-echo "$HEAD_SHA" > "$REPO_ROOT/.git/.pr-this-ran"
+# Resolve the per-worktree git dir. REPO_ROOT/.git is a regular FILE inside a
+# linked worktree, so this redirect would fail with "Not a directory" and no
+# marker would be written. --absolute-git-dir is per-worktree (not
+# --git-common-dir, which is shared and would let one worktree authorise a
+# push from another branch).
+echo "$HEAD_SHA" > "$(git rev-parse --absolute-git-dir)/.pr-this-ran"
 echo "✓ /pr-this marker recorded for HEAD $(echo "$HEAD_SHA" | head -c 8)."
 echo "  Next git push is allowed (until the next commit / amend / rebase)."
