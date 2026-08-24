@@ -287,12 +287,12 @@ jobs:
 
       - name: Apply CSP policy for this branch
         # public/_headers is the single source and ships Report-Only; vite
-        # copies it verbatim to dist/_headers. On dev only, flip the header
+        # copies it verbatim to dist/_headers. On dev and prod, flip the header
         # NAME up to enforcing IN PLACE, touching no other character of the
-        # policy body, so there is no second file to drift against. prod keeps
-        # the Report-Only default; an unknown branch fails loudly. If this step
-        # is skipped or fails, dist/_headers stays Report-Only, so the residual
-        # failure is a missing report on dev, never a vault lockout on prod.
+        # policy body, so there is no second file to drift against. An unknown
+        # branch fails loudly. If this step is skipped or fails, dist/_headers
+        # stays Report-Only, so the residual failure is a lost enforcement,
+        # never a policy shipped enforced without these checks having run.
         run: |
           set -euo pipefail
           case "${{ github.ref_name }}" in
@@ -317,25 +317,30 @@ jobs:
               echo "CSP: branch=dev, header=Content-Security-Policy (enforcing)"
               ;;
             prod)
-              # prod keeps the Report-Only default, but "keep" must be
-              # asserted, not assumed: the policy only reaches prod because
-              # the build copies public/_headers into dist/. Verify the copy
-              # happened and is the shape we expect, or fail the deploy.
+              # prod now ENFORCES (DL-1351). The policy only reaches prod
+              # because the build copies public/_headers into dist/, so verify
+              # that copy, require EXACTLY one Report-Only source header, then
+              # flip the header NAME up to enforcing IN PLACE, touching no
+              # other character of the policy body. Same mechanism as the dev
+              # arm, so there is no second policy file to drift against.
               if [ ! -f dist/_headers ]; then
                 echo "CSP: dist/_headers missing on prod, refusing to deploy with no policy"
                 exit 1
               fi
-              ro_count=$(grep -cE '^  Content-Security-Policy-Report-Only: ' dist/_headers || true)
-              if [ "$ro_count" -ne 1 ]; then
-                echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $ro_count"
+              count=$(grep -cE '^  Content-Security-Policy-Report-Only: ' dist/_headers || true)
+              if [ "$count" -ne 1 ]; then
+                echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $count"
                 exit 1
               fi
-              enf_count=$(grep -cE '^  Content-Security-Policy: ' dist/_headers || true)
-              if [ "$enf_count" -ne 0 ]; then
-                echo "CSP: enforcing header must not be present on prod, found $enf_count"
-                exit 1
+              # Flip the NAME only. The policy body is left byte-for-byte intact.
+              sed -i 's/^  Content-Security-Policy-Report-Only: /  Content-Security-Policy: /' dist/_headers
+              if ! grep -qE '^  Content-Security-Policy: ' dist/_headers; then
+                echo "CSP: enforcing header not present after flip"; exit 1
               fi
-              echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (Report-Only default kept, asserted)"
+              if grep -qE '^  Content-Security-Policy-Report-Only: ' dist/_headers; then
+                echo "CSP: Report-Only header still present after flip"; exit 1
+              fi
+              echo "CSP: branch=prod, header=Content-Security-Policy (enforcing)"
               ;;
             *)
               echo "CSP: unknown branch '${{ github.ref_name }}', refusing to guess"
