@@ -5,7 +5,16 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import { ArrowLeft, MoreHorizontal, Pencil, CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  MoreHorizontal,
+  Pencil,
+  CheckCircle2,
+  RotateCcw,
+  Trash2,
+  AlertCircle,
+} from "lucide-react";
+import { UNTRACKABLE_COPY } from "@/lib/goal-untrackable-copy";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -188,11 +197,41 @@ export function GoalDetailPage({ id }: { id: string }) {
 
       <Card>
         <CardContent className="p-6 space-y-4">
-          <div className="flex items-baseline justify-between font-mono tabular-nums">
-            <span className="text-3xl font-semibold">{fmtUSD(prog.current)}</span>
-            <span className="text-sm text-muted-foreground">of {fmtUSD(prog.target)}</span>
-          </div>
-          <Progress value={prog.pct * 100} className="h-3" />
+          {/*
+           * A progress bar is a claim that progress is measurable. When
+           * goals-math says it is not, this page used to draw a confident zero
+           * percent anyway, contradicting the "not tracking yet" the list tile
+           * had just shown for the same goal. This is the screen someone opens
+           * BECAUSE the list flagged it, so it is the worst place to restate
+           * the number as fact (DL-1588).
+           */}
+          {prog.untrackableReason ? (
+            <>
+              <div className="flex items-baseline justify-between font-mono tabular-nums">
+                <span className="text-3xl font-semibold">{fmtUSD(prog.current)}</span>
+                {/*
+                 * Suppressed for no_target_set only. Printing "of $0" states a
+                 * target the goal does not carry, which is the same unsupported
+                 * claim as the bar. The other two reasons do have a real target.
+                 */}
+                {prog.untrackableReason !== "no_target_set" && (
+                  <span className="text-sm text-muted-foreground">of {fmtUSD(prog.target)}</span>
+                )}
+              </div>
+              <div className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{UNTRACKABLE_COPY[prog.untrackableReason]}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between font-mono tabular-nums">
+                <span className="text-3xl font-semibold">{fmtUSD(prog.current)}</span>
+                <span className="text-sm text-muted-foreground">of {fmtUSD(prog.target)}</span>
+              </div>
+              <Progress value={prog.pct * 100} className="h-3" />
+            </>
+          )}
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <div>
               <span className="text-muted-foreground">Remaining: </span>

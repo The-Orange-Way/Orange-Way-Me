@@ -10,6 +10,7 @@ import {
   projectCompletionDate,
   averageMonthlyContribution,
 } from "@/lib/goals-math";
+import { UNTRACKABLE_COPY } from "@/lib/goal-untrackable-copy";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
 import { PiggyBank, Banknote, Calendar, TrendingUp, AlertCircle } from "lucide-react";
@@ -25,25 +26,6 @@ function fmtMonths(d: number | null): string | null {
   const months = Math.round(d / 30);
   return `${months} month${months === 1 ? "" : "s"} to go`;
 }
-
-/**
- * What to tell someone whose goal cannot be measured, one line per cause.
- *
- * A lookup rather than a chain of ternaries so that adding a fourth cause to
- * goals-math is a type error here until the copy exists, instead of silently
- * falling through to whichever message happens to be last.
- */
-const UNTRACKABLE_COPY: Record<
-  "no_target_set" | "no_accounts_linked" | "linked_accounts_missing",
-  string
-> = {
-  no_target_set:
-    "This goal has no target amount, so there is nothing to measure progress against. Open the goal and set one.",
-  no_accounts_linked:
-    "No accounts are linked to this goal, so there is no balance to measure. Open the goal and link one.",
-  linked_accounts_missing:
-    "The accounts linked to this goal no longer exist, so there is no balance to measure. Open the goal and link one.",
-};
 
 interface Props {
   goal: Goal;
