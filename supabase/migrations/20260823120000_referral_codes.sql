@@ -13,8 +13,9 @@
 --
 -- Access model: the owner can read and create their own codes under RLS. There
 -- is no client update or delete policy. The redemption increment happens only
--- through the service-role client inside the redeem-referral Function, which
--- bypasses RLS. A redeemer can neither read the row nor learn the owner.
+-- inside redeem_referral_code, a SECURITY DEFINER function that runs as its
+-- owner and so updates the counter past RLS. A redeemer can neither read the
+-- row nor learn the owner.
 --
 -- Reversal: additive only. DROP TABLE public.referral_codes reverses it.
 --
