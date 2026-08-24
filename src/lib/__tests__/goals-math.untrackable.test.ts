@@ -55,6 +55,45 @@ describe("untrackableReason", () => {
     ).toBeNull();
   });
 
+  /*
+   * The second reported shape on the same ticket, found on production: a
+   * pay_down goal against a card carrying -4,200 rendered "0% / $0 of $0".
+   *
+   * computeCurrent falls back to the target when there is no starting
+   * balance, so an absent target makes the starting balance 0, the debt
+   * subtracts to 0, and the target is 0 as well. Every number on the card is
+   * a true consequence of a target that was never set, and together they
+   * read as a claim about the debt.
+   */
+  it("flags a goal with no target, which is the pay_down case seen on production", () => {
+    const noTarget = goal({
+      type: "pay_down",
+      strategy: "all_balance",
+      target_amount: "",
+      linked_account_ids: ["amex"],
+    });
+    expect(untrackableReason(noTarget, [account("amex", "-4200")])).toBe("no_target_set");
+  });
+
+  it("flags a zero target the same way, since it is equally unmeasurable", () => {
+    expect(
+      untrackableReason(goal({ target_amount: "0", linked_account_ids: ["a"] }), [
+        account("a", "900"),
+      ]),
+    ).toBe("no_target_set");
+  });
+
+  it("flags a targetless specific_amount goal too, which no linked-account check reaches", () => {
+    // This one has a real current amount and still cannot be shown as a
+    // percentage, which is why the target check runs before the strategy split.
+    const manual = goal({
+      strategy: "specific_amount",
+      manual_allocation: "900",
+      target_amount: "",
+    });
+    expect(untrackableReason(manual, [])).toBe("no_target_set");
+  });
+
   it("never flags a specific_amount goal, which does not need linked accounts", () => {
     const manual = goal({ strategy: "specific_amount", manual_allocation: "900" });
     expect(derivesFromLinkedAccounts(manual)).toBe(false);
@@ -81,6 +120,28 @@ describe("computeProgress carries the reason alongside the number", () => {
     // balance really is zero. That zero is true and should render as a bar.
     const p = computeProgress(goal({ linked_account_ids: ["a"] }), [account("a", "0")]);
     expect(p.current).toBe(0);
+    expect(p.untrackableReason).toBeNull();
+  });
+
+  it("still returns the zeros for a targetless goal but says they are unmeasured", () => {
+    const p = computeProgress(
+      goal({ type: "pay_down", target_amount: "", linked_account_ids: ["amex"] }),
+      [account("amex", "-4200")],
+    );
+    expect(p.current).toBe(0);
+    expect(p.target).toBe(0);
+    expect(p.pct).toBe(0);
+    expect(p.untrackableReason).toBe("no_target_set");
+  });
+
+  it("reports a targeted pay_down goal as trackable, so real debt progress still shows", () => {
+    // The case the fix must NOT swallow: a target is set, so the bar is a
+    // claim we can support even though the current amount is still zero.
+    const p = computeProgress(
+      goal({ type: "pay_down", target_amount: "4200", linked_account_ids: ["amex"] }),
+      [account("amex", "-4200")],
+    );
+    expect(p.target).toBe(4200);
     expect(p.untrackableReason).toBeNull();
   });
 

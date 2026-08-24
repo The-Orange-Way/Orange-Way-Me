@@ -137,6 +137,72 @@ describe("planOrKeyMaterial", () => {
       "derive-and-pin",
     );
   });
+
+  /**
+   * The unpinned half of the same defect the pinned half above already covers.
+   *
+   * Recovery mints a new salt before it asks for key material. When a row was
+   * never pinned there is nothing to unwrap, and deriving against the new salt
+   * produces 32 bytes that open none of the rows the customer already has. It
+   * looks like success at every layer, which is what made the original loss
+   * silent. Nor can recovery repair it: reproducing the old key needs the OLD
+   * password, and recovery exists precisely because that is gone.
+   */
+  it("refuses when nothing is pinned and the salt has just rotated", () => {
+    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", {
+      saltMatchesExistingRows: false,
+    });
+    expect(plan.mode).toBe("refuse");
+  });
+
+  it("says in the refusal that earlier transactions need a re-sync", () => {
+    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", {
+      saltMatchesExistingRows: false,
+    });
+    expect(plan.mode === "refuse" && plan.reason).toMatch(/re-sync/i);
+  });
+
+  /**
+   * A rotated salt is only fatal when there is nothing pinned. An account that
+   * WAS pinned recovers normally, because the pinned blob is sealed under the
+   * vault MEK and recovery reaches that MEK through the recovery code. This is
+   * the case that must keep working, or the fix trades one silent loss for a
+   * loud one.
+   */
+  it("still unwraps a pinned row even though the salt has rotated", () => {
+    expect(planOrKeyMaterial(PINNED, "brand-new-salt", { saltMatchesExistingRows: false })).toEqual(
+      {
+        mode: "unwrap",
+        ciphertext: "sealed-blob",
+        saltContext: "salt-at-pin-time",
+      },
+    );
+  });
+
+  it("derives and pins when the salt is explicitly unchanged, as on an unlock", () => {
+    expect(planOrKeyMaterial(EMPTY, "current-salt", { saltMatchesExistingRows: true })).toEqual({
+      mode: "derive-and-pin",
+      saltContext: "current-salt",
+      epoch: CURRENT_OR_KEY_EPOCH,
+    });
+  });
+
+  /**
+   * Every caller that predates the flag was an unlock or a vault creation, so
+   * omitting it has to keep behaving as one. If this ever flips to refusing,
+   * unlock stops pinning and the rows it was meant to protect stay exposed.
+   */
+  it("treats an omitted flag as the unchanged-salt case", () => {
+    expect(planOrKeyMaterial(EMPTY, "current-salt", {}).mode).toBe("derive-and-pin");
+    expect(planOrKeyMaterial(EMPTY, "current-salt").mode).toBe("derive-and-pin");
+  });
+
+  it("refuses a half-pinned row on recovery too, not just on unlock", () => {
+    const halfPinned: OrKeyMaterialRow = { ...PINNED, or_subkey_salt: null };
+    expect(
+      planOrKeyMaterial(halfPinned, "brand-new-salt", { saltMatchesExistingRows: false }).mode,
+    ).toBe("refuse");
+  });
 });
 
 describe("OrNamespaceDisabledError", () => {
