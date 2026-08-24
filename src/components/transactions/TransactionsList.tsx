@@ -55,10 +55,7 @@ export interface DayBucket {
   rows: DecryptedTxn[];
 }
 
-export function groupTransactionsByDay(
-  items: DecryptedTxn[],
-  accounts: Account[],
-): DayBucket[] {
+export function groupTransactionsByDay(items: DecryptedTxn[], accounts: Account[]): DayBucket[] {
   const currencyOf = (t: DecryptedTxn) =>
     t.currency || accounts.find((a) => a.id === t.account_id)?.currency || "USD";
   return items.reduce<DayBucket[]>((acc, t) => {
@@ -126,9 +123,7 @@ export function TransactionsList({
                     key={currency}
                     className={cn(
                       "font-mono tabular-nums",
-                      total < 0
-                        ? "text-destructive"
-                        : "text-emerald-600 dark:text-emerald-400",
+                      total < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
                     )}
                   >
                     {`${total < 0 ? "-" : "+"}${formatCurrencyWithMode(
