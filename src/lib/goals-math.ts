@@ -24,10 +24,11 @@ export interface GoalProgress {
    * it was the first. A caller that shows a progress bar has to be able to tell
    * these apart, so the reason travels with the number.
    *
+   *   "no_target_set"  the goal carries no usable target to measure against
    *   "no_accounts_linked"  the goal has no linked account ids at all
    *   "linked_accounts_missing"  it has ids, but none resolve to a real account
    */
-  untrackableReason: "no_accounts_linked" | "linked_accounts_missing" | null;
+  untrackableReason: "no_target_set" | "no_accounts_linked" | "linked_accounts_missing" | null;
 }
 
 /**
@@ -49,7 +50,15 @@ export function derivesFromLinkedAccounts(goal: Goal): boolean {
 export function untrackableReason(
   goal: Goal,
   accounts: Account[],
-): "no_accounts_linked" | "linked_accounts_missing" | null {
+): "no_target_set" | "no_accounts_linked" | "linked_accounts_missing" | null {
+  // Checked before the strategy split because a missing target defeats every
+  // goal type. computeProgress divides by the target, so without one the
+  // percentage is not "zero progress", it is a division that was never
+  // attempted. A pay_down goal is the visible case: its starting balance
+  // falls back to the target, so an absent target makes both the numerator
+  // and the denominator zero and the card reads "0% of $0" over a card that
+  // plainly carries a debt.
+  if (!((Number(goal.target_amount) || 0) > 0)) return "no_target_set";
   if (!derivesFromLinkedAccounts(goal)) return null;
   if (goal.linked_account_ids.length === 0) return "no_accounts_linked";
   const resolved = accounts.filter((a) => goal.linked_account_ids.includes(a.id));

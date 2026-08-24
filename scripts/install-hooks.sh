@@ -30,7 +30,10 @@ chmod +x .git/hooks/pre-push
 # (a new commit changes HEAD, so the previous /pr-this run no longer covers the tree)
 cat > .git/hooks/post-commit <<'EOF'
 #!/usr/bin/env bash
-MARK="$(git rev-parse --show-toplevel)/.git/.pr-this-ran"
+# --absolute-git-dir gives the per-worktree git dir, where the marker lives.
+# "$(git rev-parse --show-toplevel)/.git" is a plain FILE inside a worktree,
+# so the old path could never reach the marker to invalidate it there.
+MARK="$(git rev-parse --absolute-git-dir)/.pr-this-ran"
 if [ -f "$MARK" ]; then
   rm -f "$MARK"
   echo "ℹ /pr-this marker invalidated (commit changed HEAD)."
@@ -42,7 +45,10 @@ chmod +x .git/hooks/post-commit
 # post-rewrite: amend, rebase, etc. (same logic)
 cat > .git/hooks/post-rewrite <<'EOF'
 #!/usr/bin/env bash
-MARK="$(git rev-parse --show-toplevel)/.git/.pr-this-ran"
+# --absolute-git-dir gives the per-worktree git dir, where the marker lives.
+# "$(git rev-parse --show-toplevel)/.git" is a plain FILE inside a worktree,
+# so the old path could never reach the marker to invalidate it there.
+MARK="$(git rev-parse --absolute-git-dir)/.pr-this-ran"
 if [ -f "$MARK" ]; then
   rm -f "$MARK"
   echo "ℹ /pr-this marker invalidated (HEAD was rewritten: $1)."

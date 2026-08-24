@@ -12,10 +12,16 @@
  *   - Returns a discriminated result, not a flat array, so a caller
  *     cannot confuse "we could not read your connections" with "you
  *     have no connections". Pure read, no picker / sync / delete UX.
- *   - Caches the subaccount_id from localStorage same as the
- *     Connections page. If the user has never visited /connections
- *     (subaccount not provisioned yet) the result is unavailable — no
- *     OR connections means nothing to surface.
+ *   - Resolves the subaccount_id from localStorage first, same as the
+ *     Connections page, and falls back to the signed-in user's own
+ *     user_profiles.or_subaccount_id row when that cache is cold.
+ *     Without the fallback a new device, a new browser or cleared site
+ *     data surfaces nothing until the user happens to open
+ *     /connections, because /connections is the only writer of the
+ *     cache (DL-1570). The two ways that fallback can end are kept
+ *     apart: a read that fails is unreadable, because we could not
+ *     determine whether a connection exists, while a read that succeeds
+ *     and returns no subaccount is unavailable.
  *
  * ZK invariants are unchanged: the proxy authenticates via the
  * Supabase JWT, OR returns ciphertexts, and the decrypted_last_error
@@ -102,18 +108,49 @@ export function useOrConnectionsList(): {
       setLoading(false);
       return;
     }
-    const cachedSub = localStorage.getItem(SUBACCOUNT_LS_PREFIX + user.id);
-    if (!cachedSub) {
-      // User hasn't visited Connections yet (no OR subaccount provisioned).
-      // There's nothing OR-side to surface.
-      setResult({ state: "unavailable" });
-      setLoading(false);
-      return;
+    let subaccountId = localStorage.getItem(SUBACCOUNT_LS_PREFIX + user.id);
+    if (!subaccountId) {
+      // Cold cache. /connections is the only writer of the localStorage
+      // entry, so a new device or cleared site data lands here even
+      // though the subaccount exists. Read the user's own profile row
+      // instead of giving up. RLS scopes this to the caller and the
+      // subaccount id is a routing identifier, not key material, so
+      // this reads nothing the user could not already read.
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("or_subaccount_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (error) {
+        // We could not determine whether a subaccount exists. That is
+        // UNKNOWN, not empty: a connection in error may sit behind this
+        // and reporting "nothing to surface" would hide it. Same fact
+        // as a proxy throw, so it takes the same exit.
+        setResult({ state: "unreadable" });
+        setLoading(false);
+        return;
+      }
+      if (!data?.or_subaccount_id) {
+        // The read succeeded and there is genuinely no subaccount yet,
+        // so there is nothing OR-side to surface.
+        setResult({ state: "unavailable" });
+        setLoading(false);
+        return;
+      }
+      subaccountId = data.or_subaccount_id;
+      // Warm the cache so later mounts skip the round-trip, matching
+      // what /connections writes on provision.
+      try {
+        localStorage.setItem(SUBACCOUNT_LS_PREFIX + user.id, subaccountId);
+      } catch {
+        // Private mode or a full quota. The fallback still works, it
+        // just pays the profile read on every mount.
+      }
     }
     setLoading(true);
     try {
       const res = (await callProxy("or-connection-list", {
-        subaccount_id: cachedSub,
+        subaccount_id: subaccountId,
       })) as { connections: RawConnectionRow[] };
       const out: OrConnectionStatus[] = [];
       for (const c of res.connections ?? []) {
