@@ -13,8 +13,9 @@
 --
 -- Access model: the owner can read and create their own codes under RLS. There
 -- is no client update or delete policy. The redemption increment happens only
--- through the service-role client inside the redeem-referral Function, which
--- bypasses RLS. A redeemer can neither read the row nor learn the owner.
+-- inside redeem_referral_code, a SECURITY DEFINER function that runs as its
+-- owner and so updates the counter past RLS. A redeemer can neither read the
+-- row nor learn the owner.
 --
 -- Reversal: additive only. DROP TABLE public.referral_codes reverses it.
 --
@@ -33,7 +34,7 @@ create table if not exists public.referral_codes (
   -- count under RLS. On account deletion the code goes with them.
   owner_id         uuid not null references auth.users(id) on delete cascade,
   -- How many times a link carrying this code has been redeemed. Incremented
-  -- only by the service-role redeem-referral Function. Never negative.
+  -- only by redeem_referral_code (a SECURITY DEFINER function). Never negative.
   redemption_count integer not null default 0 check (redemption_count >= 0),
   -- When the code was created.
   created_at       timestamptz not null default now()
@@ -44,8 +45,8 @@ create index if not exists referral_codes_owner_id_idx
   on public.referral_codes (owner_id);
 
 -- Force redemption_count to 0 on insert so a client cannot seed its own count
--- through the RLS insert path. The service-role increment path is unaffected
--- because it UPDATEs, never INSERTs.
+-- through the RLS insert path. The redeem_referral_code increment path is
+-- unaffected because it UPDATEs, never INSERTs.
 create or replace function public.referral_codes_zero_count()
 returns trigger
 language plpgsql
