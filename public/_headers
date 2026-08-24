@@ -8,11 +8,10 @@
 #   - This file is the ONE policy body and ships Report-Only. vite copies it
 #     verbatim into dist/_headers, so anything that skips or fails the deploy
 #     CSP step serves Report-Only: a missing report, never a vault lockout.
-#   - On the dev branch only, the deploy flips the header NAME in place, from
-#     Content-Security-Policy-Report-Only to Content-Security-Policy, touching
-#     no other character of the policy body. There is no second policy file to
-#     drift against. Prod keeps the Report-Only default; an unknown branch
-#     fails the deploy loudly.
+#   - On the dev and prod branches, the deploy flips the header NAME in place,
+#     from Content-Security-Policy-Report-Only to Content-Security-Policy,
+#     touching no other character of the policy body. There is no second
+#     policy file to drift against. An unknown branch fails the deploy loudly.
 #
 # report-uri is kept under both names: an enforcing policy still reports, and
 # those reports are how a real break is caught. frame-ancestors and report-uri
