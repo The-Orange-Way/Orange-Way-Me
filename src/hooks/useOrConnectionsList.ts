@@ -18,8 +18,10 @@
  *     Without the fallback a new device, a new browser or cleared site
  *     data surfaces nothing until the user happens to open
  *     /connections, because /connections is the only writer of the
- *     cache (DL-1570). Only when both are absent is there genuinely no
- *     OR subaccount, and the result is unavailable.
+ *     cache (DL-1570). The two ways that fallback can end are kept
+ *     apart: a read that fails is unreadable, because we could not
+ *     determine whether a connection exists, while a read that succeeds
+ *     and returns no subaccount is unavailable.
  *
  * ZK invariants are unchanged: the proxy authenticates via the
  * Supabase JWT, OR returns ciphertexts, and the decrypted_last_error
@@ -119,9 +121,18 @@ export function useOrConnectionsList(): {
         .select("or_subaccount_id")
         .eq("user_id", user.id)
         .maybeSingle();
-      if (error || !data?.or_subaccount_id) {
-        // Genuinely no subaccount provisioned yet, or the profile read
-        // failed. Either way there is nothing OR-side to surface.
+      if (error) {
+        // We could not determine whether a subaccount exists. That is
+        // UNKNOWN, not empty: a connection in error may sit behind this
+        // and reporting "nothing to surface" would hide it. Same fact
+        // as a proxy throw, so it takes the same exit.
+        setResult({ state: "unreadable" });
+        setLoading(false);
+        return;
+      }
+      if (!data?.or_subaccount_id) {
+        // The read succeeded and there is genuinely no subaccount yet,
+        // so there is nothing OR-side to surface.
         setResult({ state: "unavailable" });
         setLoading(false);
         return;
