@@ -281,6 +281,18 @@ type OrKeyMaterial =
   | { ok: false; reason: string };
 
 /**
+ * Waits before each pin write attempt. The first entry is zero so the happy
+ * path costs nothing, and the total added latency on a hard failure is under a
+ * second, which is the most an unlock can be asked to absorb for a write that
+ * is not on its critical path.
+ */
+const PIN_WRITE_BACKOFF_MS = [0, 200, 600];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Where the Orange Rails key material comes from (DL-1506).
  *
  * Every caller below used to do the same thing: derive it from the password
@@ -309,10 +321,17 @@ async function resolveOrKeyMaterial(params: {
   mek: CryptoKey;
   row: OrKeyMaterialRow;
   kdfSalt: string;
+  /**
+   * Whether `kdfSalt` is still the salt that already-sealed rows were sealed
+   * under. Required, with no default, so that neither caller can inherit an
+   * assumption: unlock passes true because the salt is unchanged, recovery
+   * passes false because it has just minted a new one.
+   */
+  saltMatchesExistingRows: boolean;
 }): Promise<OrKeyMaterial> {
-  const { userId, password, mek, row, kdfSalt } = params;
+  const { userId, password, mek, row, kdfSalt, saltMatchesExistingRows } = params;
 
-  const plan = planOrKeyMaterial(row, kdfSalt);
+  const plan = planOrKeyMaterial(row, kdfSalt, { saltMatchesExistingRows });
 
   // A refusal disables the Orange Rails namespace and does NOT fail the
   // unlock. Two reasons, and the second is the important one. First, the
@@ -351,18 +370,40 @@ async function resolveOrKeyMaterial(params: {
   // correct for this session either way, and the next unlock retries the pin.
   // What must not happen is the reverse: treating a failed WRITE as a reason to
   // stop using the correct value we already hold.
-  try {
-    const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
-    const { error } = await vaultTable()
-      .update({
-        enc_or_mek_ciphertext: ciphertext,
-        or_subkey_salt: plan.saltContext,
-        or_key_epoch: plan.epoch,
-      })
-      .eq("user_id", userId);
-    if (error) throw new Error(error.message);
-  } catch (e) {
-    console.warn("[vault] could not pin Orange Rails key material; will retry next unlock", e);
+  //
+  // But a single attempt that is swallowed on failure is how a row stays
+  // unpinned indefinitely, and an unpinned row is exactly what makes a later
+  // recovery unrecoverable. One dropped connection at the wrong moment used to
+  // be enough. So the write is retried with a short backoff before giving up,
+  // and giving up says so at error level rather than as a warning nobody reads.
+  const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
+  let pinned = false;
+  let lastPinError: unknown = null;
+
+  for (let attempt = 0; attempt < PIN_WRITE_BACKOFF_MS.length && !pinned; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(PIN_WRITE_BACKOFF_MS[attempt]);
+    }
+    try {
+      const { error } = await vaultTable()
+        .update({
+          enc_or_mek_ciphertext: ciphertext,
+          or_subkey_salt: plan.saltContext,
+          or_key_epoch: plan.epoch,
+        })
+        .eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      pinned = true;
+    } catch (e) {
+      lastPinError = e;
+    }
+  }
+
+  if (!pinned) {
+    console.error(
+      "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
+      lastPinError,
+    );
   }
 
   return { ok: true, orMekBytes, saltContext: plan.saltContext };
@@ -1014,6 +1055,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mek,
       row,
       kdfSalt: row.kdf_salt,
+      // An unlock does not rotate the salt, so deriving here reproduces the
+      // same key the existing rows were sealed under.
+      saltMatchesExistingRows: true,
     });
 
     mekRef.current = mek;
@@ -1340,6 +1384,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         or_key_epoch: data.or_key_epoch ?? null,
       },
       kdfSalt: newSalt,
+      // newSalt was minted a few lines above and written to the row. Deriving
+      // against it cannot reproduce anything, so an unpinned row must refuse
+      // here rather than mint a replacement key and call that success.
+      saltMatchesExistingRows: false,
     });
 
     mekRef.current = mek;

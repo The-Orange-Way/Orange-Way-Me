@@ -103,7 +103,33 @@ export type OrKeyMaterialPlan =
  * @param row       what `vault_metadata` holds for this user
  * @param kdfSalt   the salt in force right now, used only when pinning
  */
-export function planOrKeyMaterial(row: OrKeyMaterialRow, kdfSalt: string): OrKeyMaterialPlan {
+export interface PlanOrKeyMaterialOptions {
+  /**
+   * Whether `kdfSalt` is still the salt that already-sealed rows were sealed
+   * under.
+   *
+   * True on an unlock or a vault creation: the salt in force is the salt the
+   * existing rows were written against, so deriving reproduces the same key.
+   *
+   * False during recovery, which mints a NEW salt before it gets here.
+   * Deriving against that salt produces 32 bytes with no relationship to the
+   * old ones, and pinning them makes the loss permanent. Recovery also cannot
+   * repair the row, because reproducing the old key needs the OLD password and
+   * recovery by definition does not have it. So refusing is not a policy
+   * preference, it is the only outcome that is not a lie.
+   *
+   * Omitted defaults to true, which preserves the unlock and create paths.
+   * `resolveOrKeyMaterial` requires it explicitly so neither production caller
+   * can inherit that default by accident.
+   */
+  saltMatchesExistingRows?: boolean;
+}
+
+export function planOrKeyMaterial(
+  row: OrKeyMaterialRow,
+  kdfSalt: string,
+  options: PlanOrKeyMaterialOptions = {},
+): OrKeyMaterialPlan {
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
@@ -146,6 +172,19 @@ export function planOrKeyMaterial(row: OrKeyMaterialRow, kdfSalt: string): OrKey
     return {
       mode: "refuse",
       reason: "No vault salt is available to pin Orange Rails key material against.",
+    };
+  }
+
+  if (options.saltMatchesExistingRows === false) {
+    // Nothing is pinned AND the salt just rotated.
+    // Deriving here is what silently destroyed history: it yields a well
+    // formed key, pins it as authoritative, reports success, and every row the
+    // customer already synced stops opening forever with nothing on screen to
+    // say so.
+    return {
+      mode: "refuse",
+      reason:
+        "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.",
     };
   }
 
