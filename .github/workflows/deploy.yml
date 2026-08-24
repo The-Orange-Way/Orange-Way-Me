@@ -335,6 +335,11 @@ jobs:
                 echo "CSP: expected exactly 1 Report-Only header in dist/_headers on prod, found $count"
                 exit 1
               fi
+              enf_count=$(grep -cE '^  Content-Security-Policy: ' dist/_headers || true)
+              if [ "$enf_count" -ne 0 ]; then
+                echo "CSP: enforcing header must not be present on prod, found $enf_count"
+                exit 1
+              fi
               echo "CSP: branch=prod, header=Content-Security-Policy-Report-Only (report-only, enforce deferred DL-1351)"
               ;;
             *)
