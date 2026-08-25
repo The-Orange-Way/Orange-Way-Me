@@ -463,7 +463,10 @@ export function useTransactions(opts: {
         .order("date", { ascending: false })
         .limit(500);
       if (e) throw new Error(e.message);
-      const { items: hits, failCount } = await decryptInBatches((data ?? []) as RawRow[], decryptText);
+      const { items: hits, failCount } = await decryptInBatches(
+        (data ?? []) as RawRow[],
+        decryptText,
+      );
       setDecryptFailCount((prev) => prev + failCount);
       return hits;
     },

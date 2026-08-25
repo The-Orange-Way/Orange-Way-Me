@@ -400,9 +400,13 @@ export function TransactionsPage() {
       />
 
       {!loading && decryptFailCount > 0 && (
-        <Alert variant="default" className="border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-200">
+        <Alert
+          variant="default"
+          className="border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-200"
+        >
           <AlertDescription>
-            {decryptFailCount} {decryptFailCount === 1 ? "row" : "rows"} could not be decrypted and are not shown. This can happen after a vault key change.
+            {decryptFailCount} {decryptFailCount === 1 ? "row" : "rows"} could not be decrypted and
+            are not shown. This can happen after a vault key change.
           </AlertDescription>
         </Alert>
       )}
