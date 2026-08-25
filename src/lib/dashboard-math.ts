@@ -11,6 +11,7 @@
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
 import { convert } from "@/lib/fx-rates";
+import { unitIsExact } from "@/lib/format";
 import { isSpendable } from "@/lib/budget-math";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,11 @@ export function netWorthSeries(
 
   // Total current net worth in primary currency.
   const currentNW = accounts.reduce(
-    (sum, a) => sum + convert(Number(a.balance) || 0, a.currency, primaryCurrency),
+    (sum, a) =>
+      sum +
+      convert(Number(a.balance) || 0, a.currency, primaryCurrency, {
+        unitIsExact: unitIsExact(a.format_version),
+      }),
     0,
   );
 
@@ -205,7 +210,9 @@ export function accountsSummary(accounts: Account[], primaryCurrency: string): A
   for (const a of accounts) {
     const bal = Number(a.balance) || 0;
     rawByCurrency[a.currency] = (rawByCurrency[a.currency] ?? 0) + bal;
-    const inPrimary = convert(bal, a.currency, primaryCurrency);
+    const inPrimary = convert(bal, a.currency, primaryCurrency, {
+      unitIsExact: unitIsExact(a.format_version),
+    });
     if (LIABILITY_TYPES.has(a.type)) {
       liabilities += Math.abs(inPrimary);
       liabilityAccounts.push(a);

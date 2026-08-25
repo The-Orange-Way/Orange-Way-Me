@@ -45,7 +45,12 @@ function usdPerUnit(c: SupportedCurrency): number {
 }
 
 /** Convert `amount` from currency `from` to currency `to`. */
-export function convert(amount: number, from: string, to: string): number {
+export function convert(
+  amount: number,
+  from: string,
+  to: string,
+  opts?: { unitIsExact?: boolean },
+): number {
   let f = (from as SupportedCurrency) in USD_PER_UNIT ? (from as SupportedCurrency) : "USD";
   const t = (to as SupportedCurrency) in USD_PER_UNIT ? (to as SupportedCurrency) : "USD";
   if (!Number.isFinite(amount)) return 0;
@@ -56,7 +61,7 @@ export function convert(amount: number, from: string, to: string): number {
     // the display path uses, then convert as sats so we never multiply raw sats
     // by the full BTC-USD price. Flipping `f` to "sats" also prevents any
     // double-normalization downstream.
-    value = normalizeBitcoinToSats(amount, "BTC");
+    value = normalizeBitcoinToSats(amount, "BTC", opts);
     f = "sats";
   }
   const usd = value * usdPerUnit(f);

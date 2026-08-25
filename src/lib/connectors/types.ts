@@ -62,6 +62,18 @@ export interface Account {
   institution?: string | null;
   balance: string;
   metadata?: Record<string, unknown> | null;
+  /**
+   * Plaintext migration-state marker from the accounts table (DL-1342).
+   *
+   * 0 means the row predates the unit correction, so a "BTC" label may sit on
+   * a balance that is really an integer number of satoshis and the reader has
+   * to guess. 1 means a corrected writer stamped it, so the label is exact and
+   * nothing should be inferred from the shape of the number.
+   *
+   * Optional because rows read before this field was selected will not carry
+   * it, and absent has to mean the cautious value rather than the trusting one.
+   */
+  format_version?: number;
 }
 
 /**
