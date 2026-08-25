@@ -12,6 +12,7 @@ import {
   isBitcoinCurrency,
   normalizeBitcoinToSats,
   sumByCurrency,
+  toBalanceEntry,
 } from "@/lib/format";
 import { AccountCard, type AccountConnectionStatus } from "@/components/accounts/AccountCard";
 import { AddAccountDialog } from "@/components/accounts/AddAccountDialog";
@@ -202,28 +203,11 @@ export function AccountsPage() {
   const netWorthLabel = useMemo(
     () =>
       formatTotalsWithMode(
-        sumByCurrency(
-          accounts.map((a) => {
-            // Same live-balance fallback as the AccountCard: when stored is
-            // exactly $0 but transactions exist, use their sum. Keeps the
-            // net worth in sync with what the user sees on each card.
-            const stored = Number(a.balance);
-            const txnSum = txnSumByAccount.get(a.id);
-            const useTxnLive =
-              Number.isFinite(stored) &&
-              stored === 0 &&
-              typeof txnSum === "number" &&
-              Math.abs(txnSum) > 0.005;
-            if (!useTxnLive) return { amount: a.balance, currency: a.currency };
-            // txnSumByAccount has already reduced a bitcoin account to sats,
-            // so declare that unit rather than handing the value back to a
-            // heuristic that infers the unit from the magnitude.
-            return {
-              amount: String(txnSum),
-              currency: isBitcoinCurrency(a.currency) ? "sats" : a.currency,
-            };
-          }),
-        ),
+        // toBalanceEntry carries format_version through and applies the same
+        // live-balance fallback as the AccountCard: when stored is exactly $0
+        // but transactions exist, their sum stands in. Keeps the net worth in
+        // sync with what the user sees on each card.
+        sumByCurrency(accounts.map((a) => toBalanceEntry(a, txnSumByAccount.get(a.id)))),
         prefs.btcDisplayMode,
         loc,
       ),
@@ -301,9 +285,7 @@ export function AccountsPage() {
 
         <div className="space-y-8">
           {grouped.map((group) => {
-            const totals = sumByCurrency(
-              group.items.map((a) => ({ amount: a.balance, currency: a.currency })),
-            );
+            const totals = sumByCurrency(group.items.map((a) => toBalanceEntry(a)));
             return (
               <section key={group.type}>
                 <div className="mb-3 flex items-center justify-between">

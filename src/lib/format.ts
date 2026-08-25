@@ -148,9 +148,16 @@ export function formatCurrency(amount: string, currency: string, locale?: string
  * reads any non-integer as decimal BTC and multiplies by 1e8, and the display
  * divides by 1e8 again, so the wrong number survives the round trip intact.
  *
- * The heuristic itself is unchanged here and is still wrong for a holding of a
- * whole number of BTC entered as a bare integer. That is DL-1449 / issue #343
- * and it needs the stored unit recorded rather than inferred.
+ * A row carrying format_version >= 1 has had its unit established by the
+ * writer, so its bitcoin amount is converted without consulting the magnitude
+ * at all. That is the branch that stops a holding of exactly 1 BTC being read
+ * as one satoshi (DL-1449 / issue #343).
+ *
+ * An unstamped row keeps the heuristic, deliberately. format_version 0 means
+ * the writer did not record the unit, and the sats rows already stored under a
+ * BTC label would be rescaled by 1e8 the other way if the guess were dropped.
+ * Build the entries with toBalanceEntry below rather than by hand: an inline
+ * object literal is where the stamp was lost the first time.
  */
 export function sumByCurrency(
   amounts: { amount: string; currency: string; format_version?: number }[],
@@ -170,6 +177,45 @@ export function sumByCurrency(
     }
   }
   return out;
+}
+
+/**
+ * Map one account onto the shape sumByCurrency reads.
+ *
+ * This is a function rather than an inline object literal because the inline
+ * version is exactly where the stamp went missing: AccountsPage built
+ * { amount, currency } at two call sites, so sumByCurrency never saw
+ * format_version and a stamped balance was still read by magnitude. An object
+ * literal in a JSX file cannot be tested, so nothing failed when the wiring
+ * came apart. This can be, and is.
+ *
+ * txnSum is the live-balance fallback: when the stored balance is exactly zero
+ * but transactions exist, their sum stands in for it. That sum has already been
+ * reduced to sats by the caller, so this branch declares "sats" outright and
+ * carries no stamp. The absence there is correct rather than an omission,
+ * because normalizeBitcoinToSats never consults the stamp for a sats amount.
+ */
+export function toBalanceEntry(
+  account: { balance: string; currency: string; format_version?: number },
+  txnSum?: number,
+): { amount: string; currency: string; format_version?: number } {
+  const stored = Number(account.balance);
+  const useTxnLive =
+    Number.isFinite(stored) &&
+    stored === 0 &&
+    typeof txnSum === "number" &&
+    Math.abs(txnSum) > 0.005;
+  if (!useTxnLive) {
+    return {
+      amount: account.balance,
+      currency: account.currency,
+      format_version: account.format_version,
+    };
+  }
+  return {
+    amount: String(txnSum),
+    currency: isBitcoinCurrency(account.currency) ? "sats" : account.currency,
+  };
 }
 
 /**

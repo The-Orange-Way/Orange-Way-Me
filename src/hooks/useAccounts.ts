@@ -294,6 +294,11 @@ export function useAccounts() {
           is_active: raw.is_active,
           created_at: raw.created_at,
           updated_at: raw.updated_at,
+          // Carried for the same reason as the active list. The archived
+          // section renders no balance today, so this is latent rather than
+          // live, but the row is selected with format_version and dropping it
+          // here is the same disconnect the active list already had.
+          format_version: raw.format_version,
           ...dec,
         });
       } catch {
