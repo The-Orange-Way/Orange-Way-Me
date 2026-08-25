@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { UNTRACKABLE_COPY } from "@/lib/goal-untrackable-copy";
+import { UNTRACKABLE_COPY, UNTRACKABLE_SHORT } from "@/lib/goal-untrackable-copy";
 import { computeProgress } from "@/lib/goals-math";
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
@@ -65,5 +65,42 @@ describe("untrackable copy is complete for every reason goals-math can return", 
   it("returns null for a goal that can be measured, so neither screen suppresses a real bar", () => {
     const prog = computeProgress(goal({}), [account("a", "250")]);
     expect(prog.untrackableReason).toBeNull();
+  });
+});
+
+/**
+ * DL-1601. The dashboard widget is the third screen rendering this state, and
+ * it is the one a person hits FIRST, with no list tile having warned them. It
+ * cannot fit the sentences above, so it renders a compact label instead.
+ *
+ * The risk a compact second lookup introduces is drift: a fourth cause added
+ * to goals-math could get copy in one lookup and not the other, and the screen
+ * with the gap would render undefined rather than fail. The type makes that a
+ * compile error; these tests make it a test failure too, because a type error
+ * in a Record literal is easy to silence with a cast under time pressure.
+ */
+describe("compact untrackable copy stays in lockstep with the long form", () => {
+  it("covers exactly the same reasons, so no screen can be left without copy", () => {
+    expect(Object.keys(UNTRACKABLE_SHORT).sort()).toEqual(Object.keys(UNTRACKABLE_COPY).sort());
+  });
+
+  it("has a non-empty label for every reason goals-math can return", () => {
+    for (const reason of Object.keys(UNTRACKABLE_COPY) as (keyof typeof UNTRACKABLE_COPY)[]) {
+      const short = UNTRACKABLE_SHORT[reason];
+      expect(typeof short).toBe("string");
+      expect(short.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("stays short enough for a dashboard tile, which is the whole reason it exists", () => {
+    for (const short of Object.values(UNTRACKABLE_SHORT)) {
+      expect(short.length).toBeLessThanOrEqual(32);
+    }
+  });
+
+  it("resolves for a real untrackable goal, not just for hand-written keys", () => {
+    const prog = computeProgress(goal({ target_amount: "0" }), [account("a", "250")]);
+    expect(prog.untrackableReason).toBe("no_target_set");
+    expect(UNTRACKABLE_SHORT[prog.untrackableReason!]).toBe("No target set");
   });
 });
