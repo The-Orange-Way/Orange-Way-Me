@@ -11,6 +11,11 @@ import { ComingSoonFlow } from "./flows/ComingSoonFlow";
  * OrangeRails tile in the picker just navigates to /connections,
  * where the full flow lives.
  *
+ * The description leads with banks on purpose. /connections offers both
+ * "+ Connect a bank" and "+ Connect a Bitcoin source", but this tile used
+ * to describe only the Bitcoin half, so the bank route had no signpost
+ * anywhere in the Add Account picker.
+ *
  * `comingSoon` is intentionally false: OR is live. Removing the
  * coming-soon badge fixes the misleading UX where users were told to
  * wait for an integration that already exists. `FlowComponent` is
@@ -22,7 +27,7 @@ export const orangeRailsConnector: Connector = {
   type: "orange_rails",
   label: "OrangeRails",
   icon: "Plug",
-  description: "Connect Bitcoin wallets and exchanges (Blink today; xpub, BTCPay, more soon).",
+  description: "Connect a bank, a Bitcoin wallet or an exchange.",
   navigateTo: "/connections",
   FlowComponent: ComingSoonFlow,
 };
