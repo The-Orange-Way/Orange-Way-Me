@@ -10,6 +10,7 @@ import { Target } from "lucide-react";
 import { useGoals } from "@/hooks/useGoals";
 import { useAccounts } from "@/hooks/useAccounts";
 import { computeProgress } from "@/lib/goals-math";
+import { UNTRACKABLE_SHORT } from "@/lib/goal-untrackable-copy";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { useLocaleFormat } from "@/lib/locale";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,14 +63,35 @@ export function GoalsProgressWidget() {
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-sm font-medium">{g.name}</span>
                     <span className="text-xs text-muted-foreground tabular-nums">
-                      {Math.round(p.pct * 100)}%
+                      {p.untrackableReason ? "Not tracking yet" : `${Math.round(p.pct * 100)}%`}
                     </span>
                   </div>
-                  <Progress value={p.pct * 100} className="mt-2 h-1.5" />
-                  <div className="mt-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
-                    <span>{fmt.formatCurrency(p.current, goalCurrency)}</span>
-                    <span>of {fmt.formatCurrency(p.target, goalCurrency)}</span>
-                  </div>
+                  {p.untrackableReason ? (
+                    /*
+                     * DL-1601. Drawing the bar here would be the same claim the
+                     * list tile and the detail page already refuse to make: a
+                     * zero that reads as "saved nothing" when the truth is
+                     * "nothing to measure". This surface is the worst of the
+                     * three for it, because the dashboard is where someone sees
+                     * the goal FIRST, with no tile having flagged it.
+                     *
+                     * No bar and no figures, for the same reason the tile
+                     * suppresses "of $0": printing an amount states something
+                     * the goal does not carry. The tile links to the goal,
+                     * where the full explanation is.
+                     */
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">
+                      {UNTRACKABLE_SHORT[p.untrackableReason]}
+                    </p>
+                  ) : (
+                    <>
+                      <Progress value={p.pct * 100} className="mt-2 h-1.5" />
+                      <div className="mt-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
+                        <span>{fmt.formatCurrency(p.current, goalCurrency)}</span>
+                        <span>of {fmt.formatCurrency(p.target, goalCurrency)}</span>
+                      </div>
+                    </>
+                  )}
                 </Link>
               );
             })}
