@@ -26,7 +26,9 @@ import {
   formatTotalsWithMode,
   isBitcoinCurrency,
   normalizeBitcoinToSats,
+  unitIsExact,
   sumByCurrency,
+  toBalanceEntry,
 } from "../format";
 
 describe("sumByCurrency", () => {
@@ -134,5 +136,127 @@ describe("normalizeBitcoinToSats: the limitation this change does NOT fix", () =
     expect(normalizeBitcoinToSats(1.0, "BTC")).toBe(1);
     // The workaround users are implicitly relying on today:
     expect(normalizeBitcoinToSats(1.00000001, "BTC")).toBe(100_000_001);
+  });
+});
+
+describe("unitIsExact: which rows we are allowed to stop guessing about", () => {
+  it("treats an absent or zero format_version as not exact", () => {
+    // Absent has to mean the cautious value. A row read by a query that does
+    // not select the column must not be mistaken for a stamped one.
+    expect(unitIsExact(undefined)).toBe(false);
+    expect(unitIsExact(0)).toBe(false);
+  });
+
+  it("treats format_version 1 and above as exact", () => {
+    expect(unitIsExact(1)).toBe(true);
+    expect(unitIsExact(2)).toBe(true);
+  });
+});
+
+describe("normalizeBitcoinToSats: a stamped row is taken at its word", () => {
+  it("reads a whole number of BTC as BTC when the row is stamped", () => {
+    // This is the case the product has been getting wrong: a customer holding
+    // exactly 1 BTC. Unstamped, the magnitude heuristic reads it as 1 sat and
+    // the dashboard renders $0.00. Stamped, the label is authoritative.
+    expect(normalizeBitcoinToSats(1, "BTC", { unitIsExact: true })).toBe(100_000_000);
+    expect(normalizeBitcoinToSats(2, "BTC", { unitIsExact: true })).toBe(200_000_000);
+  });
+
+  it("keeps guessing on an unstamped row, because we still do not know", () => {
+    // Deliberately unchanged. format_version 0 means the writer did not record
+    // the unit, so the magnitude heuristic is still the only signal available
+    // and removing it would silently rescale every legacy sats row by 1e8.
+    expect(normalizeBitcoinToSats(1, "BTC")).toBe(1);
+    expect(normalizeBitcoinToSats(1, "BTC", { unitIsExact: false })).toBe(1);
+  });
+
+  it("leaves an explicit sats row alone whether stamped or not", () => {
+    // currency "sats" was never ambiguous, so the flag must not perturb it.
+    expect(normalizeBitcoinToSats(50_000, "sats")).toBe(50_000);
+    expect(normalizeBitcoinToSats(50_000, "sats", { unitIsExact: true })).toBe(50_000);
+  });
+
+  it("agrees with the heuristic on a sub-unit decimal either way", () => {
+    // The overlap case: below 1 the two paths already gave the same answer, so
+    // stamping a row can never move a value that was previously correct.
+    expect(normalizeBitcoinToSats(0.5, "BTC")).toBe(50_000_000);
+    expect(normalizeBitcoinToSats(0.5, "BTC", { unitIsExact: true })).toBe(50_000_000);
+  });
+});
+
+describe("sumByCurrency: a stamped row and a legacy row can be added safely", () => {
+  it("adds 1 stamped BTC to a legacy sats balance without a 1e8 error", () => {
+    const out = sumByCurrency([
+      { amount: "1", currency: "BTC", format_version: 1 },
+      { amount: "50000", currency: "BTC", format_version: 0 },
+    ]);
+    // 100,000,000 sats + 50,000 sats. Before this change the first row
+    // contributed 1 sat and the holding read as 50,001 sats.
+    expect(out.sats).toBe(100_050_000);
+  });
+});
+
+/**
+ * These cases exist because the first version of this change wired the stamp
+ * all the way onto the Account type and then dropped it in the last step: the
+ * two totals on the accounts page built { amount, currency } inline, so
+ * sumByCurrency saw format_version as undefined and a stamped balance was
+ * still read by magnitude. Every test above passed with the wiring
+ * disconnected, because they all called the pure function directly.
+ *
+ * The fix was to make that mapping a function. These tests are the reason it
+ * cannot come apart silently again.
+ */
+describe("toBalanceEntry: the stamp survives the trip to the totals", () => {
+  it("carries format_version onto the entry sumByCurrency reads", () => {
+    expect(toBalanceEntry({ balance: "1", currency: "BTC", format_version: 1 })).toEqual({
+      amount: "1",
+      currency: "BTC",
+      format_version: 1,
+    });
+  });
+
+  it("reports a stamped whole BTC holding as a whole bitcoin, end to end", () => {
+    // This is the case the ticket is about, exercised through the mapping
+    // rather than through a hand-built literal. Drop format_version anywhere
+    // between the account and sumByCurrency and this reads 1 sat.
+    const out = sumByCurrency([
+      toBalanceEntry({ balance: "1", currency: "BTC", format_version: 1 }),
+    ]);
+    expect(out.sats).toBe(100_000_000);
+  });
+
+  it("leaves an unstamped whole BTC holding on the old heuristic", () => {
+    // Not an oversight. format_version 0 means the writer did not record the
+    // unit, and the sats rows already stored under a BTC label would be
+    // rescaled by 1e8 the other way if the guess were dropped here.
+    const out = sumByCurrency([toBalanceEntry({ balance: "1", currency: "BTC" })]);
+    expect(out.sats).toBe(1);
+  });
+
+  it("falls back to the transaction sum only when the stored balance is zero", () => {
+    // Stored balance stands, stamp and all, when it is not zero.
+    expect(toBalanceEntry({ balance: "1", currency: "BTC", format_version: 1 }, 42)).toEqual({
+      amount: "1",
+      currency: "BTC",
+      format_version: 1,
+    });
+  });
+
+  it("declares sats on the transaction fallback and carries no stamp", () => {
+    // The caller has already reduced a bitcoin account's rows to sats, so the
+    // unit is known outright and there is nothing left for a stamp to settle.
+    expect(toBalanceEntry({ balance: "0", currency: "BTC", format_version: 1 }, 50_000)).toEqual({
+      amount: "50000",
+      currency: "sats",
+    });
+  });
+
+  it("ignores a transaction sum too small to be a real balance", () => {
+    expect(toBalanceEntry({ balance: "0", currency: "USD" }, 0.001)).toEqual({
+      amount: "0",
+      currency: "USD",
+      format_version: undefined,
+    });
   });
 });

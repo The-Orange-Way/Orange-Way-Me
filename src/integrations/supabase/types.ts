@@ -19,6 +19,7 @@ export type Database = {
           enc_metadata: string | null;
           enc_name: string;
           enc_type: string;
+          format_version: number;
           household_id: string | null;
           id: string;
           is_active: boolean;
@@ -40,6 +41,7 @@ export type Database = {
           enc_metadata?: string | null;
           enc_name: string;
           enc_type: string;
+          format_version?: number;
           household_id?: string | null;
           id?: string;
           is_active?: boolean;
@@ -61,6 +63,7 @@ export type Database = {
           enc_metadata?: string | null;
           enc_name?: string;
           enc_type?: string;
+          format_version?: number;
           household_id?: string | null;
           id?: string;
           is_active?: boolean;

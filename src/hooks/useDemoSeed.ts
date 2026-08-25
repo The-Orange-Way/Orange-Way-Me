@@ -257,6 +257,11 @@ export function useDemoSeed() {
               enc_current_amount: await encryptText("0"),
               enc_target_date: await encryptText(g.targetDate),
               enc_linked_account_ids: await encryptText(JSON.stringify(linkedId ? [linkedId] : [])),
+              // Mirrors what useGoals.createGoal writes for a hand-made goal.
+              // Leaving these null made a seeded pay_down goal fall back to its
+              // target for the starting balance, which was zero (DL-1587).
+              enc_strategy: g.strategy ? await encryptText(g.strategy) : null,
+              enc_starting_balance: g.startingBalance ? await encryptText(g.startingBalance) : null,
               ...buildHouseholdSignatureFields(),
             })
             .select("id")

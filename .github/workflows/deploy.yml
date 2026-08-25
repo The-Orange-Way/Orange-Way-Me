@@ -287,12 +287,16 @@ jobs:
 
       - name: Apply CSP policy for this branch
         # public/_headers is the single source and ships Report-Only; vite
-        # copies it verbatim to dist/_headers. On dev and prod, flip the header
-        # NAME up to enforcing IN PLACE, touching no other character of the
-        # policy body, so there is no second file to drift against. An unknown
-        # branch fails loudly. If this step is skipped or fails, dist/_headers
-        # stays Report-Only, so the residual failure is a lost enforcement,
-        # never a policy shipped enforced without these checks having run.
+        # copies it verbatim to dist/_headers. On dev, flip the header NAME up
+        # to enforcing IN PLACE, touching no other character of the policy
+        # body. On prod, verify the policy and leave it Report-Only: the
+        # enforce flip is deferred (DL-1351) until dev has run 48h clean under
+        # enforcement and QA has passed, so a dev to prod promotion carries no
+        # premature enforcement. There is no second file to drift against. An
+        # unknown branch fails loudly. If this step is skipped or fails,
+        # dist/_headers stays Report-Only, so the residual failure is a lost
+        # enforcement, never a policy shipped enforced without these checks
+        # having run.
         run: |
           set -euo pipefail
           case "${{ github.ref_name }}" in

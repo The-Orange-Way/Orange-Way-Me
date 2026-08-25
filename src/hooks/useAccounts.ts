@@ -25,6 +25,7 @@ interface AccountRow extends AccountEncrypted {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  format_version?: number;
 }
 
 const accountsTable = () => supabase.from("accounts");
@@ -52,7 +53,7 @@ export function useAccounts() {
     try {
       const { data, error: e } = await accountsTable()
         .select(
-          "id, user_id, connector_type, is_active, created_at, updated_at, enc_name, enc_type, enc_currency, enc_institution, enc_balance, enc_metadata",
+          "id, user_id, connector_type, is_active, created_at, updated_at, format_version, enc_name, enc_type, enc_currency, enc_institution, enc_balance, enc_metadata",
         )
         .eq("is_active", true)
         .order("created_at", { ascending: true });
@@ -83,6 +84,7 @@ export function useAccounts() {
             is_active: raw.is_active,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
+            format_version: raw.format_version,
             ...dec,
           };
           decryptCacheRef.current.set(raw.id, acc);
@@ -267,7 +269,7 @@ export function useAccounts() {
     if (!user || !isUnlocked) return [];
     const { data, error: e } = await accountsTable()
       .select(
-        "id, user_id, connector_type, is_active, created_at, updated_at, enc_name, enc_type, enc_currency, enc_institution, enc_balance, enc_metadata",
+        "id, user_id, connector_type, is_active, created_at, updated_at, format_version, enc_name, enc_type, enc_currency, enc_institution, enc_balance, enc_metadata",
       )
       .eq("is_active", false)
       .order("created_at", { ascending: true });
@@ -292,6 +294,11 @@ export function useAccounts() {
           is_active: raw.is_active,
           created_at: raw.created_at,
           updated_at: raw.updated_at,
+          // Carried for the same reason as the active list. The archived
+          // section renders no balance today, so this is latent rather than
+          // live, but the row is selected with format_version and dropping it
+          // here is the same disconnect the active list already had.
+          format_version: raw.format_version,
           ...dec,
         });
       } catch {

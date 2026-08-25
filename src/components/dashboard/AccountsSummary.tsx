@@ -10,7 +10,7 @@ import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { accountsSummary } from "@/lib/dashboard-math";
 import { convert } from "@/lib/fx-rates";
 import { formatCurrencyLocale, numberLocale } from "@/lib/locale";
-import { formatCurrencyWithMode, type BtcDisplayMode } from "@/lib/format";
+import { formatCurrencyWithMode, unitIsExact, type BtcDisplayMode } from "@/lib/format";
 import type { NumberFormatPref } from "@/hooks/useDashboardPrefs";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Account } from "@/lib/connectors";
@@ -158,7 +158,9 @@ function Group({
             <div className="py-1 text-xs text-muted-foreground">No accounts</div>
           ) : (
             accounts.map((a) => {
-              const inPrimary = convert(Number(a.balance) || 0, a.currency, currency);
+              const inPrimary = convert(Number(a.balance) || 0, a.currency, currency, {
+                unitIsExact: unitIsExact(a.format_version),
+              });
               return (
                 <Link
                   key={a.id}
