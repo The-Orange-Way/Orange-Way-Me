@@ -29,7 +29,10 @@
  * For or-provision: external_user_id is set to the authenticated user.id.
  * For or-link-mint-token: app_user_id is set to user.id; ttl_seconds
  *   passed through if numeric.
- * For all others: subaccount_id MUST be in payload (browser passes it).
+ * For all others: subaccount_id is resolved server-side from
+ *   user_profiles.or_subaccount_id on the authenticated user. A
+ *   client-supplied subaccount_id is ignored, so a user cannot act on
+ *   another user's subaccount.
  *
  * Response: passes through OR's response body and status.
  */
@@ -281,17 +284,28 @@ Deno.serve(async (req: Request) => {
           : {}),
       };
     } else {
-      // For everything else, ensure subaccount_id is in the payload.
-      // The browser passes it from localStorage; we additionally validate
-      // it on the OR side (resolveSubaccount checks platform ownership).
-      if (!payload.subaccount_id) {
+      // Always resolve subaccount_id server-side from the authenticated
+      // user's profile. Never trust a client-supplied value: OR only checks
+      // that a subaccount belongs to the platform, not to the calling user,
+      // so an authenticated user could otherwise pass another user's
+      // subaccount_id and read or mutate that user's Orange Rails state
+      // (list, sync, delete, transactions). Source of truth is
+      // user_profiles.or_subaccount_id, written by the or-provision mirror
+      // below. Mirrors the OWB owb-or-proxy control.
+      const { data: profileRow } = await serviceClient
+        .from("user_profiles")
+        .select("or_subaccount_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const resolved = (profileRow as { or_subaccount_id?: unknown } | null)?.or_subaccount_id;
+      if (typeof resolved !== "string" || !resolved) {
         return jsonResponse(
-          { error: "subaccount_id required in payload (call or-provision first if missing)" },
+          { error: "not provisioned on Orange Rails (call or-provision first)" },
           400,
           cors,
         );
       }
-      orBody = { ...payload };
+      orBody = { ...payload, subaccount_id: resolved };
     }
 
     const orRes = await callOr(endpoint, orBody);
