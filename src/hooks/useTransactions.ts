@@ -83,7 +83,7 @@ const txnsTable = () => supabase.from("transactions");
 
 const BATCH = 50;
 
-async function decryptInBatches(
+export async function decryptInBatches(
   rows: RawRow[],
   decryptText: (s: string) => Promise<string>,
 ): Promise<{ items: DecryptedTxn[]; failCount: number }> {
@@ -463,7 +463,8 @@ export function useTransactions(opts: {
         .order("date", { ascending: false })
         .limit(500);
       if (e) throw new Error(e.message);
-      const { items: hits } = await decryptInBatches((data ?? []) as RawRow[], decryptText);
+      const { items: hits, failCount } = await decryptInBatches((data ?? []) as RawRow[], decryptText);
+      setDecryptFailCount((prev) => prev + failCount);
       return hits;
     },
     [user, getHmacKey, decryptText],
