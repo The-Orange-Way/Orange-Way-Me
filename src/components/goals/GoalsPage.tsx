@@ -8,7 +8,7 @@ import { Plus, Target } from "lucide-react";
 import { useGoals, type GoalDraft } from "@/hooks/useGoals";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useTransactions } from "@/hooks/useTransactions";
-import { computeProgress } from "@/lib/goals-math";
+import { summariseGoals } from "@/lib/goals-math";
 import { useLocaleFormat } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { GoalCard } from "./GoalCard";
@@ -41,18 +41,7 @@ export function GoalsPage() {
   const payDown = goals.filter((g) => g.type === "pay_down" && !g.is_completed);
   const completed = goals.filter((g) => g.is_completed);
 
-  const totals = useMemo(() => {
-    let saved = 0;
-    let target = 0;
-    for (const g of goals) {
-      if (g.is_completed) continue;
-      const p = computeProgress(g, accounts);
-      saved += p.current;
-      target += p.target;
-    }
-    const pct = target > 0 ? (saved / target) * 100 : 0;
-    return { saved, target, pct };
-  }, [goals, accounts]);
+  const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
 
   async function handleCreate(draft: GoalDraft) {
     await createGoal(draft);
@@ -63,18 +52,38 @@ export function GoalsPage() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Goals</h1>
-          {goals.length > 0 ? (
+          {goals.length === 0 ? (
             <p className="mt-1 text-sm text-muted-foreground">
-              You've made {fmtMoney(totals.saved)} of {fmtMoney(totals.target)} progress across{" "}
-              {goals.length - completed.length} active goal
-              {goals.length - completed.length === 1 ? "" : "s"}{" "}
-              <span className="font-medium text-foreground tabular-nums">
-                ({Math.round(totals.pct)}%)
-              </span>
+              Track money you're saving toward something, or paying down.
+            </p>
+          ) : totals.active === 0 ? (
+            /*
+             * Goals exist but every one is complete. The old line reported
+             * "$0 of $0 progress across 0 active goals (0%)" here, which reads
+             * like a failure to someone who has just finished everything.
+             */
+            <p className="mt-1 text-sm text-muted-foreground">
+              Every goal you have set is complete.
+            </p>
+          ) : totals.counted === 0 ? (
+            /*
+             * Every active goal is one we cannot measure, so there is no
+             * percentage to report. Saying "0% of $0" here would be the same
+             * false claim the tiles already refuse to make (DL-1603).
+             */
+            <p className="mt-1 text-sm text-muted-foreground">
+              None of your {totals.active} active goal
+              {totals.active === 1 ? "" : "s"} can be measured yet.
             </p>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">
-              Track money you're saving toward something — or paying down.
+              You've made {fmtMoney(totals.saved)} of {fmtMoney(totals.target)} progress across{" "}
+              {totals.counted < totals.active
+                ? `${totals.counted} of ${totals.active} active goals`
+                : `${totals.counted} active goal${totals.counted === 1 ? "" : "s"}`}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                ({Math.round(totals.pct * 100)}%)
+              </span>
             </p>
           )}
         </div>
