@@ -3,6 +3,7 @@
  * Each family has accounts + ~3 months of realistic transactions + goals.
  * Category names match the DEFAULT_CATEGORIES list in useCategories.
  */
+import type { Goal } from "@/hooks/useGoals";
 
 export interface DemoAccount {
   name: string;
@@ -27,9 +28,25 @@ export interface DemoTxn {
 export interface DemoGoal {
   name: string;
   type: "save_up" | "pay_down";
+  /**
+   * What the goal is measured against. For save_up it is the amount being
+   * saved; for pay_down it is the debt being cleared, never zero. See
+   * startingBalance below.
+   */
   targetAmount: string;
   targetDate: string; // YYYY-MM-DD
   account: string;
+  /**
+   * How progress is derived. Taken from the Goal this fixture becomes rather
+   * than restated, so a new strategy is a compile error here.
+   */
+  strategy?: NonNullable<Goal["strategy"]>;
+  /**
+   * pay_down only: what was owed when the goal started. Progress is this minus
+   * the debt still on the card, so it has to be at least the current balance
+   * or the goal reads as zero progress forever.
+   */
+  startingBalance?: string;
 }
 
 export interface DemoFamily {
@@ -421,8 +438,9 @@ const NAKAMOTO: DemoFamily = {
       name: "1 Bitcoin stack",
       type: "save_up",
       targetAmount: "1.00000000",
-      targetDate: date(-365 * -2),
+      targetDate: date(-365 * 2),
       account: "Cold Storage",
+      strategy: "all_balance",
     },
     {
       name: "Emergency fund (6 months)",
@@ -430,6 +448,7 @@ const NAKAMOTO: DemoFamily = {
       targetAmount: "45000.00",
       targetDate: date(-365),
       account: "Chase Savings",
+      strategy: "all_balance",
     },
   ],
 };
@@ -844,6 +863,7 @@ const ANDERSON: DemoFamily = {
       targetAmount: "5000.00",
       targetDate: date(-180),
       account: "Wells Fargo Savings",
+      strategy: "all_balance",
     },
     {
       name: "Emergency fund",
@@ -851,13 +871,16 @@ const ANDERSON: DemoFamily = {
       targetAmount: "18000.00",
       targetDate: date(-270),
       account: "Wells Fargo Savings",
+      strategy: "all_balance",
     },
     {
       name: "Pay off Visa card",
       type: "pay_down",
-      targetAmount: "0.00",
+      targetAmount: "2500.00",
       targetDate: date(-90),
       account: "Visa Credit Card",
+      strategy: "avalanche",
+      startingBalance: "2500.00",
     },
   ],
 };
@@ -1276,8 +1299,9 @@ const REYES: DemoFamily = {
       name: "House down payment",
       type: "save_up",
       targetAmount: "100000.00",
-      targetDate: date(-365 * -2),
+      targetDate: date(-365 * 2),
       account: "High-yield Savings",
+      strategy: "all_balance",
     },
     {
       name: "Honeymoon — Japan",
@@ -1285,13 +1309,16 @@ const REYES: DemoFamily = {
       targetAmount: "8000.00",
       targetDate: date(-365),
       account: "High-yield Savings",
+      strategy: "all_balance",
     },
     {
       name: "Pay off Amex balance",
       type: "pay_down",
-      targetAmount: "0.00",
+      targetAmount: "6000.00",
       targetDate: date(-60),
       account: "Amex Platinum",
+      strategy: "avalanche",
+      startingBalance: "6000.00",
     },
   ],
 };
