@@ -75,6 +75,7 @@ import {
 import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
+import { recordStealthSyncRun } from "@/lib/stealth/runLog";
 import {
   orRowsForConnection,
   sealedRecordToCipherB64,
