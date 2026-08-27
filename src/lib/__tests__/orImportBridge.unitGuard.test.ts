@@ -113,6 +113,37 @@ describe("importOrTransactions - DL-1424 balance unit guard", () => {
     expect(result.netByAccount["acct-1"]).toBe(0.5);
   });
 
+  it("credits when the account currency and tx currency differ only in case", async () => {
+    const { client } = makeFakeSupabase();
+    const btcTx: OrImportTransaction = {
+      id: "or-btc-case-1",
+      direction: "in",
+      type: "deposit",
+      amount: 0.5,
+      currency: "BTC",
+      description: "Bitcoin deposit",
+      counterparty: null,
+      timestamp: "2026-05-14T12:00:00Z",
+      source_wallet_id: "or-wallet-1",
+    };
+    // Account currency stored lowercase, tx currency uppercase: a labelling
+    // difference, not a provable unit mismatch.
+    const result = await importOrTransactions("conn-1", [btcTx], depsFor(client, "btc"));
+
+    expect(result.imported).toBe(1);
+    expect(result.unitMismatch).toBe(0);
+    expect(result.netByAccount["acct-1"]).toBe(0.5);
+  });
+
+  it("still refuses sats vs BTC after case normalisation", async () => {
+    const { client } = makeFakeSupabase();
+    const result = await importOrTransactions("conn-1", [satsTx], depsFor(client, "btc"));
+
+    expect(result.imported).toBe(1);
+    expect(result.unitMismatch).toBe(1);
+    expect(result.netByAccount["acct-1"]).toBeUndefined();
+  });
+
   it("still credits when the account currency is unknown (cannot prove a mismatch)", async () => {
     const { client } = makeFakeSupabase();
     const result = await importOrTransactions("conn-1", [satsTx], {
