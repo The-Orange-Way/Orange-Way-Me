@@ -100,10 +100,16 @@ function allUnreadableMessage(count: number): string {
  * is technically complete and tells the customer nothing.
  */
 export function describeImportOutcome(counts: ImportCounts): ImportOutcome {
-  const { attempted, opened, imported, unmapped, untagged, errored, unreadable } = counts;
+  const { attempted, opened, imported, unmapped, untagged, errored, unreadable, unitMismatch } =
+    counts;
 
   const nothingHappened =
-    imported === 0 && unmapped === 0 && untagged === 0 && errored === 0 && unreadable === 0;
+    imported === 0 &&
+    unmapped === 0 &&
+    untagged === 0 &&
+    errored === 0 &&
+    unreadable === 0 &&
+    unitMismatch === 0;
   if (nothingHappened) {
     return { level: "info", message: "", allUnreadable: false, silent: true };
   }
