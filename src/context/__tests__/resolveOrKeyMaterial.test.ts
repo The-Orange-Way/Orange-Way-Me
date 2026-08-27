@@ -138,7 +138,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       row: {
         enc_or_mek_ciphertext: "sealed-blob",
         or_subkey_salt: "salt-at-pin-time",
-        or_key_epoch: 1,
+        or_key_epoch: CURRENT_OR_KEY_EPOCH,
       },
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
