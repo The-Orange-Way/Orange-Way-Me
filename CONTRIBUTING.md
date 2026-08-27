@@ -86,7 +86,7 @@ export E2E_VAULT_PASSWORD=...  # The vault password (the secret the
                                # client uses to derive the OPK key
                                # material; see /security for the
                                # full scheme)
-PLAYWRIGHT_BASE_URL=https://dev.orangeway.app \
+PLAYWRIGHT_BASE_URL=https://orangeway.dev \
   bunx playwright test --project=authenticated
 ```
 
