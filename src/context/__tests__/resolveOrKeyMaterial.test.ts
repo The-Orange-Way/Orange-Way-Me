@@ -17,6 +17,7 @@
  * in this environment.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CURRENT_OR_KEY_EPOCH } from "@/lib/or/or-key-material";
 
 const fromMock = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({
