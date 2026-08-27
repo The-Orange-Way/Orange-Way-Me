@@ -85,7 +85,8 @@ setup("authenticate the test user and unlock the vault", async ({ page }) => {
       throw new Error(
         `auth.setup.ts: PLAYWRIGHT_BASE_URL points at a production ` +
           `host (${host}). Refusing to run the authenticated harness ` +
-          `against prod. Point at dev.orangeway.app or a local preview.`,
+          `against prod. Point at https://orangeway.dev (the dev ` +
+          `deployment) or a local preview.`,
       );
     }
   } catch (err) {
