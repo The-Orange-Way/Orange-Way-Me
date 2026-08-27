@@ -62,6 +62,12 @@ describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () =
     });
 
     expect(result.ok).toBe(false);
+
+    // Any pin write on this path would be fire-and-forget, not awaited by
+    // resolveOrKeyMaterial (see the doc comment on that call site). Give it
+    // a macrotask tick to land before asserting it never started.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
     // The whole point: no table was ever touched.
     expect(fromMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
