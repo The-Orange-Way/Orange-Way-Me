@@ -126,6 +126,8 @@ describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () =
     if (result.ok) {
       expect(result.orMekBytes).toEqual(orMekBytes);
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fromMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
   });
