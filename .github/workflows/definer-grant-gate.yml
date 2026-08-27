@@ -1,0 +1,45 @@
+name: Definer grant gate
+
+# Refuses an EXECUTE grant to anon or to PUBLIC on any SECURITY DEFINER
+# function in the public schema of the dev project. The whole check, including
+# why it reads a live database rather than the migration files, is documented
+# in scripts/check-definer-grants.sh.
+#
+# This job is NOT a pull request check. A pull request cannot move the live
+# database, so a red here would be somebody else's drift blocking an unrelated
+# merge. It runs where the database can actually have changed: a push to dev,
+# and once a day for grants that arrive with no commit behind them at all.
+
+on:
+  push:
+    branches: [dev]
+  schedule:
+    - cron: '20 13 * * *'
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: 'Supabase project ref to inspect. Empty means the dev project. Set a ref that does not resolve to force the gate red, which is how the failure path is proven.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  definer-grants:
+    name: SECURITY DEFINER EXECUTE grants (live dev database)
+    runs-on: ubuntu-latest
+    # SUPABASE_ACCESS_TOKEN is defined per GitHub Environment, so a dev run
+    # never has the prod credential in scope. Same secret and same binding as
+    # the edge function deploy, so this adds no new credential to the repo.
+    environment: dev
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Refuse anon or PUBLIC EXECUTE on SECURITY DEFINER functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          # Empty on a push or a scheduled run, and the script falls back to
+          # the dev project ref. Only a manual run can point it elsewhere.
+          OW_DEV_PROJECT_REF: ${{ github.event.inputs.project_ref }}
+        run: bash scripts/check-definer-grants.sh
