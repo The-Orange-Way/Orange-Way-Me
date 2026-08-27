@@ -126,11 +126,15 @@ export interface OrImportResult {
    */
   blockedByOpeningDate: number;
   /**
-   * DL-1424. Rows whose amount unit did not match the destination account's
-   * currency (e.g. a satoshi integer routed into an account kept in whole
-   * BTC). The row is still imported with its own correct `enc_currency`; only
-   * the stored-balance credit is skipped, because adding the raw number would
-   * corrupt the balance by a factor of 1e8. Counted, never guessed.
+   * DL-1424. Number of times a balance credit was refused because the
+   * transaction's amount unit did not match a destination account's currency
+   * (e.g. a satoshi integer routed into an account kept in whole BTC).
+   * Counted per DESTINATION ACCOUNT, not per transaction: a transaction
+   * mapped to more than one account (the 1:N mapping loop) can add more than
+   * one to this count. The row is still imported with its own correct
+   * `enc_currency`; only the stored-balance credit is skipped, because adding
+   * the raw number would corrupt the balance by a factor of 1e8. Counted,
+   * never guessed.
    */
   unitMismatch: number;
 }
