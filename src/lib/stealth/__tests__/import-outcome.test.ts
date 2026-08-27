@@ -21,6 +21,7 @@ const NOTHING: ImportCounts = {
   untagged: 0,
   errored: 0,
   unreadable: 0,
+  unitMismatch: 0,
 };
 
 describe("describeImportOutcome", () => {
