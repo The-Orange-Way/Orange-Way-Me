@@ -240,6 +240,10 @@ function pickCurrency(tx: OrImportTransaction, accountCurrency: string | undefin
  * We never guess a conversion. Returns false ONLY for a provable mismatch:
  * when the account currency is unknown we cannot prove one, so we return true
  * and preserve the existing behaviour rather than silently stop crediting.
+ *
+ * The compare is case-insensitive: a difference of case ("btc" vs "BTC") is
+ * not a provable unit mismatch, only a labelling difference, so it must not
+ * refuse the credit.
  */
 function balanceUnitMatches(tx: OrImportTransaction, accountCurrency: string | undefined): boolean {
   const balanceUnit = accountCurrency?.trim();
@@ -250,7 +254,7 @@ function balanceUnitMatches(tx: OrImportTransaction, accountCurrency: string | u
       : tx.currency && tx.currency.trim().length > 0
         ? tx.currency.trim()
         : balanceUnit;
-  return amountUnit === balanceUnit;
+  return amountUnit.toUpperCase() === balanceUnit.toUpperCase();
 }
 
 /**
