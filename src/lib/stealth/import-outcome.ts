@@ -133,10 +133,20 @@ export function describeImportOutcome(counts: ImportCounts): ImportOutcome {
   if (unreadable > 0) {
     parts.push(`${unreadable} could not be opened`);
   }
+  // A refused balance credit is a real problem, not a status note: the
+  // transaction lands in the ledger but the account balance does not move
+  // by it. Say so in the same sentence rather than a silent success toast.
+  if (unitMismatch > 0) {
+    parts.push(`${unitMismatch} balance credit${unitMismatch === 1 ? "" : "s"} not applied (unit mismatch)`);
+  }
   if (errored > 0) parts.push(`${errored} errored`);
 
   const level: ImportOutcomeLevel =
-    errored > 0 || unreadable > 0 ? "warning" : unmapped > 0 || untagged > 0 ? "info" : "success";
+    errored > 0 || unreadable > 0 || unitMismatch > 0
+      ? "warning"
+      : unmapped > 0 || untagged > 0
+        ? "info"
+        : "success";
 
   return {
     level,
