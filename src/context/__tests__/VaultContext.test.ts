@@ -40,15 +40,6 @@ beforeEach(() => {
 });
 
 describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () => {
-  /**
-   * The assertion this ticket exists for. Recovery mints a new salt before
-   * asking for key material; when nothing was ever pinned, planOrKeyMaterial
-   * refuses (see or-key-material.test.ts: "refuses when nothing is pinned
-   * and the salt has just rotated"). resolveOrKeyMaterial must turn that
-   * refusal into "return ok:false" and touch vault_metadata NOT AT ALL -
-   * never derive-and-write a key that would open nothing while looking like
-   * a success.
-   */
   it("writes nothing to vault_metadata when recovery refuses an unpinned row", async () => {
     const mek = await makeMek();
 
@@ -62,22 +53,14 @@ describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () =
     });
 
     expect(result.ok).toBe(false);
-    // The whole point: no table was ever touched.
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
     expect(fromMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
     expect(eqMock).not.toHaveBeenCalled();
   });
 
-  /**
-   * Proves the assertion above is a real guard and not a tautology: if the
-   * write path recorded here had reached vault_metadata directly (the shape
-   * a regression would take, since pinOrKeyMaterial calls the exact same
-   * vaultTable().update(...).eq(...) chain this test mocks), the mock
-   * would have recorded it and the test above would fail. This does not
-   * call resolveOrKeyMaterial a second time; it exercises the identical
-   * mocked chain the way a regression in pinOrKeyMaterial would, so a
-   * reviewer can see the failure the first test is built to catch.
-   */
   it("the mock actually detects a write, so the assertion above is not vacuous", async () => {
     await fromMock("vault_metadata").update({
       enc_or_mek_ciphertext: "would-be-wrong",
@@ -90,12 +73,6 @@ describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () =
     expect(eqMock).toHaveBeenCalledTimes(1);
   });
 
-  /**
-   * The case that must keep working. A pinned row recovers normally even
-   * after the salt rotates, because it unwraps the sealed blob under the
-   * MEK recovery reaches through the recovery code; it does not re-derive.
-   * unwrap never calls pinOrKeyMaterial, so this must also write nothing.
-   */
   it("still unwraps a pinned row on the same rotated-salt recovery, and still writes nothing", async () => {
     const mek = await makeMek();
     const orMekBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -120,6 +97,8 @@ describe("resolveOrKeyMaterial (VaultContext caller of planOrKeyMaterial)", () =
     if (result.ok) {
       expect(result.orMekBytes).toEqual(orMekBytes);
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fromMock).not.toHaveBeenCalled();
     expect(updateMock).not.toHaveBeenCalled();
   });
