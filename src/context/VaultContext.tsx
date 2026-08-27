@@ -341,6 +341,9 @@ export async function resolveOrKeyMaterial(params: {
   // to deriving, is the original defect: after a rotation it produces a key
   // that opens nothing while looking exactly like success.
   if (plan.mode === "refuse") {
+    // DEV-0070 scratch: simulate a regression where the refuse branch still
+    // writes. This line must never exist outside this throwaway branch.
+    void pinOrKeyMaterial({ userId, mek, orMekBytes: new Uint8Array(32), saltContext: kdfSalt, epoch: 1 });
     return { ok: false, reason: plan.reason };
   }
 
