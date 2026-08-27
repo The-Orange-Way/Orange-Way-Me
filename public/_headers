@@ -9,15 +9,21 @@
 #     verbatim into dist/_headers, so anything that skips or fails the deploy
 #     CSP step serves Report-Only: a missing report, never a vault lockout.
 #   - On the dev branch, the deploy flips the header NAME in place, from
-#     Content-Security-Policy-Report-Only to Content-Security-Policy, touching
-#     no other character of the policy body. On the prod branch the deploy
+#     Content-Security-Policy-Report-Only to Content-Security-Policy, AND
+#     rewrites the report-uri destination to the dev GlitchTip project,
+#     derived from VITE_SENTRY_DSN_DEV (DL-1803), so a violation raised on dev
+#     is never filed against the production project. Those two are the only
+#     differences between environments: the directive list is identical, and
+#     the deploy refuses the build if it is not. On the prod branch the deploy
 #     verifies the policy is present and leaves it Report-Only: the enforce
 #     flip is deferred (DL-1351) until the gate below is met, and the prod arm
 #     refuses a build carrying an enforcing header. There is no second policy
 #     file to drift against. An unknown branch fails the deploy loudly.
 #
-# report-uri is kept under both names: an enforcing policy still reports, and
-# those reports are how a real break is caught. frame-ancestors and report-uri
+# The report-uri written below is the PRODUCTION destination. Changing it moves
+# prod reports, not dev ones; dev is rewritten at deploy time from the dev DSN.
+# report-uri is kept under both header names: an enforcing policy still reports,
+# and those reports are how a real break is caught. frame-ancestors and report-uri
 # can only be delivered as a header, never via <meta>.
 #
 # Prod flips to enforcing only after dev has run 48 hours clean under
