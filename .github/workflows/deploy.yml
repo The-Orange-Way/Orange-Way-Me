@@ -293,8 +293,11 @@ jobs:
           DEV_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN_DEV }}
         # public/_headers is the single source and ships Report-Only; vite
         # copies it verbatim to dist/_headers. On dev, flip the header NAME up
-        # to enforcing IN PLACE, touching no other character of the policy
-        # body. On prod, verify the policy and leave it Report-Only: the
+        # to enforcing IN PLACE and rewrite the report-uri destination to the
+        # dev GlitchTip project (DL-1803). Those two are the ONLY differences
+        # between environments, and the step refuses the build if the directive
+        # list itself differs. On prod, verify the policy and leave it
+        # Report-Only: the
         # enforce flip is deferred (DL-1351) until dev has run 48h clean under
         # enforcement and QA has passed, so a dev to prod promotion carries no
         # premature enforcement. There is no second file to drift against. An
