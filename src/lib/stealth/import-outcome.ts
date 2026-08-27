@@ -40,6 +40,14 @@ export interface ImportCounts {
   errored: number;
   /** Rows that failed to open, or opened and failed to parse. */
   unreadable: number;
+  /**
+   * DL-1424 / DEV-0064. Balance credits refused because the transaction's
+   * amount unit did not match the destination account's currency. The row
+   * still imported; only the stored balance was not updated for it. Must be
+   * told to the customer, because otherwise a transaction appears in the
+   * ledger while the account balance silently does not reflect it.
+   */
+  unitMismatch: number;
 }
 
 export type ImportOutcomeLevel = "success" | "info" | "warning";
