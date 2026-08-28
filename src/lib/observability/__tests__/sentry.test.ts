@@ -119,4 +119,23 @@ describe("Sentry init no-PII contract", () => {
     mod.initSentry();
     expect(initMock).toHaveBeenCalledTimes(1);
   });
+
+  it("redacts stealth wallet key fields before sending events", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: {
+        or_stealth_key_b64: "secret-a",
+        stealth_key: "secret-b",
+        credKeyB64: "secret-c",
+        label: "safe context",
+      },
+    }) as { extra: Record<string, unknown> };
+
+    expect(scrubbed.extra.or_stealth_key_b64).toBe("[redacted]");
+    expect(scrubbed.extra.stealth_key).toBe("[redacted]");
+    expect(scrubbed.extra.credKeyB64).toBe("[redacted]");
+    expect(scrubbed.extra.label).toBe("safe context");
+  });
 });

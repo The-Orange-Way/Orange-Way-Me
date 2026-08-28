@@ -34,6 +34,18 @@ describe("posthog scrubber", () => {
     expect(r?.properties.random).toBe(1);
   });
 
+  it("redacts stealth wallet key fields", () => {
+    const r = event({
+      or_stealth_key_b64: "secret-a",
+      stealth_key: "secret-b",
+      credKeyB64: "secret-c",
+    });
+
+    expect(r?.properties.or_stealth_key_b64).toBe("[redacted]");
+    expect(r?.properties.stealth_key).toBe("[redacted]");
+    expect(r?.properties.credKeyB64).toBe("[redacted]");
+  });
+
   it("does NOT redact innocent keys that lack a $ prefix or hint", () => {
     const r = event({ window_width: 1024, page_count: 3 });
     expect(r?.properties.window_width).toBe(1024);
