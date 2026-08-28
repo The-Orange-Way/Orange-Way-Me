@@ -40,6 +40,18 @@ const SCRUB_VALUE_KEY_HINTS = [
   "notes",
   "name",
   "token",
+  // Key material. These are substring hints, so "key" alone covers
+  // cred_key, txn_key, credKeyB64 and the wallet sync key field in one
+  // rule rather than being extended a name at a time. Over-matching an
+  // innocent property such as "keyboard" costs one analytics field;
+  // under-matching can cost a user their funds.
+  "key",
+  "stealth",
+  "seed",
+  "secret",
+  // Not secret, but an extended public key derives every address and
+  // balance a household owns.
+  "xpub",
 ];
 
 // PostHog reserved auto-capture properties that carry quasi-identifiers.
