@@ -1392,6 +1392,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const newHmacSalt = randomBytesB64(16);
     const iterations = 600_000;
 
+    // DEV-0049 / DL-2266. If this row had no Orange Rails material pinned
+    // before this recovery, the rotation below is about to leave it with
+    // three null OR columns under a brand new salt -- indistinguishable from
+    // a vault that never had OR material at all. Recording the pre-rotation
+    // salt (already read above, already needed for the keypair re-wrap)
+    // turns that into a half-established row, which planOrKeyMaterial
+    // refuses permanently rather than a state that reads as "safe to derive
+    // and pin" on the very next unlock.
+    const hadNoOrMaterialBeforeRecovery =
+      !data.enc_or_mek_ciphertext && !data.or_subkey_salt && data.or_key_epoch == null;
+
     const mek = await importMekFromRaw(mekBytes);
     const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
     // Recovery always promotes the vault to the current best KDF.
