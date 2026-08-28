@@ -128,6 +128,34 @@ describe("posthog scrubber", () => {
     expect(r?.properties.notes_field_x).toBe("[redacted]");
   });
 
+  it("redacts key-material property names, including the wallet sync key field", () => {
+    const r = event({
+      or_stealth_key_b64: "a".repeat(44),
+      credKeyB64: "b".repeat(44),
+      cred_key: "c",
+      seed_phrase: "d",
+      my_secret: "e",
+      xpub_value: "f",
+      innocent: "ok",
+    });
+    expect(r?.properties.or_stealth_key_b64).toBe("[redacted]");
+    expect(r?.properties.credKeyB64).toBe("[redacted]");
+    expect(r?.properties.cred_key).toBe("[redacted]");
+    expect(r?.properties.seed_phrase).toBe("[redacted]");
+    expect(r?.properties.my_secret).toBe("[redacted]");
+    expect(r?.properties.xpub_value).toBe("[redacted]");
+    expect(r?.properties.innocent).toBe("ok");
+  });
+
+  it("redacts key material nested inside a property object", () => {
+    const r = event({
+      ctx: { or_stealth_key_b64: "a".repeat(44), label: "innocent" },
+    });
+    const ctx = r?.properties.ctx as Record<string, unknown>;
+    expect(ctx.or_stealth_key_b64).toBe("[redacted]");
+    expect(ctx.label).toBe("innocent");
+  });
+
   it("passes null events through unchanged", () => {
     expect(scrubPostHogEvent(null)).toBeNull();
   });
