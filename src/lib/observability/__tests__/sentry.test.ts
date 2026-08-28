@@ -138,4 +138,27 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.extra.credKeyB64).toBe("[redacted]");
     expect(scrubbed.extra.label).toBe("safe context");
   });
+
+  it("redacts a token in event.message (string form), the captureMessage path", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      message: "manual capture failed: access_token=super-secret-value",
+    }) as { message: string };
+
+    expect(scrubbed.message).not.toContain("super-secret-value");
+    expect(scrubbed.message).toContain("access_token=[redacted]");
+  });
+
+  it("redacts a token in event.message (object form { message, params })", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      message: { message: "Bearer abc123.def456.ghi789 rejected", params: [] },
+    }) as { message: { message: string } };
+
+    expect(scrubbed.message.message).toBe("Bearer [redacted] rejected");
+  });
 });
