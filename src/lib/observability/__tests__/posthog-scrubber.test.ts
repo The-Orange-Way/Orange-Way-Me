@@ -46,6 +46,24 @@ describe("posthog scrubber", () => {
     expect(r?.properties.credKeyB64).toBe("[redacted]");
   });
 
+  it("redacts seed, secret and xpub key names (DL-1584)", () => {
+    const r = event({
+      seed: "abandon abandon abandon",
+      wallet_seed: "abandon abandon abandon",
+      my_secret: "s".repeat(20),
+      xpub: "xpub6D4BDPcP2GT...",
+      wallet_xpub: "xpub6D4BDPcP2GT...",
+      label: "safe context",
+    });
+
+    expect(r?.properties.seed).toBe("[redacted]");
+    expect(r?.properties.wallet_seed).toBe("[redacted]");
+    expect(r?.properties.my_secret).toBe("[redacted]");
+    expect(r?.properties.xpub).toBe("[redacted]");
+    expect(r?.properties.wallet_xpub).toBe("[redacted]");
+    expect(r?.properties.label).toBe("safe context");
+  });
+
   it("does NOT redact innocent keys that lack a $ prefix or hint", () => {
     const r = event({ window_width: 1024, page_count: 3 });
     expect(r?.properties.window_width).toBe(1024);
