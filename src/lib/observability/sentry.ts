@@ -20,7 +20,8 @@
  *
  * What gets scrubbed before send:
  *   - object keys matching SECRET_KEY_PATTERNS (password, mek, opk, vault_*,
- *     recovery (any recovery* field), cred_key, txn_key, seed, private_key, api_key,
+ *     recovery (any recovery* field), cred_key, txn_key, seed, secret,
+ *     private_key, api_key, xpub, any key name containing "key",
  *     access_token, refresh_token, authorization, jwt, service_role,
  *     decrypted_*, plus plaintext field names like merchant/description)
  *   - string fields run through TOKEN_PATTERNS (URL fragments, query strings,
@@ -29,6 +30,9 @@
  *   - console-category breadcrumbs at level "log" are dropped entirely — they
  *     would otherwise leak DEV-only fingerprints if anyone ever bypassed the
  *     import.meta.env.DEV gate on the key-fingerprint logs.
+ *   - if the scrubber itself throws while walking a payload, the event or
+ *     breadcrumb is DROPPED rather than sent half-scrubbed. See the
+ *     try/catch in beforeSend/beforeBreadcrumb below.
  *
  * Companion changes:
  *   - main.tsx calls initSentry() before React mounts.
@@ -66,6 +70,7 @@ const SECRET_KEY_PATTERNS = [
   /key/i,
   /txn_key/i,
   /seed/i,
+  /secret/i,
   /private_key/i,
   /privatekey/i,
   /api_key/i,
@@ -92,6 +97,12 @@ const SECRET_KEY_PATTERNS = [
   /widget_token/i,
   /quick_?connect/i,
   /link_token/i,
+  // An extended public key is not secret on its own, but it derives every
+  // address and balance a household owns, so it never belongs in an error
+  // payload either. DL-1584: this was the gap /key/i and the stealth-key
+  // patterns above did not close, because "xpub" contains neither "key"
+  // nor "stealth".
+  /xpub/i,
 ];
 
 /**
@@ -244,7 +255,17 @@ export function initSentry(): void {
     // silently vacuous. The companion test asserts each name is
     // dropped against a synthetic defaults list.
     integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
-    beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
+    // Fail closed. If the scrubber throws for any reason, drop the event
+    // rather than hand the SDK a payload we did not finish scrubbing. A
+    // report we never see costs us debugging; an unscrubbed one costs a
+    // user their privacy. DL-1584.
+    beforeSend: (event) => {
+      try {
+        return scrubEventLoose(event) as Sentry.ErrorEvent;
+      } catch {
+        return null;
+      }
+    },
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
       // BrowserClient grabs every console call by default. We only want
@@ -255,8 +276,13 @@ export function initSentry(): void {
         const level = (bc.level ?? "log").toLowerCase();
         if (level !== "error" && level !== "warn") return null;
       }
-      if (bc.message) bc.message = scrubString(bc.message);
-      if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+      try {
+        if (bc.message) bc.message = scrubString(bc.message);
+        if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+      } catch {
+        // Fail closed, same reasoning as beforeSend above.
+        return null;
+      }
       return bc;
     },
   });
