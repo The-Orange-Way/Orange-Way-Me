@@ -27,6 +27,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { logSecurityEvent } from "@/lib/audit";
+import { captureMessage } from "@/lib/observability/sentry";
 import {
   CURRENT_VAULT_KEY_VERSION,
   KEY_DERIVATION_STRATEGIES,
@@ -431,7 +432,7 @@ async function pinOrKeyMaterial(params: {
           or_key_epoch: epoch,
         })
         .eq("user_id", userId);
-      if (error) throw new Error(error.message);
+      if (error) throw error;
       return;
     } catch (e) {
       lastPinError = e;
@@ -442,6 +443,54 @@ async function pinOrKeyMaterial(params: {
     "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
     lastPinError,
   );
+
+  // Monitoring only, DEV-0185: the retries above are the correctness path,
+  // this is how we find out a whole class of accounts stopped pinning
+  // without waiting for a customer to report lost history. Fires once, on
+  // the final failure only -- a retried-and-succeeded write reports nothing.
+  // Payload is an event name, a failure class and the attempt count. No key
+  // material, no salt, no ciphertext, no user id.
+  try {
+    captureMessage("or_pin_write_exhausted", {
+      level: "error",
+      tags: {
+        source: "vault.pinOrKeyMaterial",
+        failureClass: classifyPinFailure(lastPinError),
+        attempts: String(PIN_WRITE_BACKOFF_MS.length),
+      },
+    });
+  } catch {
+    // Sentry not initialized (VITE_SENTRY_DSN unset) -- swallow. The
+    // console.error above remains the primary signal in that case.
+  }
+}
+
+/**
+ * Classifies a failed pin write into a coarse, PII-free bucket for
+ * monitoring. Never inspects payload contents -- only the Postgrest error
+ * shape (code / message) or a generic JS error's own message.
+ */
+function classifyPinFailure(e: unknown): "network" | "permission" | "constraint" | "unknown" {
+  const code = (e as { code?: string } | null)?.code;
+  const message = e instanceof Error ? e.message : String((e as { message?: unknown })?.message ?? e ?? "");
+  const lower = message.toLowerCase();
+
+  if (code === "42501" || lower.includes("permission denied") || lower.includes("row-level security")) {
+    return "permission";
+  }
+  if (code?.startsWith("23") || lower.includes("violates") || lower.includes("constraint")) {
+    return "constraint";
+  }
+  if (
+    e instanceof TypeError ||
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed") ||
+    lower.includes("fetch failed")
+  ) {
+    return "network";
+  }
+  return "unknown";
 }
 
 interface VaultMetadataRow {
