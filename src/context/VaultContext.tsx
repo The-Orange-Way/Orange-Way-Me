@@ -315,7 +315,7 @@ function sleep(ms: number): Promise<void> {
  * a well formed key that opens nothing and reports success, which is precisely
  * the failure being removed.
  */
-async function resolveOrKeyMaterial(params: {
+export async function resolveOrKeyMaterial(params: {
   userId: string;
   password: string;
   mek: CryptoKey;
