@@ -62,7 +62,9 @@ bun run build && bun run preview &
 bunx playwright install chromium
 bunx playwright test --project=chromium
 
-# Or point at a deployed environment:
+# Or point at the deployed dev environment (orangeway.dev is the dev
+# deployment; deploy.yml publishes ref dev there. Production is
+# orangeway.app and the authenticated suite refuses to run against it):
 PLAYWRIGHT_BASE_URL=https://orangeway.dev bunx playwright test --project=chromium
 ```
 
@@ -86,7 +88,7 @@ export E2E_VAULT_PASSWORD=...  # The vault password (the secret the
                                # client uses to derive the OPK key
                                # material; see /security for the
                                # full scheme)
-PLAYWRIGHT_BASE_URL=https://dev.orangeway.app \
+PLAYWRIGHT_BASE_URL=https://orangeway.dev \
   bunx playwright test --project=authenticated
 ```
 
