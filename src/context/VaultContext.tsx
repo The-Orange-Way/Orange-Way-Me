@@ -432,17 +432,68 @@ async function pinOrKeyMaterial(params: {
           or_key_epoch: epoch,
         })
         .eq("user_id", userId);
-      if (error) throw new Error(error.message);
+      // Throw the original Postgrest error object, not a re-wrapped Error,
+      // so the final-failure branch below can classify it by error code
+      // rather than by parsing the message text.
+      if (error) throw error;
       return;
     } catch (e) {
       lastPinError = e;
     }
   }
 
+  // Every attempt in PIN_WRITE_BACKOFF_MS is now exhausted. This is the one
+  // branch that reports: a retried-and-succeeded write above never reaches
+  // here, so this fires only on a real, durable failure (DEV-0185). The
+  // payload is deliberately tiny and carries no key material, no vault
+  // secret and no user identifier — just which kind of failure it was and
+  // how many attempts were made. captureMessage no-ops when Sentry has no
+  // DSN configured (see src/lib/observability/sentry.ts).
+  captureMessage("vault.or_pin_write_exhausted", {
+    level: "error",
+    extra: {
+      failureClass: classifyPinWriteFailure(lastPinError),
+      attempts: PIN_WRITE_BACKOFF_MS.length,
+    },
+  });
+
   console.error(
     "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
     lastPinError,
   );
+}
+
+/**
+ * Buckets a pin-write failure into a coarse class for the exhausted-retries
+ * report. Deliberately coarse: the goal is "is this systematic and does it
+ * need a human", not a full diagnostic, so nothing beyond this string and
+ * the attempt count leaves the browser (see pinOrKeyMaterial above).
+ */
+function classifyPinWriteFailure(
+  e: unknown,
+): "network" | "permission_denied" | "constraint" | "unknown" {
+  if (e instanceof TypeError) return "network";
+  if (e && typeof e === "object") {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string") {
+      if (code === "42501") return "permission_denied";
+      if (code.startsWith("23")) return "constraint";
+    }
+    const message = (e as { message?: unknown }).message;
+    if (typeof message === "string") {
+      const m = message.toLowerCase();
+      if (m.includes("permission denied") || m.includes("row-level security") || m.includes(" rls ")) {
+        return "permission_denied";
+      }
+      if (m.includes("violates") || m.includes("constraint")) {
+        return "constraint";
+      }
+      if (m.includes("failed to fetch") || m.includes("network")) {
+        return "network";
+      }
+    }
+  }
+  return "unknown";
 }
 
 interface VaultMetadataRow {
