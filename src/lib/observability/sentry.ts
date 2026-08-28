@@ -21,6 +21,7 @@
  * What gets scrubbed before send:
  *   - object keys matching SECRET_KEY_PATTERNS (password, mek, opk, vault_*,
  *     recovery (any recovery* field), cred_key, txn_key, seed, private_key, api_key,
+ *     any key name containing "key", "stealth" or "xpub",
  *     access_token, refresh_token, authorization, jwt, service_role,
  *     decrypted_*, plus plaintext field names like merchant/description)
  *   - string fields run through TOKEN_PATTERNS (URL fragments, query strings,
@@ -89,6 +90,18 @@ const SECRET_KEY_PATTERNS = [
   /widget_token/i,
   /quick_?connect/i,
   /link_token/i,
+  // Wallet sync key fields. The specific patterns above matched none of
+  // the newest ones, which is what motivated the catch-all below.
+  /stealth/i,
+  // An extended public key is not secret, but it derives every address and
+  // balance a household owns, so it never belongs in an error payload.
+  /xpub/i,
+  // Deliberately broad catch-all, kept LAST so the specific patterns above
+  // still document the fields we know about. Any object key whose name
+  // contains "key" is treated as key material. Over-matching something
+  // harmless like "keyboard" costs one debugging field; under-matching can
+  // cost a user their funds.
+  /key/i,
 ];
 
 /**
@@ -241,7 +254,17 @@ export function initSentry(): void {
     // silently vacuous. The companion test asserts each name is
     // dropped against a synthetic defaults list.
     integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
-    beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
+    // Fail closed. If the scrubber throws for any reason, drop the event
+    // rather than hand the SDK a payload we did not finish scrubbing. A
+    // report we never see costs us debugging; an unscrubbed one costs a
+    // user their privacy.
+    beforeSend: (event) => {
+      try {
+        return scrubEventLoose(event) as Sentry.ErrorEvent;
+      } catch {
+        return null;
+      }
+    },
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
       // BrowserClient grabs every console call by default. We only want
@@ -252,8 +275,13 @@ export function initSentry(): void {
         const level = (bc.level ?? "log").toLowerCase();
         if (level !== "error" && level !== "warn") return null;
       }
-      if (bc.message) bc.message = scrubString(bc.message);
-      if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+      try {
+        if (bc.message) bc.message = scrubString(bc.message);
+        if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+      } catch {
+        // Fail closed, same reasoning as beforeSend above.
+        return null;
+      }
       return bc;
     },
   });
