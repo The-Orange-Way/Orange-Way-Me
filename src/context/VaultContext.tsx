@@ -27,6 +27,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { logSecurityEvent } from "@/lib/audit";
+import { captureMessage } from "@/lib/observability/sentry";
 import {
   CURRENT_VAULT_KEY_VERSION,
   KEY_DERIVATION_STRATEGIES,
