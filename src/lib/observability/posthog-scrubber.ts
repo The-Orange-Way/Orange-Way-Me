@@ -43,6 +43,16 @@ const SCRUB_VALUE_KEY_HINTS = [
   "notes",
   "name",
   "token",
+  // DL-1584: these three were missing from this list even though the
+  // Sentry side (sentry.ts SECRET_KEY_PATTERNS) covers them, either via
+  // an explicit pattern or via the broad /key/i catch-all. "seed" and
+  // "secret" do not contain the substring "key", so the existing "key"
+  // hint above never caught a bare `seed` or `my_secret` property, and
+  // "xpub" is not secret material at all but derives every address and
+  // balance a household owns.
+  "seed",
+  "secret",
+  "xpub",
 ];
 
 // PostHog reserved auto-capture properties that carry quasi-identifiers.
