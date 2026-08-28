@@ -134,6 +134,14 @@ if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
   RESERVED_TERMS="$(grep -vE '^[[:space:]]*(#|$)' .reserved-terms | paste -sd'|' -)"
 fi
 
+# Withhold matched text when running in CI. A CI log on a public repository
+# is public, and the reserved-term category matches strings that are internal
+# by definition, so printing the offending line there publishes the very
+# thing this scan exists to keep out of the tree. Locally the full line is
+# what makes a finding fixable, so it is printed in full. CI is set by GitHub
+# Actions and by most other runners.
+REDACT_MATCHES="${CI:+1}"
+
 EXIT_CODE=0
 
 # ----------------------------------------------------------------------
@@ -145,12 +153,16 @@ EXIT_CODE=0
 #   $2  grep pattern (extended regex)
 #   $3  grep flags (e.g. -i for case-insensitive). Empty string for none.
 #   $4  extra-exemption pattern (extended regex). Empty string for none.
+#   $5  "1" to print file:line only and withhold the matched text. Set it for
+#       any category whose pattern comes from the internal list. Empty for
+#       the hardcoded categories, whose matches are safe to show.
 
 scan() {
   local name="$1"
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
+  local redact="${5:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -190,7 +202,16 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31m✗\033[0m  %s (%d findings)\n" "$name" "$count"
-  printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
+
+  if [[ -n "$redact" ]]; then
+    # file:line only. The matched text is an internal string by definition,
+    # so it must never reach a log that may be public.
+    printf '%s\n' "$filtered" | cut -d: -f1,2 | sed 's/^/      /' | head -30
+    printf "      (matched text withheld; run this scan locally to see it)\n"
+  else
+    printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
+  fi
+
   if [[ "$count" -gt 30 ]]; then
     printf "      ... %d more\n" "$((count - 30))"
   fi
@@ -226,7 +247,8 @@ if [[ -n "$RESERVED_TERMS" ]]; then
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
        "" \
-       ""
+       "" \
+       "$REDACT_MATCHES"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
