@@ -1468,6 +1468,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       recovery_ciphertext: freshRecovery,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
+      // See hadNoOrMaterialBeforeRecovery above. Marks the row so the next
+      // unlock refuses instead of silently re-pinning under this salt.
+      ...(hadNoOrMaterialBeforeRecovery ? { or_subkey_salt: data.kdf_salt } : {}),
     };
     // Only include enc_private_key in the payload when we had one to
     // re-wrap. Leaving the key out of the UPDATE preserves the existing
