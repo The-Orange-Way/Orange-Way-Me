@@ -138,4 +138,21 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.extra.credKeyB64).toBe("[redacted]");
     expect(scrubbed.extra.label).toBe("safe context");
   });
+
+  it("redacts token patterns in top-level event.message (captureMessage path)", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+
+    const scrubbedString = cfg.beforeSend({
+      message: "login failed access_token=abc123.def456.ghi789",
+    }) as { message: string };
+    expect(scrubbedString.message).not.toContain("abc123.def456.ghi789");
+
+    const scrubbedObject = cfg.beforeSend({
+      message: { message: "bearer Bearer abc123.def456.ghi789", params: ["x"] },
+    }) as { message: { message: string; params: unknown[] } };
+    expect(scrubbedObject.message.message).not.toContain("abc123.def456.ghi789");
+    expect(scrubbedObject.message.params).toEqual(["x"]);
+  });
 });
