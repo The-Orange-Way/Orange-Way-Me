@@ -1084,15 +1084,22 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // is not worse than the status quo, where that material is password
     // derived directly. Writing a second code path for a shape no row in the
     // system has would mean shipping a branch no test can reach.
+    // Computed, not asserted (DEV-0049). An unlock never rotates kdf_salt
+    // itself, but that says nothing about whether something ELSE rotated it
+    // while the Orange Rails material was unpinned (recovery, before the
+    // paired fix below). The only signal stored for that today is a
+    // half-established row: or_subkey_salt present, enc_or_mek_ciphertext
+    // absent. planOrKeyMaterial refuses that shape unconditionally already
+    // (the anyPresent check runs before this flag is read), so this makes
+    // the assertion honest rather than changing behaviour for that case.
+    const saltRotatedWhileUnpinned = Boolean(row.or_subkey_salt) && !row.enc_or_mek_ciphertext;
     const orMaterial = await resolveOrKeyMaterial({
       userId: user.id,
       password,
       mek,
       row,
       kdfSalt: row.kdf_salt,
-      // An unlock does not rotate the salt, so deriving here reproduces the
-      // same key the existing rows were sealed under.
-      saltMatchesExistingRows: true,
+      saltMatchesExistingRows: !saltRotatedWhileUnpinned,
     });
 
     mekRef.current = mek;
