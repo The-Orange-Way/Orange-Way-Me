@@ -496,6 +496,19 @@ function classifyPinWriteFailure(
   return "unknown";
 }
 
+/**
+ * Test-only surface. Nothing outside src/context/__tests__ should import
+ * this: it exists because pinOrKeyMaterial and classifyPinWriteFailure are
+ * otherwise module-private, and DEV-0185 needs to force the retry loop to
+ * exhaust and assert on the resulting report without driving a full vault
+ * unlock through the public context API.
+ */
+export const __testing = {
+  pinOrKeyMaterial,
+  classifyPinWriteFailure,
+  PIN_WRITE_BACKOFF_MS,
+};
+
 interface VaultMetadataRow {
   user_id: string;
   kdf_salt: string;
