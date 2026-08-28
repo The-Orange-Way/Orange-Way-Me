@@ -1084,15 +1084,22 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // is not worse than the status quo, where that material is password
     // derived directly. Writing a second code path for a shape no row in the
     // system has would mean shipping a branch no test can reach.
+    // Computed, not asserted (DEV-0049). An unlock never rotates kdf_salt
+    // itself, but that says nothing about whether something ELSE rotated it
+    // while the Orange Rails material was unpinned (recovery, before the
+    // paired fix below). The only signal stored for that today is a
+    // half-established row: or_subkey_salt present, enc_or_mek_ciphertext
+    // absent. planOrKeyMaterial refuses that shape unconditionally already
+    // (the anyPresent check runs before this flag is read), so this makes
+    // the assertion honest rather than changing behaviour for that case.
+    const saltRotatedWhileUnpinned = Boolean(row.or_subkey_salt) && !row.enc_or_mek_ciphertext;
     const orMaterial = await resolveOrKeyMaterial({
       userId: user.id,
       password,
       mek,
       row,
       kdfSalt: row.kdf_salt,
-      // An unlock does not rotate the salt, so deriving here reproduces the
-      // same key the existing rows were sealed under.
-      saltMatchesExistingRows: true,
+      saltMatchesExistingRows: !saltRotatedWhileUnpinned,
     });
 
     mekRef.current = mek;
@@ -1385,6 +1392,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const newHmacSalt = randomBytesB64(16);
     const iterations = 600_000;
 
+    // DEV-0049 / DL-2266. If this row had no Orange Rails material pinned
+    // before this recovery, the rotation below is about to leave it with
+    // three null OR columns under a brand new salt -- indistinguishable from
+    // a vault that never had OR material at all. Recording the pre-rotation
+    // salt (already read above, already needed for the keypair re-wrap)
+    // turns that into a half-established row, which planOrKeyMaterial
+    // refuses permanently rather than a state that reads as "safe to derive
+    // and pin" on the very next unlock.
+    const hadNoOrMaterialBeforeRecovery =
+      !data.enc_or_mek_ciphertext && !data.or_subkey_salt && data.or_key_epoch == null;
+
     const mek = await importMekFromRaw(mekBytes);
     const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
     // Recovery always promotes the vault to the current best KDF.
@@ -1450,6 +1468,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       recovery_ciphertext: freshRecovery,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
+      // See hadNoOrMaterialBeforeRecovery above. Marks the row so the next
+      // unlock refuses instead of silently re-pinning under this salt.
+      ...(hadNoOrMaterialBeforeRecovery ? { or_subkey_salt: data.kdf_salt } : {}),
     };
     // Only include enc_private_key in the payload when we had one to
     // re-wrap. Leaving the key out of the UPDATE preserves the existing
