@@ -291,6 +291,15 @@ function scrubEventLoose(event: unknown): unknown {
   }
   if (typeof e.transaction === "string") e.transaction = scrubString(e.transaction);
 
+  if (typeof e.message === "string") {
+    e.message = scrubString(e.message);
+  } else if (e.message && typeof e.message === "object") {
+    const msgObj = e.message as Record<string, unknown>;
+    if (typeof msgObj.message === "string") {
+      e.message = { ...msgObj, message: scrubString(msgObj.message) };
+    }
+  }
+
   const breadcrumbs = e.breadcrumbs as
     | Array<{
         message?: string;
