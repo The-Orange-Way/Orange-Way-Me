@@ -64,6 +64,43 @@ describe("Sentry init no-PII contract", () => {
     expect(cfg.tracesSampleRate).toBe(0);
   });
 
+  it("redacts key material anywhere in the payload, by name", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: {
+        or_stealth_key_b64: "a".repeat(44),
+        credKeyB64: "b".repeat(44),
+        xpub: "xpub-value",
+        innocent: "ok",
+      },
+      contexts: { wallet: { stealth_key: "c".repeat(44) } },
+    });
+    expect(scrubbed.extra.or_stealth_key_b64).toBe("[redacted]");
+    expect(scrubbed.extra.credKeyB64).toBe("[redacted]");
+    expect(scrubbed.extra.xpub).toBe("[redacted]");
+    expect(scrubbed.extra.innocent).toBe("ok");
+    expect(scrubbed.contexts.wallet.stealth_key).toBe("[redacted]");
+  });
+
+  it("drops the event instead of sending it when the scrubber throws", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    // A throwing getter is the cheapest way to fail the scrubber partway
+    // through walking a payload. The point of the assertion is that a
+    // half-scrubbed event never reaches the network.
+    const hostile = {};
+    Object.defineProperty(hostile, "extra", {
+      enumerable: true,
+      get() {
+        throw new Error("scrubber blew up");
+      },
+    });
+    expect(cfg.beforeSend(hostile)).toBeNull();
+  });
+
   it("drops every name in DROPPED_INTEGRATIONS and keeps every other safe default", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();
