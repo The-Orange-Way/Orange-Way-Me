@@ -95,6 +95,20 @@ check 'a term with an internal space keeps it' \
   'zz alpha|zzbravo' \
   "$(printf '  zz alpha  \nzzbravo\n' | canon_terms)"
 
+# A line is documented as a regex FRAGMENT, so "termA|termB" on one line is
+# invited, and editing it back down to one term leaves the trailing pipe
+# behind. paste then joins it into "termA||termB". An empty alternation
+# branch matches the empty string, which is contained in every line, so the
+# scan stops being a search and becomes a refusal of the whole tree, with a
+# term count next to it that still reads correct.
+check 'a stray pipe on a fragment cannot become an empty branch' \
+  'zzalpha|zzbravo' \
+  "$(printf 'zzalpha|\nzzbravo\n' | canon_terms)"
+
+check 'runs of separators anywhere in the value are squeezed to one' \
+  'zzalpha|zzbravo|zzcharlie' \
+  "$(printf '||zzalpha||\n|zzbravo|||zzcharlie|\n' | canon_terms)"
+
 # ----------------------------------------------------------------------
 # Behaviour, not shape. The cases below are the reason this file is worth
 # running.
@@ -196,6 +210,31 @@ check 'a fragment grep cannot compile is refused, not silently accepted' \
 # dropped the line and handed back something harmless.
 check 'the broken fixture really did reach the pattern' \
   'zzalpha|zz(bravo' "$BROKEN_PATTERN"
+
+# The empty-branch pattern COMPILES, so the refusal above cannot see it. It
+# is built here by hand rather than through canon_terms, which now removes
+# the empty branch at the source: routing the fixture through the fix would
+# test the fix instead of the guard, and the guard has to hold for any value
+# that reaches it, including one a future consumer builds its own way.
+if canon_terms_usable 'zzalpha||zzbravo'; then
+  EVERYTHING_VERDICT=usable
+else
+  EVERYTHING_VERDICT=refused
+fi
+check 'a pattern that matches everything is refused, not reported usable' \
+  'refused' "$EVERYTHING_VERDICT"
+
+# And the fixture really is the hazard, not a strawman: the same pattern
+# matches a line holding no reserved term at all. If this case ever reports
+# "missed", the refusal above is passing for some other reason and proves
+# nothing.
+if printf '%s\n' 'an ordinary line with no reserved term in it' | grep -qE 'zzalpha||zzbravo'; then
+  EVERYTHING_MATCHES=matched
+else
+  EVERYTHING_MATCHES=missed
+fi
+check 'the everything fixture does match text containing no term' \
+  'matched' "$EVERYTHING_MATCHES"
 
 if canon_terms_usable ""; then
   EMPTY_VERDICT=usable
