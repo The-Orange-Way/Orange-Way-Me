@@ -126,7 +126,8 @@ case "$HTTP_CODE" in
   head -c 400 "$BODY_FILE" || true
   echo
   cannot_check "the query returned HTTP ${HTTP_CODE} for project ${PROJECT_REF}"
-fi
+  ;;
+esac
 
 REPORT=$(jq -c '.[0].report // empty' "$BODY_FILE" 2>/dev/null)
 [ -n "$REPORT" ] || cannot_check "the response did not contain the expected report object"
