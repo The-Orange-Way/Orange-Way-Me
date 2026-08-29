@@ -122,12 +122,32 @@ push_base() {
 # publish the very strings it exists to keep out of the public tree. It is
 # sourced at runtime from the OW_RESERVED_TERMS environment variable or a
 # gitignored .reserved-terms file (one regex fragment per line; see
-# .reserved-terms.example). The post-merge identity-scan workflow sources
-# the same list from the repository secret, so local and server-side
-# enforcement share one source of truth and cannot drift.
-PRIVATE_PATTERN="${OW_RESERVED_TERMS:-}"
-if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
-  PRIVATE_PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/.reserved-terms" | paste -sd'|' -)"
+# .reserved-terms.example). The post-merge identity-scan workflow reads the
+# same list from the repository secret.
+#
+# BOTH sources are canonicalized, and by the SAME code the leak scan and
+# the post-merge identity scan use: scripts/canon-terms.sh. The environment
+# value used to be taken raw here, which is not a small omission. grep -E
+# treats each line of a multi-line pattern as a separate pattern, so a
+# blank line in the value matched every input and refused every push, a
+# comment line became a live fragment matching its own text, and a
+# carriage return made every branch match nothing while the gate reported
+# no reserved terms found.
+CANON_TERMS_LIB="$REPO_ROOT/scripts/canon-terms.sh"
+PRIVATE_PATTERN=""
+if [ ! -f "$CANON_TERMS_LIB" ]; then
+  # Fail closed. A check that cannot run is not a check that passed.
+  red "✗ scripts/canon-terms.sh is missing; the reserved-term check cannot run."
+  FAIL=1
+else
+  # shellcheck source=scripts/canon-terms.sh
+  . "$CANON_TERMS_LIB"
+  if [ -n "${OW_RESERVED_TERMS:-}" ]; then
+    PRIVATE_PATTERN="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+  fi
+  if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
+    PRIVATE_PATTERN="$(canon_terms < "$REPO_ROOT/.reserved-terms")"
+  fi
 fi
 
 if [ -z "$PRIVATE_PATTERN" ]; then
