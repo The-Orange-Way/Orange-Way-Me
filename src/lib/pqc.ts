@@ -22,7 +22,10 @@
  *   - Constants are frozen; bumping a version means a new named constant
  *     plus coordinated migration.
  *
- * See docs/OrangeRails-PQC.md for the threat model and migration path.
+ * The threat model and the migration path are those two design rules: hybrid,
+ * so that breaking one primitive alone does not recover the output, and frozen
+ * versioned constants, so that a bump is a coordinated migration and never an
+ * in-place change to a version already in use.
  */
 
 import { x25519 } from "@noble/curves/ed25519.js";
