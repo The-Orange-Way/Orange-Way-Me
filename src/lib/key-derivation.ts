@@ -14,7 +14,8 @@
  * the new key, so a caller that sees a `payload_key_version` older than
  * the current must derive the appropriate legacy subkey.
  *
- * See docs/OrangeRails-Architecture.md §5.2 (Key Hierarchy).
+ * The key hierarchy itself is HKDF_CONTEXTS below: one context string per
+ * purpose, all derived from the MEK, never reused across purposes.
  */
 
 import { importAesKey, importAesKeyNonExtractable } from "./vault";
