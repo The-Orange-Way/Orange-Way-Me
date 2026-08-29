@@ -1,7 +1,9 @@
 /**
  * blindIndexHmac — deterministic HMAC-SHA-256 of a normalized input,
  * used as a server-side equality search key for encrypted columns.
- * Matches the implementation in useAccounts.ts.
+ * This is the only implementation. Import it; never re-declare it. The value
+ * it returns is stored and later searched for, so correctness is agreement:
+ * a second copy that drifts makes rows silently stop matching, with no error.
  */
 export async function blindIndexHmac(input: string, hmacKey: CryptoKey): Promise<string> {
   const sig = await crypto.subtle.sign(
