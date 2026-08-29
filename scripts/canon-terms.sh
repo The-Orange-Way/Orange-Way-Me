@@ -125,10 +125,11 @@ canon_terms_usable() {
   # 2 or higher = grep refused the pattern outright, which is the typo case
   #     this function was added for.
   #
-  # 0 = the pattern MATCHED the empty string. A pattern that matches nothing
-  #     at all still matches every line of every file, so this is the
-  #     match-everything failure: an empty alternation branch left by a
-  #     stray pipe in a fragment, or a fragment that is entirely optional.
+  # 0 = the pattern MATCHED the empty string. The empty string is contained
+  #     in every line, so such a pattern matches every line of every file.
+  #     This is the match-everything failure: an empty alternation branch
+  #     left by a stray pipe in a fragment, or a fragment that is entirely
+  #     optional.
   #     It compiles, so the refusal above cannot see it, and it turns the
   #     scan into a refusal of the whole tree while the term count printed
   #     next to it still reads correct. An earlier version of this comment
