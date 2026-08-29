@@ -10,7 +10,8 @@
  * NEVER log decrypted output. NEVER persist plaintext to anything other
  * than React state held during a logged-in session.
  */
-import { encryptText, decryptText, blindIndex } from "./vault";
+import { encryptText, decryptText } from "./vault";
+import { blindIndexHmac } from "./blind-index";
 
 // ---------- shared helpers ----------
 
@@ -110,8 +111,8 @@ export async function encryptTransaction(
     enc_tags:
       txn.tags && txn.tags.length > 0 ? await encryptText(JSON.stringify(txn.tags), mek) : null,
     enc_owner: await encOpt(txn.owner, mek),
-    hmac_merchant: txn.merchant ? await blindIndex(txn.merchant, hmacKey) : null,
-    hmac_category: txn.category_id ? await blindIndex(txn.category_id, hmacKey) : null,
+    hmac_merchant: txn.merchant ? await blindIndexHmac(txn.merchant, hmacKey) : null,
+    hmac_category: txn.category_id ? await blindIndexHmac(txn.category_id, hmacKey) : null,
   };
 }
 
