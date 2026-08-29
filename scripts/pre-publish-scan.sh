@@ -249,7 +249,11 @@ printf "\033[1m1. Reserved terms\033[0m\n"
 # path AND to surrounding prose (^\./path:[0-9]+:.*context), so it exempts
 # one line rather than a whole file, and no entry needs to carry the
 # matched term itself. Never add an unanchored bare filename here.
-EXEMPT_RESERVED_CI=""
+EXEMPT_RESERVED_CI="$(join_pipe \
+  "^\\./src/lib/vault-envelope\\.ts:[0-9]+:.*straight from the password" \
+  "^\\./src/lib/vault\\.ts:[0-9]+:.*is not 32 bytes; refusing to use it" \
+  "^\\./supabase/migrations/20260625130000_beta_allowlist\\.sql:[0-9]+:.*seeded with the migration" \
+)"
 
 if [[ -n "$RESERVED_TERMS" ]]; then
   # -i: the post-merge identity scan already compares case-insensitively.
