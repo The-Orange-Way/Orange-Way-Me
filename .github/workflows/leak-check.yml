@@ -113,6 +113,19 @@ jobs:
         # requests too, where the reserved-term category itself cannot.
         run: bash scripts/test-canon-terms.sh
 
+      - name: Leak scan red run self test
+        # The reserved-term category withholds matched text in CI, and a
+        # scanner that has been silenced produces output identical to a
+        # clean tree. This drives the real scanner against a throwaway tree
+        # holding an invented term and asserts it goes RED with the file and
+        # the line, that the matched text is withheld, and that the same
+        # list against a tree with no plant comes back green.
+        #
+        # Like the canonicalizer self test above it needs no secret, so it
+        # runs on fork and Dependabot pull requests, where the reserved-term
+        # category itself cannot.
+        run: bash scripts/test-leak-scan-red.sh
+
       - name: Run pre-publish leak scan
         # Fails the job (and the required check) if any leak is found.
         # See scripts/pre-publish-scan.sh for the rules and exemptions.
