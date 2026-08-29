@@ -211,12 +211,28 @@ check 'a fragment grep cannot compile is refused, not silently accepted' \
 check 'the broken fixture really did reach the pattern' \
   'zzalpha|zz(bravo' "$BROKEN_PATTERN"
 
-# The empty-branch pattern COMPILES, so the refusal above cannot see it. It
-# is built here by hand rather than through canon_terms, which now removes
-# the empty branch at the source: routing the fixture through the fix would
-# test the fix instead of the guard, and the guard has to hold for any value
-# that reaches it, including one a future consumer builds its own way.
+# Both fixtures below are built by hand rather than through canon_terms,
+# which now removes the empty branch at the source: routing them through the
+# fix would test the fix instead of the guard, and the guard has to hold for
+# any value that reaches it, including one a future consumer builds its own
+# way.
+#
+# An empty alternation branch is undefined in POSIX ERE. GNU grep accepts it
+# and matches everything; another grep refuses it outright. Both answers mean
+# "do not scan with this", so the guard is asserted against it here without
+# claiming which of the two reasons applied.
 if canon_terms_usable 'zzalpha||zzbravo'; then
+  EMPTY_BRANCH_VERDICT=usable
+else
+  EMPTY_BRANCH_VERDICT=refused
+fi
+check 'a stray empty alternation branch is refused, however grep reads it' \
+  'refused' "$EMPTY_BRANCH_VERDICT"
+
+# An entirely optional fragment: valid ERE everywhere, and it matches the
+# empty string, so it matches every line of every file. The term count still
+# reads correct while the scan reports the whole tree as findings.
+if canon_terms_usable '(zzalpha)?'; then
   EVERYTHING_VERDICT=usable
 else
   EVERYTHING_VERDICT=refused
@@ -224,11 +240,10 @@ fi
 check 'a pattern that matches everything is refused, not reported usable' \
   'refused' "$EVERYTHING_VERDICT"
 
-# And the fixture really is the hazard, not a strawman: the same pattern
-# matches a line holding no reserved term at all. If this case ever reports
-# "missed", the refusal above is passing for some other reason and proves
-# nothing.
-if printf '%s\n' 'an ordinary line with no reserved term in it' | grep -qE 'zzalpha||zzbravo'; then
+# And that fixture really is the hazard, not a strawman: it matches a line
+# holding no reserved term at all. If this case ever reports "missed", the
+# refusal above is passing for some other reason and proves nothing.
+if printf '%s\n' 'an ordinary line with no reserved term in it' | grep -qE '(zzalpha)?'; then
   EVERYTHING_MATCHES=matched
 else
   EVERYTHING_MATCHES=missed
