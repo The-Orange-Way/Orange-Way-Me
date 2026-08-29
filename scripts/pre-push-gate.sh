@@ -279,6 +279,21 @@ if command -v gitleaks >/dev/null; then
   else
     FAIL=1
   fi
+else
+  # An absent scanner is not a clean scan. This branch did not exist: with
+  # gitleaks off PATH nothing ran, nothing printed, FAIL was untouched, and
+  # the gate went on to print PASSED, which reads as "a secret scan covered
+  # these commits". Announce the gap every time instead.
+  #
+  # This warns rather than refusing, unlike check 3, and the difference is
+  # deliberate: canon-terms.sh ships in the repository, so its absence means
+  # a broken tree, while gitleaks is an optional external binary that a
+  # fresh clone will not have. Whether this should also refuse is being
+  # settled on evidence about server-side coverage, not guessed here.
+  yellow "- gitleaks is not installed: NO secret scan ran on the commits being pushed."
+  yellow "  The checks above look for reserved terms and seat trailers. None of them"
+  yellow "  looks for secret-shaped strings such as API keys, tokens or private keys."
+  yellow "  Install gitleaks and push again for that cover: https://github.com/gitleaks/gitleaks"
 fi
 
 # ---- Check 5: Seat trailer on every pushed non-merge commit ----
