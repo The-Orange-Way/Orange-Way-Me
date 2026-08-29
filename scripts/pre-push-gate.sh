@@ -81,6 +81,17 @@ else
 fi
 
 # ---- Check 2: pre-publish leak scan ----
+# Fail closed. A check that cannot run is not a check that passed, and with
+# no else branch here a cleared executable bit made this check disappear:
+# nothing ran, nothing printed, FAIL stayed untouched and the gate went on to
+# report PASSED. Every other unrunnable-check path below now refuses with a
+# reason; this was the one left answering "I could not check" with silence.
+#
+# The bit is tested and the scanner is then invoked with bash, which does not
+# need it. That looks redundant and is deliberate: the post-merge
+# identity-scan workflow tests the same bit and hard errors on it, so
+# accepting a non-executable scanner here would pass a push the server
+# refuses after the merge. Same rule in both places, same wording.
 if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
   if bash "$REPO_ROOT/scripts/pre-publish-scan.sh" >/tmp/.pps.out 2>&1; then
     green "✓ pre-publish-scan clean."
@@ -89,6 +100,10 @@ if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
     tail -20 /tmp/.pps.out
     FAIL=1
   fi
+else
+  red "✗ scripts/pre-publish-scan.sh is missing or not executable; the tree scan cannot run."
+  red "  Restore the file, or run: chmod +x scripts/pre-publish-scan.sh"
+  FAIL=1
 fi
 
 # ---- Shared helper: the base a push is measured against ----
