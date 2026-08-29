@@ -17,6 +17,7 @@ import {
 import { encryptText as cryptoEncryptText } from "@/lib/vault";
 import type { Account, AccountDraft, AccountTypeKey, ConnectorType } from "@/lib/connectors";
 import { getConnector } from "@/lib/connectors";
+import { blindIndexHmac } from "@/lib/blind-index";
 
 interface AccountRow extends AccountEncrypted {
   id: string;
@@ -392,17 +393,4 @@ export class AccountNotEmptyError extends Error {
     this.name = "AccountNotEmptyError";
     this.transactionCount = transactionCount;
   }
-}
-
-// Local helper — avoids pulling in the full vault.ts blindIndex which expects a CryptoKey.
-async function blindIndexHmac(input: string, hmacKey: CryptoKey): Promise<string> {
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    hmacKey,
-    new TextEncoder().encode(input.trim().toLowerCase()),
-  );
-  const bytes = new Uint8Array(sig);
-  let s = "";
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s);
 }
