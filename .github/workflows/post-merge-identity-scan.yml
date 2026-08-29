@@ -73,9 +73,12 @@ jobs:
           # The reserved-term list is NOT hardcoded here: committing it
           # would publish the very strings it exists to keep out of the
           # public repo. It lives in the OW_RESERVED_TERMS repository
-          # secret; scripts/pre-push-gate.sh and pre-publish-scan.sh source
-          # the same list locally (env var or gitignored .reserved-terms),
-          # so local and server-side enforcement cannot drift.
+          # secret; scripts/pre-push-gate.sh and pre-publish-scan.sh read
+          # the same list locally (env var or gitignored .reserved-terms).
+          # All of them turn it into a pattern with the one shared
+          # canonicalizer at scripts/canon-terms.sh, which is what makes
+          # "local and server-side enforcement cannot drift" a statement
+          # about the code rather than an intention.
           RAW_PATTERN: ${{ secrets.OW_RESERVED_TERMS }}
           RANGE: ${{ steps.range.outputs.range }}
         run: |
