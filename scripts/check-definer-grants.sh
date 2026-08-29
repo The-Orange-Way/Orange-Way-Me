@@ -113,14 +113,21 @@ if [ "$CURL_RC" -ne 0 ]; then
   cannot_check "curl exited ${CURL_RC} talking to the management API for project ${PROJECT_REF}"
 fi
 
-if [ "$HTTP_CODE" != "200" ]; then
+# The management API answers 201 Created, not 200, for a successful POST to
+# database/query. Insisting on exactly 200 sent every single run down the
+# CANNOT CHECK path, so the gate never read the database at all. Accept any
+# 2xx; everything else still refuses loudly rather than reading as a pass.
+case "$HTTP_CODE" in
+  2??) ;;
+  *)
   # The response body carries an API error message, never the token, so it is
   # safe to print and it is the only way to tell a scope problem from an outage.
   echo "First 400 bytes of the response, for diagnosis:"
   head -c 400 "$BODY_FILE" || true
   echo
   cannot_check "the query returned HTTP ${HTTP_CODE} for project ${PROJECT_REF}"
-fi
+  ;;
+esac
 
 REPORT=$(jq -c '.[0].report // empty' "$BODY_FILE" 2>/dev/null)
 [ -n "$REPORT" ] || cannot_check "the response did not contain the expected report object"
