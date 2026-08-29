@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
-# SECURITY DEFINER EXECUTE grant gate, read from the LIVE dev database.
+# SECURITY DEFINER EXECUTE grant gate, read from a LIVE database. Which project
+# it reads is named by the caller through OW_DEFINER_PROJECT_REF. The workflow
+# runs it twice, as two separate jobs bound to two separate GitHub Environments:
+# once against dev and once against production.
 #
 # WHAT IT REFUSES
-# Any SECURITY DEFINER function in the `public` schema of the Orange Way Me dev
-# project that carries EXECUTE for `anon` or for `PUBLIC` and is not on the
-# allowlist below. A SECURITY DEFINER function runs with its owner's rights, so
+# Any SECURITY DEFINER function in the `public` schema of the named Orange Way Me
+# project that carries EXECUTE for `anon` or for `PUBLIC` and is not on that
+# project's allowlist below. A SECURITY DEFINER function runs with its owner's rights, so
 # such a grant is a hole through row level security.
 #
 # WHY IT READS A LIVE DATABASE AND NOT THE MIGRATION FILES
@@ -32,28 +35,14 @@
 #   exit 2  CANNOT CHECK  no credential, unreachable API, unreadable answer, or
 #                         zero functions examined
 #
-# The credential is SUPABASE_ACCESS_TOKEN from the `dev` GitHub Environment, the
-# same secret the edge function deploy already uses. It is read only here: the
-# only statement sent is the SELECT below.
+# The credential is SUPABASE_ACCESS_TOKEN from the calling job's GitHub
+# Environment, `dev` or `prod`, the same per environment secret the edge function
+# deploy already uses (.github/workflows/deploy-supabase-functions.yml). Each
+# environment holds its own token, so a dev run never has the production
+# credential in scope and a production run never has dev's. It is read only
+# here: the only statement sent is the SELECT below.
 
 set -uo pipefail
-
-PROJECT_REF="${OW_DEV_PROJECT_REF:-bogmoovbjpvcvdqrmjgt}"
-API_URL="https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query"
-
-# Allowlist, exact `signature<TAB>grantee` pairs. Both entries have a verified
-# pre-auth callsite, which is the only thing that can justify anon reaching a
-# definer function at all:
-#   is_invite_code_valid(text)        called from the join page before sign in
-#   is_email_in_beta_allowlist(text)  called from the auth screen before sign in
-#
-# PUBLIC is deliberately NOT allowlisted for either of them. PUBLIC is broader
-# than anon, and a PUBLIC grant reappearing on one of these is exactly the
-# CREATE OR REPLACE drift described above.
-#
-# To add an entry you must name the pre-auth callsite in the same change. If you
-# cannot name one, the answer is a revoke, not an allowlist entry.
-ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon'
 
 cannot_check() {
   echo "::error::CANNOT CHECK: $1"
@@ -65,8 +54,53 @@ for BIN in curl jq; do
   command -v "$BIN" >/dev/null 2>&1 || cannot_check "${BIN} is not available on this runner"
 done
 
+# The project to inspect, named by the caller. There is deliberately NO default.
+# A default would mean a production job whose ref never reached it would quietly
+# inspect dev and report a pass under a production heading, which is exactly the
+# silent success shape this gate exists to refuse. OW_DEV_PROJECT_REF is still
+# read so an older manual invocation keeps working.
+PROJECT_REF="${OW_DEFINER_PROJECT_REF:-${OW_DEV_PROJECT_REF:-}}"
+if [ -z "$PROJECT_REF" ]; then
+  cannot_check "no project ref was given. Set OW_DEFINER_PROJECT_REF to the Supabase project this run is meant to inspect. This script has no default on purpose: a default would inspect dev while reporting under whatever heading the caller intended."
+fi
+API_URL="https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query"
+
+# Allowlist, exact `signature<TAB>grantee` pairs, and it is PER PROJECT rather
+# than shared. A pre-auth callsite that justifies anon EXECUTE on dev does not
+# automatically justify it on production, and one shared list would let a dev
+# exemption silently cover production drift. Both projects allow the same two
+# functions today; if that ever stops being true, give them separate lists here
+# rather than widening one list for both.
+#
+# Both entries have a verified pre-auth callsite, which is the only thing that
+# can justify anon reaching a definer function at all:
+#   is_invite_code_valid(text)        called from the join page before sign in
+#   is_email_in_beta_allowlist(text)  called from the auth screen before sign in
+#
+# PUBLIC is deliberately NOT allowlisted for either of them, on either project.
+# PUBLIC is broader than anon, and a PUBLIC grant reappearing on one of these is
+# exactly the CREATE OR REPLACE drift described above.
+#
+# To add an entry you must name the pre-auth callsite in the same change. If you
+# cannot name one, the answer is a revoke, not an allowlist entry.
+DEV_PROJECT_REF='bogmoovbjpvcvdqrmjgt'
+PROD_PROJECT_REF='tmqjusxxjjcsdgyiqbcg'
+PRE_AUTH_ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon'
+
+case "$PROJECT_REF" in
+  "$DEV_PROJECT_REF")  ALLOWLIST="$PRE_AUTH_ALLOWLIST" ;;
+  "$PROD_PROJECT_REF") ALLOWLIST="$PRE_AUTH_ALLOWLIST" ;;
+  *)
+    # An unrecognised ref is a deliberate manual run. It gets NO exemptions:
+    # refusing everything it finds is the safe direction, and the run says so
+    # rather than leaving the reader to assume the usual list applied.
+    ALLOWLIST=''
+    echo "::notice::Project ${PROJECT_REF} is not one of the two known Orange Way Me projects, so no allowlist applies and every anon or PUBLIC EXECUTE found will be refused."
+    ;;
+esac
+
 if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
-  cannot_check "SUPABASE_ACCESS_TOKEN is empty. This job binds to the 'dev' GitHub Environment, which holds it. A run with no access to that secret cannot check anything and must not report green."
+  cannot_check "SUPABASE_ACCESS_TOKEN is empty. Each job binds to its own GitHub Environment, 'dev' or 'prod', which holds it. A run with no access to that secret cannot check anything and must not report green."
 fi
 
 SQL=$(cat <<'ENDSQL'
