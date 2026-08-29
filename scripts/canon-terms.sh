@@ -62,9 +62,16 @@
 #   paste -sd'|' -
 #       Joins what survives into one alternation.
 #
-#   sed -e 's/^|*//' -e 's/|*$//'
-#       Trims leading and trailing separators. They are empty branches with
-#       the same match-everything effect as a blank line.
+#   sed -e 's/||*/|/g' -e 's/^|*//' -e 's/|*$//'
+#       Squeezes runs of separators, then trims them off the two ends. Every
+#       one of them is an empty alternation branch, which matches every line
+#       of every file: the same match-everything effect as a blank line, and
+#       it arrives the same way. A line is documented as a regex FRAGMENT, so
+#       "termA|termB" on one line is invited, and editing it down to "termA|"
+#       leaves a trailing pipe that the join turns into "termA||termB".
+#       Trimming only the ends of the joined string left that internal pair
+#       in place. The squeeze runs BEFORE the trim so a leading or trailing
+#       run is reduced first and then removed.
 #
 # The output is EMPTY when the input holds no usable terms. Callers must
 # treat empty as "not configured" and say so loudly. Empty is never clean.
@@ -78,7 +85,7 @@ canon_terms() {
   tr -d '\r' \
     | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' \
     | paste -sd'|' - \
-    | sed -e 's/^|*//' -e 's/|*$//'
+    | sed -e 's/||*/|/g' -e 's/^|*//' -e 's/|*$//'
 }
 
 # canon_terms_usable PATTERN
@@ -113,7 +120,19 @@ canon_terms_usable() {
   local rc=0
   [ -n "$pattern" ] || return 1
   printf '' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
-  # 0 = matched, which empty input cannot produce; 1 = compiled and did not
-  # match, which is the healthy answer; 2 or higher = grep refused it.
-  [ "$rc" -le 1 ]
+  # 1 = compiled and did not match. That is the only healthy answer.
+  #
+  # 2 or higher = grep refused the pattern outright, which is the typo case
+  #     this function was added for.
+  #
+  # 0 = the pattern MATCHED the empty string. A pattern that matches nothing
+  #     at all still matches every line of every file, so this is the
+  #     match-everything failure: an empty alternation branch left by a
+  #     stray pipe in a fragment, or a fragment that is entirely optional.
+  #     It compiles, so the refusal above cannot see it, and it turns the
+  #     scan into a refusal of the whole tree while the term count printed
+  #     next to it still reads correct. An earlier version of this comment
+  #     asserted that empty input could not produce a match and accepted
+  #     exit 0 on that basis. It can, and this is exactly when.
+  [ "$rc" -eq 1 ]
 }
