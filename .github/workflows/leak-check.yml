@@ -92,6 +92,16 @@ jobs:
         run: |
           echo "::notice title=Reserved-term scan skipped::Category 1, reserved terms, did not run on this pull request. GitHub withholds Actions secrets from Dependabot runs and from fork runs, so OW_RESERVED_TERMS is empty here and category 1 has nothing to check against. A green check on this run means the structural checks passed, not the full scan. The full scan runs on the push to dev after merge."
 
+      - name: Reserved-term canonicalizer self test
+        # Every consumer of the reserved-term list resolves it through one
+        # shared function, so that function is a single point of failure
+        # whose failure mode is silent: it returns a pattern that compiles,
+        # matches nothing, and produces output identical to a clean tree.
+        #
+        # This needs no secret, so it runs on fork and Dependabot pull
+        # requests too, where the reserved-term category itself cannot.
+        run: bash scripts/test-canon-terms.sh
+
       - name: Run pre-publish leak scan
         # Fails the job (and the required check) if any leak is found.
         # See scripts/pre-publish-scan.sh for the rules and exemptions.
