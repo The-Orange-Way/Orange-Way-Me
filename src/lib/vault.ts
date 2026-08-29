@@ -244,20 +244,18 @@ export async function decryptBlob(
 }
 
 // ---------- HMAC blind indexes ----------
-
-/**
- * Compute a base64-encoded HMAC-SHA-256 of the lowercased input.
- * Use for blind-index columns so equality-search works without
- * leaking plaintext.
- */
-export async function blindIndex(input: string, hmacKey: CryptoKey): Promise<string> {
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    hmacKey,
-    new TextEncoder().encode(input.trim().toLowerCase()),
-  );
-  return b64encode(new Uint8Array(sig));
-}
+//
+// Deliberately not here. The one implementation is blindIndexHmac in
+// src/lib/blind-index.ts. What used to live here was identical to it: the
+// same input.trim().toLowerCase(), the same crypto.subtle.sign("HMAC", ...),
+// and the same latin1 plus btoa encoding, so nothing about the stored value
+// changed when it was deleted.
+//
+// Keep it that way. A blind index is a deterministic equality search key over
+// encrypted columns, so its correctness is agreement between the code that
+// writes the value and the code that later searches for it. A second copy
+// that drifts by one character in normalization, encoding or HMAC input makes
+// rows silently stop matching: no error, no failing test, no CI signal.
 
 // ---------- recovery code (12-word BIP-39-style) ----------
 
