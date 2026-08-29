@@ -136,8 +136,13 @@ EXEMPT_OWM_FUNCTION_URLS=(
 # compiled into a live regex fragment that would match literal text, and
 # a blank line inside it cannot become an empty alternation branch that
 # matches every line in the tree.
+#
+# Carriage returns are deleted first. A value stored with Windows line
+# endings leaves a trailing CR on every fragment, so each branch of the
+# alternation would look for "term\r", match nothing anywhere in the
+# tree, and report a clean scan against a list that is fully populated.
 canon_terms() {
-  grep -vE '^[[:space:]]*(#|$)' | paste -sd'|' - | sed -e 's/^|*//' -e 's/|*$//'
+  tr -d '\r' | grep -vE '^[[:space:]]*(#|$)' | paste -sd'|' - | sed -e 's/^|*//' -e 's/|*$//'
 }
 
 RESERVED_TERMS=""
