@@ -280,5 +280,5 @@ Orange Way with household ZKA + cryptographic revocation is a clean market gap. 
 ## 12. References
 
 - **Competitive analysis**: `COMPETITIVE-ANALYSIS.md` — 10 platforms, patterns, market gaps, cited URLs.
-- **Orange Rails PQC reference**: `orange-rails/src/lib/pqc.ts`, `co-admin.ts`, `pqc-lifecycle.ts`.
+- **Post-quantum design reference**: maintainer notes.
 - **@noble/post-quantum** (ML-KEM-768, ML-DSA-65), **@noble/curves** (X25519), **@noble/hashes** (HKDF-SHA-256).
