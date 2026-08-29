@@ -129,21 +129,22 @@ EXEMPT_OWM_FUNCTION_URLS=(
 # (the structural checks below still run). Outside contributors therefore
 # get a working scanner with zero exposure to the internal list.
 
-# canon_terms: stdin -> one regex alternation on stdout.
-# Drops blank lines and #-comment lines, joins the rest with '|', and
-# trims any leading/trailing separators. Applied to the env value as well
-# as the file, so a comment line inside the secret is IGNORED rather than
-# compiled into a live regex fragment that would match literal text, and
-# a blank line inside it cannot become an empty alternation branch that
-# matches every line in the tree.
+# The canonicalizer is NOT defined here. This scan, the pre-push gate, the
+# post-merge identity-scan workflow and the leak-check workflow all source
+# ONE implementation, so they cannot drift the way they had. See
+# scripts/canon-terms.sh for what each step of the pipeline is holding up.
 #
-# Carriage returns are deleted first. A value stored with Windows line
-# endings leaves a trailing CR on every fragment, so each branch of the
-# alternation would look for "term\r", match nothing anywhere in the
-# tree, and report a clean scan against a list that is fully populated.
-canon_terms() {
-  tr -d '\r' | grep -vE '^[[:space:]]*(#|$)' | paste -sd'|' - | sed -e 's/^|*//' -e 's/|*$//'
-}
+# Fail closed when the library is absent. Without this check the script
+# would carry on with canon_terms undefined, RESERVED_TERMS would resolve
+# empty, category 1 would print itself as skipped, and the whole run would
+# still exit 0. An unrunnable scanner is a broken guard, not a clean tree.
+CANON_TERMS_LIB="$REPO_ROOT/scripts/canon-terms.sh"
+if [[ ! -f "$CANON_TERMS_LIB" ]]; then
+  printf "\n\033[31m▎ scripts/canon-terms.sh is missing; the reserved-term scan cannot run.\033[0m\n\n" >&2
+  exit 1
+fi
+# shellcheck source=scripts/canon-terms.sh
+. "$CANON_TERMS_LIB"
 
 RESERVED_TERMS=""
 if [[ -n "${OW_RESERVED_TERMS:-}" ]]; then
