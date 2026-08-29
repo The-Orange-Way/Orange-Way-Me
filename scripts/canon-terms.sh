@@ -115,25 +115,32 @@ canon_terms() {
 # says how to fix it, so callers test for empty FIRST and only then ask
 # this. The invocation is deliberately the same shape the consumers use,
 # so a pattern that grep would refuse in a scan is refused here too.
+#
+# The probe feeds ONE BLANK LINE, and the difference from zero bytes is the
+# whole reason this function can answer the second question below. grep
+# tests lines: given no input at all there are no lines to test, so it
+# returns "no match" for every pattern including one that matches the empty
+# string. An earlier version of this probe piped in zero bytes and then
+# reasoned about what a match would mean, which could never happen. One
+# blank line gives grep something to test that no real reserved term can
+# appear in.
 canon_terms_usable() {
   local pattern="${1-}"
   local rc=0
   [ -n "$pattern" ] || return 1
-  printf '' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
+  printf '\n' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
   # 1 = compiled and did not match. That is the only healthy answer.
   #
   # 2 or higher = grep refused the pattern outright, which is the typo case
   #     this function was added for.
   #
-  # 0 = the pattern MATCHED the empty string. The empty string is contained
-  #     in every line, so such a pattern matches every line of every file.
-  #     This is the match-everything failure: an empty alternation branch
-  #     left by a stray pipe in a fragment, or a fragment that is entirely
-  #     optional.
-  #     It compiles, so the refusal above cannot see it, and it turns the
-  #     scan into a refusal of the whole tree while the term count printed
-  #     next to it still reads correct. An earlier version of this comment
-  #     asserted that empty input could not produce a match and accepted
-  #     exit 0 on that basis. It can, and this is exactly when.
+  # 0 = the pattern matched a line with nothing in it. The empty string is
+  #     contained in every line, so such a pattern matches every line of
+  #     every file. This is the match-everything failure: an empty
+  #     alternation branch left by a stray pipe in a fragment, or a
+  #     fragment that is entirely optional. It compiles, so the refusal
+  #     above cannot see it, and it turns the scan into a refusal of the
+  #     whole tree while the term count printed next to it still reads
+  #     correct.
   [ "$rc" -eq 1 ]
 }
