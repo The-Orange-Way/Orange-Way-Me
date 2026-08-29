@@ -8,9 +8,9 @@
 # Why the emphasis on being able to fail. Every defect this gate has had was
 # an absence that read as green: a term list that resolved to nothing, an
 # exemption that swallowed a whole file, a pattern that compiled and matched
-# nowhere. A shape-only test would pass against all three. So the two cases
-# at the end assert behaviour, not shape, and the last one deliberately
-# feeds in the pre-fix pipeline to show a real failure is visible.
+# nowhere. A shape-only test would pass against all three. So the cases at
+# the end assert behaviour, not shape, and one of them deliberately feeds in
+# the pre-fix pipeline to show a real failure is visible.
 #
 # Every fixture term here is invented (zz prefix). No part of the real list
 # appears in this file.
@@ -29,6 +29,11 @@ fi
 
 if ! declare -f canon_terms >/dev/null 2>&1; then
   printf 'FAIL: canon-terms.sh was sourced but defines no canon_terms function.\n' >&2
+  exit 1
+fi
+
+if ! declare -f canon_terms_usable >/dev/null 2>&1; then
+  printf 'FAIL: canon-terms.sh was sourced but defines no canon_terms_usable function.\n' >&2
   exit 1
 fi
 
@@ -76,15 +81,46 @@ check 'a list of only comments and blanks yields nothing, so callers can refuse 
   '' \
   "$(printf '# only a comment\n\n   \n' | canon_terms)"
 
+# Whitespace around a term is not part of the term. A stray trailing space
+# produces the branch "zzalpha ", which matches only where the term happens
+# to be followed by a space: it misses nearly every real occurrence while
+# the term count still reads correct.
+check 'whitespace around a term is trimmed off both ends' \
+  'zzalpha|zzbravo' \
+  "$(printf '  zzalpha  \n\tzzbravo\t\n' | canon_terms)"
+
+# Only the ends. A term that legitimately contains a space must survive, or
+# the trim above would quietly break multi-word entries.
+check 'a term with an internal space keeps it' \
+  'zz alpha|zzbravo' \
+  "$(printf '  zz alpha  \nzzbravo\n' | canon_terms)"
+
 # ----------------------------------------------------------------------
-# Behaviour, not shape. The two cases below are the reason this file is
-# worth running.
+# Behaviour, not shape. The cases below are the reason this file is worth
+# running.
 # ----------------------------------------------------------------------
+
+# A list holding no usable terms is a VALUE, not an error. It has to come
+# back as empty output with a zero exit status, because the callers all
+# have their own "the list is not configured" branch and that branch is
+# where the human-readable reason gets printed. When the filter was grep -v
+# it exited 1 on this input, and a caller running under set -e plus
+# pipefail died mid-assignment with no message at all.
+COMMENTS_ONLY="$(printf '# only a comment\n\n   \n' | canon_terms)"
+EMPTY_RC=$?
+check 'a list with no usable terms exits 0 rather than killing the caller' \
+  '0' "$EMPTY_RC"
+check 'a list with no usable terms is empty, so callers see it as unconfigured' \
+  '' "$COMMENTS_ONLY"
 
 SUBJECT='a line that contains zzbravo somewhere in it'
 
+# grep -E '' is a legal regex that matches everything, so this case has to
+# assert the pattern is non-empty before it asserts the match. Without that
+# it reports "matched" when the canonicalizer returns nothing at all, which
+# is the exact failure the whole file exists to catch.
 FIXED_PATTERN="$(printf 'zzalpha\r\nzzbravo\r\n' | canon_terms)"
-if printf '%s\n' "$SUBJECT" | grep -qE "$FIXED_PATTERN"; then
+if [ -n "$FIXED_PATTERN" ] && printf '%s\n' "$SUBJECT" | grep -qE "$FIXED_PATTERN"; then
   FIXED_RESULT=matched
 else
   FIXED_RESULT=missed
@@ -108,6 +144,42 @@ else
 fi
 check 'negative control: without the strip the same list matches NOTHING' \
   'missed' "$UNSTRIPPED_RESULT"
+
+# The list is one regex FRAGMENT per line, so an unbalanced parenthesis is
+# a realistic typo, and the join hides it. grep exits 2 on a pattern it
+# refuses and every consumer read exit 2 as "no matches", so one typo in
+# the stored value turned every layer green while nothing was checked.
+GOOD_PATTERN="$(printf 'zzalpha\nzzbravo\n' | canon_terms)"
+if canon_terms_usable "$GOOD_PATTERN"; then
+  GOOD_VERDICT=usable
+else
+  GOOD_VERDICT=refused
+fi
+check 'a well formed list is reported usable' \
+  'usable' "$GOOD_VERDICT"
+
+BROKEN_PATTERN="$(printf 'zzalpha\nzz(bravo\n' | canon_terms)"
+if canon_terms_usable "$BROKEN_PATTERN"; then
+  BROKEN_VERDICT=usable
+else
+  BROKEN_VERDICT=refused
+fi
+check 'a fragment grep cannot compile is refused, not silently accepted' \
+  'refused' "$BROKEN_VERDICT"
+
+# Guard against the check above passing for the wrong reason: it must be
+# the unbalanced parenthesis being refused, not the canonicalizer having
+# dropped the line and handed back something harmless.
+check 'the broken fixture really did reach the pattern' \
+  'zzalpha|zz(bravo' "$BROKEN_PATTERN"
+
+if canon_terms_usable ""; then
+  EMPTY_VERDICT=usable
+else
+  EMPTY_VERDICT=refused
+fi
+check 'an empty pattern is never reported usable' \
+  'refused' "$EMPTY_VERDICT"
 
 printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
 
