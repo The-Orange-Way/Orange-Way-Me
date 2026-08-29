@@ -48,6 +48,10 @@ jobs:
             exit 1
           fi
           COUNT=$(printf '%s\n' "$OW_RESERVED_TERMS" | grep -cvE '^[[:space:]]*(#|$)' || true)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::OW_RESERVED_TERMS is configured but contains no usable terms: every line is blank or a comment. The reserved-term scan would check for nothing and report green. Set it in Settings > Secrets and variables > Actions, one term per line."
+            exit 1
+          fi
           echo "Reserved-term list is configured on this repository ($COUNT terms)."
 
       - name: Report that the reserved-term category cannot run here
