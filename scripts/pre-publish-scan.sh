@@ -129,9 +129,23 @@ EXEMPT_OWM_FUNCTION_URLS=(
 # (the structural checks below still run). Outside contributors therefore
 # get a working scanner with zero exposure to the internal list.
 
-RESERVED_TERMS="${OW_RESERVED_TERMS:-}"
+# canon_terms: stdin -> one regex alternation on stdout.
+# Drops blank lines and #-comment lines, joins the rest with '|', and
+# trims any leading/trailing separators. Applied to the env value as well
+# as the file, so a comment line inside the secret is IGNORED rather than
+# compiled into a live regex fragment that would match literal text, and
+# a blank line inside it cannot become an empty alternation branch that
+# matches every line in the tree.
+canon_terms() {
+  grep -vE '^[[:space:]]*(#|$)' | paste -sd'|' - | sed -e 's/^|*//' -e 's/|*$//'
+}
+
+RESERVED_TERMS=""
+if [[ -n "${OW_RESERVED_TERMS:-}" ]]; then
+  RESERVED_TERMS="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+fi
 if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
-  RESERVED_TERMS="$(grep -vE '^[[:space:]]*(#|$)' .reserved-terms | paste -sd'|' -)"
+  RESERVED_TERMS="$(canon_terms < .reserved-terms)"
 fi
 
 EXIT_CODE=0
@@ -166,10 +180,18 @@ scan() {
     return 0
   fi
 
-  # Always-drop exemptions
+  # Always-drop exemptions.
+  #
+  # Each entry is anchored to the PATH COLUMN of the grep -rnE output,
+  # whose lines are "./path:LINE:text". An unanchored bare filename
+  # matches anywhere on the line, including inside the matched text of an
+  # unrelated file, which silently drops a real finding in that other
+  # file. Anchor as ^\./<path>: so an entry exempts only the file it names.
   local drop_patterns=""
+  local e esc
   for e in "${EXEMPT_GENERIC[@]}"; do
-    drop_patterns+="${drop_patterns:+|}$(printf '%s' "$e" | sed 's/[.[\]*]/\\&/g')"
+    esc=$(printf '%s' "$e" | sed 's/[.[\]*]/\\&/g')
+    drop_patterns+="${drop_patterns:+|}^\\./${esc}:"
   done
   if [[ -n "$extra_exempt" ]]; then
     drop_patterns+="${drop_patterns:+|}$extra_exempt"
