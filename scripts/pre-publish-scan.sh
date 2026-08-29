@@ -244,11 +244,21 @@ printf "  repo: %s\n\n" "$REPO_ROOT"
 
 printf "\033[1m1. Reserved terms\033[0m\n"
 
+# Line-anchored exemptions for tree content that matches ONLY under
+# case-insensitive comparison and is not a leak. Each entry anchors to a
+# path AND to surrounding prose (^\./path:[0-9]+:.*context), so it exempts
+# one line rather than a whole file, and no entry needs to carry the
+# matched term itself. Never add an unanchored bare filename here.
+EXEMPT_RESERVED_CI=""
+
 if [[ -n "$RESERVED_TERMS" ]]; then
+  # -i: the post-merge identity scan already compares case-insensitively.
+  # This gate runs first, so it has to be at least as strict, or a term in
+  # another case passes here and is only caught after the merge.
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
-       "" \
-       ""
+       "-i" \
+       "$EXEMPT_RESERVED_CI"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
