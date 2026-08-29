@@ -113,6 +113,30 @@ check 'a list with no usable terms exits 0 rather than killing the caller' \
 check 'a list with no usable terms is empty, so callers see it as unconfigured' \
   '' "$COMMENTS_ONLY"
 
+# The same thing again, one level up, as the caller actually writes it.
+# scripts/pre-push-gate.sh runs under set -euo pipefail and builds its
+# pattern with a plain assignment, so a non-zero status out of canon_terms
+# ends that script ON the assignment: no message, no exit code anyone can
+# read, and the gate's own "no usable terms" branch never runs. A list of
+# only comments and blanks is what a freshly copied .reserved-terms.example
+# looks like, so it is the state a new contributor starts in.
+#
+# Proving that against the real gate needs a git repository, a push and an
+# installed hook. This reproduces the shape it fails in, which is the part
+# that regresses.
+SURVIVED="$(
+  set -euo pipefail
+  . "$HERE/canon-terms.sh"
+  PATTERN="$(printf '# only a comment\n\n   \n' | canon_terms)"
+  if [ -z "$PATTERN" ]; then
+    printf 'reached-the-skip-branch\n'
+  else
+    printf 'unexpected-pattern\n'
+  fi
+)" 2>/dev/null || SURVIVED='died-mid-assignment'
+check 'a caller under set -e plus pipefail reaches its own skip branch' \
+  'reached-the-skip-branch' "$SURVIVED"
+
 SUBJECT='a line that contains zzbravo somewhere in it'
 
 # grep -E '' is a legal regex that matches everything, so this case has to
