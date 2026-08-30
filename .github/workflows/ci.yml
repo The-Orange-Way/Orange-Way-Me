@@ -70,7 +70,7 @@ jobs:
             exit 1
           fi
 
-          # P0 recovery-guard presence floor (OWM-T0353): these two files
+          # P0 recovery-guard presence floor: these two files
           # guard the DL-1506 silent-data-loss path. Deleting either one
           # would otherwise just drop DISK by one and pass silently -- name
           # it and fail loudly instead.
@@ -94,7 +94,7 @@ jobs:
         # the include glob silently dropping whole files. It cannot catch a
         # file that collects but whose tests never execute -- describe.skip,
         # or a suite that collects with zero real assertions run. That is
-        # what scripts/ci/assert-tests-executed.mjs (OWM-T0353, ported from
+        # what scripts/ci/assert-tests-executed.mjs (ported from
         # the OWB DL-0779 zero-spec guard) checks: it fails when total
         # executed tests is 0, or when any collected suite executed nothing
         # of its own.
