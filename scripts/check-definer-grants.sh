@@ -194,6 +194,14 @@ done < <(printf '%s' "$REPORT" | jq -r '.offenders[] | "\(.sig)\t\(.grantee)"')
 # An allowlist entry that matches no function on the database is a stale
 # exemption: it protects nothing today and it will silently cover a future
 # function that happens to take the same signature. Reported, not fatal.
+#
+# definer_sigs is asserted the same way as offenders. Without it, a missing key
+# makes every jq -e below fail, every entry look stale, and the notice fire for
+# all of them, which reads as a list of stale exemptions rather than as an
+# unreadable answer.
+printf '%s' "$REPORT" | jq -e '.definer_sigs | type == "array"' >/dev/null 2>&1 \
+  || cannot_check "the response for ${PROJECT_REF} carries no definer_sigs array, so the allowlist could not be checked for stale entries"
+
 while IFS= read -r ENTRY; do
   [ -n "$ENTRY" ] || continue
   SIG="${ENTRY%%$'\t'*}"
