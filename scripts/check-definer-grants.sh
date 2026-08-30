@@ -178,6 +178,20 @@ if [ "$DEFINER_TOTAL" -eq 0 ]; then
   cannot_check "zero SECURITY DEFINER functions found in schema public on ${PROJECT_REF}; the query examined nothing rather than finding a clean database"
 fi
 
+# The offenders list is read into a variable BEFORE the loop, on purpose. Read
+# straight from a process substitution, jq's exit status is discarded: pipefail
+# does not reach across a process substitution and this script deliberately does
+# not set -e. A response whose offenders key was malformed, renamed or missing
+# would then feed the loop nothing, leave VIOLATIONS empty and report PASS on a
+# database that was never examined for offenders. An empty offenders list and an
+# unreadable one must not look the same, so the key is asserted to be an array
+# first and the read's status is checked, exactly as definer_total's is above.
+printf '%s' "$REPORT" | jq -e '.offenders | type == "array"' >/dev/null 2>&1 \
+  || cannot_check "the response for ${PROJECT_REF} carries no offenders array, so this run established nothing about anon or PUBLIC EXECUTE grants"
+
+OFFENDER_ROWS=$(printf '%s' "$REPORT" | jq -r '.offenders[] | "\(.sig)\t\(.grantee)"') \
+  || cannot_check "could not read the offenders list out of the response for ${PROJECT_REF}"
+
 VIOLATIONS=()
 ALLOWED_HITS=0
 while IFS= read -r ROW; do
@@ -189,11 +203,19 @@ while IFS= read -r ROW; do
     VIOLATIONS+=("$ROW")
     printf 'REFUSED: %s\n' "$ROW"
   fi
-done < <(printf '%s' "$REPORT" | jq -r '.offenders[] | "\(.sig)\t\(.grantee)"')
+done <<< "$OFFENDER_ROWS"
 
 # An allowlist entry that matches no function on the database is a stale
 # exemption: it protects nothing today and it will silently cover a future
 # function that happens to take the same signature. Reported, not fatal.
+#
+# definer_sigs is asserted the same way as offenders. Without it, a missing key
+# makes every jq -e below fail, every entry look stale, and the notice fire for
+# all of them, which reads as a list of stale exemptions rather than as an
+# unreadable answer.
+printf '%s' "$REPORT" | jq -e '.definer_sigs | type == "array"' >/dev/null 2>&1 \
+  || cannot_check "the response for ${PROJECT_REF} carries no definer_sigs array, so the allowlist could not be checked for stale entries"
+
 while IFS= read -r ENTRY; do
   [ -n "$ENTRY" ] || continue
   SIG="${ENTRY%%$'\t'*}"

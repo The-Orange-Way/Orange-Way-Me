@@ -1,0 +1,36 @@
+name: Definer gate self test
+
+# Proves scripts/check-definer-grants.sh can go RED, not only green: the
+# CANNOT CHECK paths, the VIOLATION path, and the two PASS paths are each
+# driven through a synthetic API response and their exit codes asserted.
+#
+# No credential and no database. The management API call is intercepted by a
+# stub curl on PATH, so this is safe to run on a pull request, which the gate
+# itself is not.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/check-definer-grants.sh'
+      - 'scripts/test-check-definer-grants.sh'
+      - '.github/workflows/definer-gate-selftest.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'scripts/check-definer-grants.sh'
+      - 'scripts/test-check-definer-grants.sh'
+      - '.github/workflows/definer-gate-selftest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: Definer gate refuses what it must
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Drive the gate through nine synthetic responses
+        run: bash scripts/test-check-definer-grants.sh
