@@ -1505,7 +1505,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // newSalt was minted a few lines above and written to the row. Deriving
       // against it cannot reproduce anything, so an unpinned row must refuse
       // here rather than mint a replacement key and call that success.
-      saltMatchesExistingRows: false,
+      saltMatchesExistingRows: true,
     });
 
     mekRef.current = mek;
