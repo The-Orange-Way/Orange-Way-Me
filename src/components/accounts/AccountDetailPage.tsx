@@ -157,7 +157,7 @@ export function AccountDetailPage() {
               <p className="mt-1 text-sm text-muted-foreground">{account.institution}</p>
             )}
             <div className="mt-4 font-mono text-4xl font-semibold tabular-nums">
-              {formatCurrency(account.balance, account.currency, loc)}
+              {formatCurrencyWithMode(account.balance, account.currency, prefs.btcDisplayMode, loc)}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Last updated {fmt.formatDate(new Date(account.updated_at))}
