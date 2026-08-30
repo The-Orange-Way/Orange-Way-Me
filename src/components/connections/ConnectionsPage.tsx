@@ -1587,6 +1587,27 @@ export function ConnectionsPage() {
           surfaces in that banner, so the spinner carried no signal of its
           own. Setup is a background concern; it does not need its own box. */}
 
+      {/* DL-1506 / OWM-T0355. The vault is unlocked but the Orange Rails
+          namespace could not be re-derived for this session (most often:
+          a password recovery just rotated the vault salt before anything
+          was pinned). Shown as soon as the reason is set, straight from
+          useVault(), rather than waiting for the customer to trigger an OR
+          call that throws — recovery is exactly the moment they are least
+          likely to go looking for a sync button on their own. */}
+      {orNamespaceDisabledReason && (
+        <div
+          aria-live="polite"
+          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-medium">Some Orange Rails data needs attention.</p>
+            <p className="text-xs text-muted-foreground">
+              {humanizeOrDisabledReason(orNamespaceDisabledReason)}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* OPK registration failed — surface loudly. Without a registered OPK
           public key on OR, every incoming bank transaction would seal under
           a stale or absent key and never decrypt. Bank-connect is blocked
