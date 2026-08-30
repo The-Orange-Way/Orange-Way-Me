@@ -7,6 +7,27 @@
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
+import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
+
+/**
+ * A linked account's balance, safe to sum against a goal's target/starting
+ * amount which is always typed by hand in decimal-BTC-or-fiat scale.
+ *
+ * Bitcoin is one asset stored in two possible scales (decimal BTC or an
+ * integer sats count), and a mistagged row (OWM-T0139: sats magnitude under
+ * currency="BTC") used to be summed as a raw number here, landing up to 1e8x
+ * too large in a goal's current/debt total. This normalizes through the same
+ * heuristic normalizeBitcoinToSats uses elsewhere, then converts back DOWN to
+ * decimal-BTC scale so a correctly-tagged row's contribution is unchanged.
+ */
+function linkedBalance(a: Pick<Account, "balance" | "currency" | "format_version">): number {
+  const raw = Number(a.balance) || 0;
+  if (!isBitcoinCurrency(a.currency)) return raw;
+  const sats = normalizeBitcoinToSats(raw, a.currency, {
+    unitIsExact: unitIsExact(a.format_version),
+  });
+  return sats / 1e8;
+}
 
 export interface GoalProgress {
   current: number;
@@ -81,12 +102,12 @@ export function computeCurrent(goal: Goal, accounts: Account[]): number {
     if (goal.strategy === "specific_amount") {
       return Number(goal.manual_allocation ?? "0") || 0;
     }
-    return linked.reduce((sum, a) => sum + Math.max(0, Number(a.balance) || 0), 0);
+    return linked.reduce((sum, a) => sum + Math.max(0, linkedBalance(a)), 0);
   }
 
   // pay_down: amount paid off = starting - |current|
   const start = Number(goal.starting_balance ?? goal.target_amount) || 0;
-  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(linkedBalance(a)), 0);
   return Math.max(0, start - currentDebt);
 }
 
