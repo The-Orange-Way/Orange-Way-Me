@@ -90,7 +90,12 @@ canon_terms() {
 
 # canon_terms_usable PATTERN
 #
-# True when grep can actually compile PATTERN, false when it cannot.
+# True when PATTERN can actually be scanned with, false when it cannot, and
+# on false it records WHICH of the three ways it failed in the global
+# CANON_TERMS_REASON: refused, matches-everything, or empty. Those are three
+# different problems with three different fixes, and every consumer used to
+# report the first one whatever the cause. canon_terms_reason_text below
+# turns the recorded reason into the one sentence they all print.
 #
 # The list is documented as one regex FRAGMENT per line, so an unbalanced
 # parenthesis or bracket is a realistic typo, and the join hides it: the
@@ -127,20 +132,63 @@ canon_terms() {
 canon_terms_usable() {
   local pattern="${1-}"
   local rc=0
+  CANON_TERMS_REASON=empty
   [ -n "$pattern" ] || return 1
   printf '\n' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
-  # 1 = compiled and did not match. That is the only healthy answer.
-  #
-  # 2 or higher = grep refused the pattern outright, which is the typo case
-  #     this function was added for.
-  #
-  # 0 = the pattern matched a line with nothing in it. The empty string is
-  #     contained in every line, so such a pattern matches every line of
-  #     every file. This is the match-everything failure: an empty
-  #     alternation branch left by a stray pipe in a fragment, or a
-  #     fragment that is entirely optional. It compiles, so the refusal
-  #     above cannot see it, and it turns the scan into a refusal of the
-  #     whole tree while the term count printed next to it still reads
-  #     correct.
-  [ "$rc" -eq 1 ]
+  case "$rc" in
+    # 1 = compiled and did not match. That is the only healthy answer.
+    1)
+      CANON_TERMS_REASON=ok
+      return 0
+      ;;
+    # 0 = the pattern matched a line with nothing in it. The empty string is
+    #     contained in every line, so such a pattern matches every line of
+    #     every file. This is the match-everything failure: an empty
+    #     alternation branch left by a stray pipe in a fragment, or a
+    #     fragment that is entirely optional. It compiles, so the refusal
+    #     below cannot see it, and it turns the scan into a refusal of the
+    #     whole tree while the term count printed next to it still reads
+    #     correct.
+    0)
+      CANON_TERMS_REASON=matches-everything
+      return 1
+      ;;
+    # 2 or higher = grep refused the pattern outright, which is the typo
+    #     case this function was added for.
+    *)
+      CANON_TERMS_REASON=refused
+      return 1
+      ;;
+  esac
+}
+
+# canon_terms_reason_text [REASON]
+#
+# Prints ONE line saying what is wrong with the list and what it would cost,
+# for the REASON given, or for the last call to canon_terms_usable when no
+# argument is passed.
+#
+# It never prints any part of the list. Every consumer's message states that
+# already and has to keep it true: the value is a repository secret and these
+# logs are public.
+#
+# WHERE to fix it is deliberately NOT here. That answer is different for each
+# consumer, a repository secret in CI and a gitignored file locally, so each
+# one adds its own line. What is wrong, and what it would cost, is the same
+# everywhere, so it is written once.
+canon_terms_reason_text() {
+  case "${1-${CANON_TERMS_REASON-}}" in
+    refused)
+      printf '%s\n' "The reserved-term list does not compile as a regular expression, so every scan that uses it would report clean while checking nothing. At least one fragment is not valid regex; an unbalanced parenthesis or bracket is the usual cause."
+      ;;
+    matches-everything)
+      printf '%s\n' "The reserved-term list matches every line of every file, so every scan that uses it would flag the whole tree instead of checking it. One fragment matches the empty string; an empty alternation branch left by a stray pipe, or an entirely optional fragment, is the usual cause."
+      ;;
+    empty)
+      printf '%s\n' "The reserved-term list holds no usable terms, so every scan that uses it would check for nothing. Either nothing is configured, or every line is blank or a comment."
+      ;;
+    *)
+      printf '%s\n' "The reserved-term list cannot be scanned with, and no reason was recorded. That is a defect in scripts/canon-terms.sh itself; treat this run as unrunnable, never as clean."
+      ;;
+  esac
 }
