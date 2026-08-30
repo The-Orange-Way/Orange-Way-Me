@@ -89,7 +89,7 @@ import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
-import { humanizeError, toastError } from "@/lib/friendly-error";
+import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
 import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
