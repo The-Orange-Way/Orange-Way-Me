@@ -382,7 +382,7 @@ check 'the explanation prints no part of the list' \
 # defect in this gate has had, in the file written to catch it. Raising
 # this number when a case is added is the point: it makes deleting a case
 # a deliberate act instead of a silent one.
-EXPECTED_CASES=31
+EXPECTED_CASES=35
 TOTAL=$((PASSED + FAILED))
 
 printf '\n%d passed, %d failed, %d ran of %d expected\n\n' \
