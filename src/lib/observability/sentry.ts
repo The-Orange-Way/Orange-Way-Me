@@ -66,6 +66,8 @@ const SECRET_KEY_PATTERNS = [
   /key/i,
   /txn_key/i,
   /seed/i,
+  /secret/i,
+  /xpub/i,
   /private_key/i,
   /privatekey/i,
   /api_key/i,
@@ -244,20 +246,36 @@ export function initSentry(): void {
     // silently vacuous. The companion test asserts each name is
     // dropped against a synthetic defaults list.
     integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
-    beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
+    beforeSend: (event) => {
+      // Fail closed. If scrubbing throws partway through walking a
+      // payload, drop the event rather than let a half-scrubbed one
+      // reach the network. A dropped crash report costs us debugging
+      // signal; a half-scrubbed one costs the customer the guarantee
+      // this whole wrapper exists to make.
+      try {
+        return scrubEventLoose(event) as Sentry.ErrorEvent;
+      } catch {
+        return null;
+      }
+    },
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
       // BrowserClient grabs every console call by default. We only want
       // error/warn breadcrumbs reaching the buffer, partly to keep volume
       // sane, partly to guarantee the DEV-only key-fingerprint console.log
       // can never end up attached to a captured event.
-      if (bc.category === "console") {
-        const level = (bc.level ?? "log").toLowerCase();
-        if (level !== "error" && level !== "warn") return null;
+      // Fail closed, for the same reason as beforeSend above.
+      try {
+        if (bc.category === "console") {
+          const level = (bc.level ?? "log").toLowerCase();
+          if (level !== "error" && level !== "warn") return null;
+        }
+        if (bc.message) bc.message = scrubString(bc.message);
+        if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+        return bc;
+      } catch {
+        return null;
       }
-      if (bc.message) bc.message = scrubString(bc.message);
-      if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
-      return bc;
     },
   });
 }
