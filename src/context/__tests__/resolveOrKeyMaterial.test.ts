@@ -68,7 +68,9 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
     });
 
     // (2) no key material at all comes back on the refuse path.
-    expect(result.ok).toBe(false);
+    // DELIBERATE FAILURE, DO NOT MERGE: this assertion is inverted on purpose,
+    // to prove a failing assertion in this suite turns the check run red.
+    expect(result.ok).toBe(true);
     expect("orMekBytes" in result).toBe(false);
 
     // Nothing derived, nothing wrapped: there are no bytes in memory a later
