@@ -233,7 +233,7 @@ canon_terms_reason_text() {
       printf '%s\n' "The reserved-term list does not compile as a regular expression, so every scan that uses it would report clean while checking nothing. At least one fragment is not valid regex; an unbalanced parenthesis or bracket is the usual cause."
       ;;
     matches-everything)
-      printf '%s\n' "The reserved-term list matches every line of every file, so every scan that uses it would flag the whole tree instead of checking it. One fragment matches the empty string; an empty alternation branch left by a stray pipe, or an entirely optional fragment, is the usual cause."
+      printf '%s\n' "The reserved-term list matches every line of every file, so every scan that uses it would flag the whole tree instead of checking it. One fragment matches far more than it names: an empty alternation branch left by a stray pipe, an entirely optional fragment, or a fragment edited down to a catch-all such as a bare dot, are the usual causes."
       ;;
     empty)
       printf '%s\n' "The reserved-term list holds no usable terms, so every scan that uses it would check for nothing. Either nothing is configured, or every line is blank or a comment."
