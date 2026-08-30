@@ -166,13 +166,17 @@ if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
   RESERVED_TERMS="$(canon_terms < .reserved-terms)"
 fi
 
-# A list that does not compile is not a clean tree. The list is one regex
-# fragment per line, so an unbalanced parenthesis or bracket is a realistic
-# typo; grep exits 2 on a pattern it refuses, scan() below discards that
-# status with "|| true", and the category prints a green tick having
-# matched nothing. Refuse the run here, while we still know why.
+# A list that cannot be scanned with is not a clean tree, and it fails in
+# three different ways: grep refuses the pattern (the unbalanced
+# parenthesis case), it compiles and matches the empty string so it hits
+# every line of every file, or it is empty. All three arrive here looking
+# identical, because scan() below discards grep's status with "|| true" and
+# the category prints a green tick having matched nothing. Refuse the run
+# while we still know why, and say WHICH why: telling someone whose list
+# matches everything that it "does not compile" sends them hunting a typo
+# that is not there, in a value nobody can read back.
 if [[ -n "$RESERVED_TERMS" ]] && ! canon_terms_usable "$RESERVED_TERMS"; then
-  printf "\n\033[31m▎ The reserved-term list does not compile as a regular expression, so the scan would check for nothing.\033[0m\n" >&2
+  printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
   printf "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line).\n" >&2
   printf "  No part of the list is printed here.\n\n" >&2
   exit 1

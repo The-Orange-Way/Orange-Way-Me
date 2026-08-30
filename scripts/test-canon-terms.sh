@@ -259,7 +259,96 @@ fi
 check 'an empty pattern is never reported usable' \
   'refused' "$EMPTY_VERDICT"
 
-printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
+# ----------------------------------------------------------------------
+# WHICH way it is unusable, not just that it is.
+#
+# canon_terms_usable refuses a pattern for three different reasons and the
+# four consumers print the one it records. Getting that mapping wrong ships
+# a confidently wrong diagnostic, which is worse than the vague one it
+# replaced: the value is a secret nobody can read back, so the message is
+# the only thing a maintainer has to go on.
+# ----------------------------------------------------------------------
+
+canon_terms_usable "$(printf 'zzalpha\nzzbravo\n' | canon_terms)"
+check 'a usable list records the reason as ok' \
+  'ok' "$CANON_TERMS_REASON"
+
+canon_terms_usable "$(printf 'zzalpha\nzz(bravo\n' | canon_terms)"
+check 'a fragment grep cannot compile is recorded as refused' \
+  'refused' "$CANON_TERMS_REASON"
+
+# Valid ERE everywhere, and it matches the empty string. Reporting this one
+# as "refused" is the bug: it compiles, and the consequence is inverted.
+canon_terms_usable '(zzalpha)?'
+check 'a pattern that matches everything is recorded as such, not as refused' \
+  'matches-everything' "$CANON_TERMS_REASON"
+
+canon_terms_usable ''
+check 'an empty pattern is recorded as empty' \
+  'empty' "$CANON_TERMS_REASON"
+
+REFUSED_TEXT="$(canon_terms_reason_text refused)"
+EVERYTHING_TEXT="$(canon_terms_reason_text matches-everything)"
+
+if [ "$REFUSED_TEXT" = "$EVERYTHING_TEXT" ]; then
+  REASONS_DIFFER=identical
+else
+  REASONS_DIFFER=different
+fi
+check 'the two explanations are not the same sentence' \
+  'different' "$REASONS_DIFFER"
+
+if printf '%s\n' "$REFUSED_TEXT" | grep -q 'does not compile'; then
+  REFUSED_SAYS=states-its-cause
+else
+  REFUSED_SAYS=wrong-cause
+fi
+check 'the refused explanation still says the list does not compile' \
+  'states-its-cause' "$REFUSED_SAYS"
+
+# The half that was previously false. A list that matches everything makes
+# the scan flag the whole tree, the opposite of checking nothing, and a
+# maintainer told otherwise looks for a bracket that is not there.
+if printf '%s\n' "$EVERYTHING_TEXT" | grep -q 'every line of every file'; then
+  EVERYTHING_SAYS=states-its-consequence
+else
+  EVERYTHING_SAYS=wrong-consequence
+fi
+check 'the matches everything explanation says the whole tree would be flagged' \
+  'states-its-consequence' "$EVERYTHING_SAYS"
+
+# Every consumer's message promises that no part of the list is printed,
+# and these logs are public. The fixture terms all carry the zz prefix, so
+# any of them reaching the text would show up here.
+canon_terms_usable "$(printf 'zzalpha\nzz(bravo\n' | canon_terms)"
+if canon_terms_reason_text | grep -q 'zz'; then
+  REASON_LEAK=printed-a-term
+else
+  REASON_LEAK=withheld
+fi
+check 'the explanation prints no part of the list' \
+  'withheld' "$REASON_LEAK"
+
+# How many cases this file must actually RUN.
+#
+# Deciding the exit status on the failure counter alone means a file
+# truncated to nothing reports "0 passed, 0 failed", prints that the self
+# test passed, and exits 0. That is the absence-reads-as-green shape every
+# defect in this gate has had, in the file written to catch it. Raising
+# this number when a case is added is the point: it makes deleting a case
+# a deliberate act instead of a silent one.
+EXPECTED_CASES=31
+TOTAL=$((PASSED + FAILED))
+
+printf '\n%d passed, %d failed, %d ran of %d expected\n\n' \
+  "$PASSED" "$FAILED" "$TOTAL" "$EXPECTED_CASES"
+
+if [ "$TOTAL" -lt "$EXPECTED_CASES" ]; then
+  printf 'canon-terms self test FAILED: only %d case(s) ran, %d were expected.\n' \
+    "$TOTAL" "$EXPECTED_CASES"
+  printf 'Cases have been removed, or this file did not run to the end.\n\n'
+  exit 1
+fi
 
 if [ "$FAILED" -ne 0 ]; then
   printf 'canon-terms self test FAILED\n\n'

@@ -173,12 +173,15 @@ else
     if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
       PRIVATE_PATTERN="$(canon_terms < "$REPO_ROOT/.reserved-terms")"
     fi
-    # One typo in a fragment, an unbalanced parenthesis say, and grep exits
-    # 2 on every use below. Both scans read that as "no match" and the gate
-    # prints that no reserved terms were found. Refuse instead, with a
-    # reason, and without printing any part of the list.
+    # A pattern this check cannot scan with fails in three different ways:
+    # grep refuses it (one typo in a fragment, an unbalanced parenthesis
+    # say, and grep exits 2 on every use below), it compiles and matches
+    # the empty string so it hits every line of every file, or it is empty.
+    # Both scans read all three as "no match" and the gate prints that no
+    # reserved terms were found. Refuse instead, with the reason that
+    # actually applies, and without printing any part of the list.
     if [ -n "$PRIVATE_PATTERN" ] && ! canon_terms_usable "$PRIVATE_PATTERN"; then
-      red "✗ The reserved-term list does not compile as a regular expression, so this check would find nothing."
+      red "✗ $(canon_terms_reason_text)"
       red "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line)."
       red "  No part of the list is printed here."
       FAIL=1
