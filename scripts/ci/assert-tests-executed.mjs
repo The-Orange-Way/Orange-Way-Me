@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * OWM-T0353: CI cannot tell a test that RAN from one that was skipped or
+ * CI cannot tell a test that RAN from one that was skipped or
  * deleted. Ported from Orange-Way-Books tests/e2e/scripts/assert-specs-ran.mjs
  * (DL-0779), adapted from Playwright's JSON report shape to vitest's.
  *
