@@ -19,6 +19,7 @@ src/lib/or/__tests__/or-key-material.test.ts
 # DEV-0070. Proves the resolveOrKeyMaterial CALLER writes none of the three
 # Orange Rails key-material columns on that same refuse path.
 src/context/__tests__/resolveOrKeyMaterial.test.ts
+src/context/__tests__/this-file-does-not-exist.test.ts
 
 # OWM-T0263 adds a third entry here (recoverWithCode-salt-flag.test.ts)
 # once that PR merges to dev. Not listed yet: it does not exist on this
