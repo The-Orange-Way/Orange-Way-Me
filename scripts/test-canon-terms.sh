@@ -251,6 +251,44 @@ fi
 check 'the everything fixture does match text containing no term' \
   'matched' "$EVERYTHING_MATCHES"
 
+# The other half of the match-everything class, and the half a blank-line
+# probe cannot see. A bare "." matches every NON-EMPTY line of every file
+# and matches a blank line nowhere, so a probe that asks only about the
+# empty string reports this pattern healthy. The list is documented as one
+# regex FRAGMENT per line, so a fragment edited down to "." is a realistic
+# edit, and the result flags every file in the tree.
+if canon_terms_usable 'zzalpha|.|zzbravo'; then
+  CATCH_ALL_VERDICT=usable
+else
+  CATCH_ALL_VERDICT=refused
+fi
+check 'a catch-all branch matching every non-empty line is refused' \
+  'refused' "$CATCH_ALL_VERDICT"
+
+# And that fixture is the hazard rather than a strawman: it matches a line
+# holding no reserved term at all. If this case ever reports "missed", the
+# refusal above is passing for some other reason and proves nothing.
+if printf '%s\n' 'an ordinary line with no reserved term in it' | grep -qE 'zzalpha|.|zzbravo'; then
+  CATCH_ALL_MATCHES=matched
+else
+  CATCH_ALL_MATCHES=missed
+fi
+check 'the catch-all fixture does match text containing no term' \
+  'matched' "$CATCH_ALL_MATCHES"
+
+# This is the case that pins WHY the probe needs a second line. The
+# catch-all fixture does not match a blank line, so the blank-line probe
+# alone answers "healthy" for it. Delete the second probe line and this
+# case and the refusal above disagree, which is how the reason for the
+# design survives an edit by someone who was not here for it.
+if printf '\n' | grep -qE 'zzalpha|.|zzbravo'; then
+  CATCH_ALL_ON_BLANK=matched
+else
+  CATCH_ALL_ON_BLANK=missed
+fi
+check 'the catch-all fixture does not match a blank line, so one probe line would miss it' \
+  'missed' "$CATCH_ALL_ON_BLANK"
+
 if canon_terms_usable ""; then
   EMPTY_VERDICT=usable
 else
