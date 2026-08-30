@@ -69,6 +69,20 @@ jobs:
             echo "::error::No test files found under src/ or supabase/functions/ -- the vitest include glob is broken or there are no tests. Fix the glob rather than let it report green."
             exit 1
           fi
+
+          # P0 recovery-guard presence floor: these two files
+          # guard the DL-1506 silent-data-loss path. Deleting either one
+          # would otherwise just drop DISK by one and pass silently -- name
+          # it and fail loudly instead.
+          for P0_FILE in \
+            "src/lib/or/__tests__/or-key-material.test.ts" \
+            "src/context/__tests__/resolveOrKeyMaterial.test.ts"; do
+            if [ ! -f "$P0_FILE" ]; then
+              echo "::error::P0 recovery-guard test file missing: $P0_FILE -- this file must exist and run on every PR."
+              exit 1
+            fi
+          done
+
           echo "Found $DISK test file(s) on disk ($SRC_COUNT under src/, $FUNC_COUNT under supabase/functions/)"
           echo "EXPECTED_TEST_FILES=$DISK" >> "$GITHUB_ENV"
 
@@ -76,23 +90,36 @@ jobs:
         run: bun run test -- --reporter=verbose --reporter=json --outputFile="$RUNNER_TEMP/vitest-results.json"
 
       - name: Test-collection verify (post-test guard)
-        # Compares the number of test SUITES vitest actually collected against
-        # the file count from the inventory step. If vitest collected fewer
-        # than exist on disk, the include glob is silently dropping tests.
-        # This is the exact failure the widened glob in vitest.config.ts fixes,
-        # and this step ensures the fix cannot silently regress.
+        # Two checks now, not one. The suite-count check (unchanged) catches
+        # the include glob silently dropping whole files. It cannot catch a
+        # file that collects but whose tests never execute -- describe.skip,
+        # or a suite that collects with zero real assertions run. That is
+        # what scripts/ci/assert-tests-executed.mjs (ported from
+        # the OWB DL-0779 zero-spec guard) checks: it fails when total
+        # executed tests is 0, or when any collected suite executed nothing
+        # of its own.
         run: |
           set -euo pipefail
           if [ ! -f "$RUNNER_TEMP/vitest-results.json" ]; then
             echo "::error::vitest JSON output not found at $RUNNER_TEMP/vitest-results.json -- the test step may not have written it."
             exit 1
           fi
-          COLLECTED=$(node -e "const r=require('$RUNNER_TEMP/vitest-results.json'); console.log(r.testResults ? r.testResults.length : 0)")
-          if [ "$COLLECTED" -lt "$EXPECTED_TEST_FILES" ]; then
-            echo "::error::Vitest collected $COLLECTED test suite(s) but $EXPECTED_TEST_FILES file(s) exist on disk. The include glob is silently dropping tests -- widen it in vitest.config.ts."
+          node scripts/ci/assert-tests-executed.mjs "$RUNNER_TEMP/vitest-results.json" "$EXPECTED_TEST_FILES"
+
+      # Prove the guard above can go RED in this same run, so it is a real
+      # gate and not a green rubber stamp. Feed it a synthetic report where a
+      # suite collected but executed nothing, and fail the job if the guard
+      # does not exit non-zero. Mirrors Orange-Way-Books ci.yml's "Prove the
+      # zero-spec guard fires on a zero-executed report" step (DL-0779).
+      - name: Prove the executed-tests guard fires on a zero-executed report
+        run: |
+          set -euo pipefail
+          echo '{"testResults":[{"name":"synthetic.test.ts","assertionResults":[{"status":"skipped"}]}]}' > "$RUNNER_TEMP/zero-executed-vitest.json"
+          if node scripts/ci/assert-tests-executed.mjs "$RUNNER_TEMP/zero-executed-vitest.json"; then
+            echo "::error::executed-tests guard did NOT fail on a zero-executed report"
             exit 1
           fi
-          echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
+          echo "executed-tests guard correctly failed on a zero-executed report"
 
   migration-hygiene:
     name: Migration filename hygiene
