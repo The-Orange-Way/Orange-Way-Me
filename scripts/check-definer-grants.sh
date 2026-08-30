@@ -178,6 +178,20 @@ if [ "$DEFINER_TOTAL" -eq 0 ]; then
   cannot_check "zero SECURITY DEFINER functions found in schema public on ${PROJECT_REF}; the query examined nothing rather than finding a clean database"
 fi
 
+# The offenders list is read into a variable BEFORE the loop, on purpose. Read
+# straight from a process substitution, jq's exit status is discarded: pipefail
+# does not reach across a process substitution and this script deliberately does
+# not set -e. A response whose offenders key was malformed, renamed or missing
+# would then feed the loop nothing, leave VIOLATIONS empty and report PASS on a
+# database that was never examined for offenders. An empty offenders list and an
+# unreadable one must not look the same, so the key is asserted to be an array
+# first and the read's status is checked, exactly as definer_total's is above.
+printf '%s' "$REPORT" | jq -e '.offenders | type == "array"' >/dev/null 2>&1 \
+  || cannot_check "the response for ${PROJECT_REF} carries no offenders array, so this run established nothing about anon or PUBLIC EXECUTE grants"
+
+OFFENDER_ROWS=$(printf '%s' "$REPORT" | jq -r '.offenders[] | "\(.sig)\t\(.grantee)"') \
+  || cannot_check "could not read the offenders list out of the response for ${PROJECT_REF}"
+
 VIOLATIONS=()
 ALLOWED_HITS=0
 while IFS= read -r ROW; do
@@ -189,7 +203,7 @@ while IFS= read -r ROW; do
     VIOLATIONS+=("$ROW")
     printf 'REFUSED: %s\n' "$ROW"
   fi
-done < <(printf '%s' "$REPORT" | jq -r '.offenders[] | "\(.sig)\t\(.grantee)"')
+done <<< "$OFFENDER_ROWS"
 
 # An allowlist entry that matches no function on the database is a stale
 # exemption: it protects nothing today and it will silently cover a future
