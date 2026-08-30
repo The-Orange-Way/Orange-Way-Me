@@ -89,7 +89,7 @@ import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
-import { humanizeError, toastError } from "@/lib/friendly-error";
+import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
 import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
@@ -211,6 +211,7 @@ export function ConnectionsPage() {
     exportOrTxnsKey,
     buildHouseholdSignatureFields,
     getOpkKeypair,
+    orNamespaceDisabledReason,
   } = useVault();
   const { accounts, updateAccount } = useAccounts();
   const {
@@ -369,6 +370,17 @@ export function ConnectionsPage() {
       cancelled = true;
     };
   }, [user, subaccountId, isUnlocked]);
+
+  // OWM-T0355. The OR namespace can come back refused (DL-1506: salt rotated
+  // while unpinned, most commonly right after a vault recovery) before the
+  // OPK-registration effect below ever runs. Surface that specific, actionable
+  // reason through the same securingError banner the OPK effect uses, rather
+  // than letting the customer land on Connections and see nothing until they
+  // trigger an OR action that throws.
+  useEffect(() => {
+    if (!orNamespaceDisabledReason) return;
+    setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
+  }, [orNamespaceDisabledReason]);
 
   // Register the OPK public key on OR once the subaccount exists. or-quiltt-sync
   // seals background-synced bank transactions to this key; if registration
