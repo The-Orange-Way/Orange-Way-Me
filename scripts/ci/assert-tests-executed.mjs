@@ -38,7 +38,9 @@ const expectedFilesArg = process.argv[3];
 const expectedFiles = expectedFilesArg !== undefined ? Number(expectedFilesArg) : null;
 
 if (!reportPath) {
-  fail("no report path given (usage: assert-tests-executed.mjs <results.json> [expectedFileCount])");
+  fail(
+    "no report path given (usage: assert-tests-executed.mjs <results.json> [expectedFileCount])",
+  );
 }
 
 if (!fs.existsSync(reportPath)) {
@@ -83,4 +85,6 @@ if (emptySuites.length > 0) {
   );
 }
 
-console.log(`assert-tests-executed: OK, ${totalExecuted} test(s) executed across ${suites.length} suite(s)`);
+console.log(
+  `assert-tests-executed: OK, ${totalExecuted} test(s) executed across ${suites.length} suite(s)`,
+);
