@@ -1592,7 +1592,7 @@ export function ConnectionsPage() {
           a password recovery just rotated the vault salt before anything
           was pinned). Shown as soon as the reason is set, straight from
           useVault(), rather than waiting for the customer to trigger an OR
-          call that throws — recovery is exactly the moment they are least
+          call that throws: recovery is exactly the moment they are least
           likely to go looking for a sync button on their own. */}
       {orNamespaceDisabledReason && (
         <div
