@@ -163,6 +163,19 @@ function scrubUrl(u: string): string {
   return scrubString(noHash);
 }
 
+/**
+ * True when an object key must have its VALUE redacted before the event is
+ * sent. Exported so src/lib/observability/__tests__/key-material-scrub-parity.test.ts
+ * can ask this list about a field name directly, rather than inferring the
+ * answer from a synthetic event and a module-private scrubber.
+ *
+ * Every pattern above is non-global, so .test() carries no lastIndex state
+ * between calls and this is safe to call in a loop.
+ */
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY_PATTERNS.some((p) => p.test(key));
+}
+
 function scrubValue(v: unknown, depth = 0): unknown {
   if (depth > 8) return REDACTED;
   if (v == null) return v;
@@ -175,7 +188,7 @@ function scrubValue(v: unknown, depth = 0): unknown {
   if (typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (SECRET_KEY_PATTERNS.some((p) => p.test(k))) {
+      if (isSecretKey(k)) {
         out[k] = REDACTED;
       } else if (k === "url" && typeof val === "string") {
         out[k] = scrubUrl(val);
