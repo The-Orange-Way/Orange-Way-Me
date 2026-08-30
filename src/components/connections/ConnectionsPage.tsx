@@ -204,6 +204,7 @@ export function ConnectionsPage() {
   const { user } = useAuth();
   const {
     isUnlocked,
+    orNamespaceDisabledReason,
     encryptText,
     decryptOrCipher,
     decryptOrTxnCipher,
