@@ -40,7 +40,6 @@ interface Props {
 
 export function GoalFormDialog({ open, onOpenChange, initial, onSave }: Props) {
   const { accounts } = useAccounts();
-  const fmt = useLocaleFormat();
   const { prefs } = useDashboardPrefs();
   const loc = numberLocale(prefs.numberFormat);
   const [type, setType] = useState<GoalType>("save_up");
