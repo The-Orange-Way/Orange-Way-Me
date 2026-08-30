@@ -100,6 +100,16 @@ jobs:
             exit 1
           fi
           . scripts/canon-terms.sh
+          # Present is not the same as usable: a file that exists and fails
+          # to source leaves the functions undefined. Ask for each by name,
+          # not just canon_terms, so a broken library names itself rather
+          # than the reserved-term list when this step fails.
+          for FN in canon_terms canon_terms_usable canon_terms_reason_text; do
+            if ! declare -f "$FN" >/dev/null 2>&1; then
+              echo "::error::scripts/canon-terms.sh was sourced but defines no $FN; the identity scan cannot run."
+              exit 1
+            fi
+          done
           PATTERN="$(printf '%s\n' "$RAW_PATTERN" | canon_terms)"
 
           if [ -z "$PATTERN" ]; then
