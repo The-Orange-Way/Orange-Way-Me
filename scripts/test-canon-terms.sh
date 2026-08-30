@@ -321,6 +321,13 @@ canon_terms_usable '(zzalpha)?'
 check 'a pattern that matches everything is recorded as such, not as refused' \
   'matches-everything' "$CANON_TERMS_REASON"
 
+# The catch-all class reaches the same reason code by the other probe line.
+# It compiles perfectly, so recording it as "refused" would send a
+# maintainer hunting a bracket that is not there.
+canon_terms_usable 'zzalpha|.|zzbravo'
+check 'a catch-all branch is recorded as matches-everything, not as refused' \
+  'matches-everything' "$CANON_TERMS_REASON"
+
 canon_terms_usable ''
 check 'an empty pattern is recorded as empty' \
   'empty' "$CANON_TERMS_REASON"
