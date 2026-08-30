@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { OrNamespaceDisabledError } from "@/lib/or/or-key-material";
 
 /**
  * Show a customer-friendly error toast. Logs the raw error to the
