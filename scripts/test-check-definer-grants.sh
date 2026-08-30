@@ -55,6 +55,7 @@ run_case() {
     SUPABASE_ACCESS_TOKEN='stub-token-not-a-real-credential' \
     OW_DEFINER_PROJECT_REF="$DEV_REF" \
     OW_TEST_BODY="$BODY" \
+    GITHUB_STEP_SUMMARY="${WORK}/summary.md" \
     bash "$GATE" 2>&1
   )
   RC=$?
