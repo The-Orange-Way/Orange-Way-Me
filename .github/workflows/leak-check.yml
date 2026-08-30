@@ -117,7 +117,22 @@ jobs:
         #
         # This needs no secret, so it runs on fork and Dependabot pull
         # requests too, where the reserved-term category itself cannot.
-        run: bash scripts/test-canon-terms.sh
+        #
+        # The result line is asserted HERE, in the caller, and not only
+        # inside the script. An assertion that lives in the file it
+        # protects disappears with that file: bash exits 0 on a zero-byte
+        # script, so a truncated self test printed nothing, this step went
+        # green, and the whole leak check reported a pass having verified
+        # nothing. The script's own case-count floor catches cases deleted
+        # from the middle of an intact file; this catches the file not
+        # running to the end at all. pipefail is set so tee cannot hide a
+        # non-zero exit from the script.
+        run: |
+          set -euo pipefail
+          bash scripts/test-canon-terms.sh | tee "$RUNNER_TEMP/canon-self-test.log"
+          grep -qE '^[0-9]+ passed, 0 failed, [0-9]+ ran of [0-9]+ expected$' \
+            "$RUNNER_TEMP/canon-self-test.log" \
+            || { echo "::error::the canon-terms self test printed no result line, so it did not run to the end. A self test that cannot say how many cases ran has verified nothing."; exit 1; }
 
       - name: Leak scan red run self test
         # The reserved-term category withholds matched text in CI, and a
@@ -130,7 +145,19 @@ jobs:
         # Like the canonicalizer self test above it needs no secret, so it
         # runs on fork and Dependabot pull requests, where the reserved-term
         # category itself cannot.
-        run: bash scripts/test-leak-scan-red.sh
+        #
+        # Asserted at the caller for the same reason as the step above: this
+        # script decides its exit status on a failure counter alone, so a
+        # truncated or emptied copy prints nothing, exits 0, and this step
+        # goes green having driven no scanner at all. The output it tees is
+        # fixture output only: the harness supplies its own invented terms
+        # and never reads the real reserved-term list.
+        run: |
+          set -euo pipefail
+          bash scripts/test-leak-scan-red.sh | tee "$RUNNER_TEMP/leak-red-self-test.log"
+          grep -qE '^[0-9]+ passed, 0 failed$' \
+            "$RUNNER_TEMP/leak-red-self-test.log" \
+            || { echo "::error::the leak scan red run self test printed no result line, so it did not run to the end. A red-run proof that produced no result has proved nothing."; exit 1; }
 
       - name: Run pre-publish leak scan
         # Fails the job (and the required check) if any leak is found.
