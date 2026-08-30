@@ -20,7 +20,7 @@ src/lib/or/__tests__/or-key-material.test.ts
 # Orange Rails key-material columns on that same refuse path.
 src/context/__tests__/resolveOrKeyMaterial.test.ts
 
-# OWM-T0263. Pins the literal saltMatchesExistingRows: false at the
-# recoverWithCode call site itself, the production call site the two tests
-# above do not reach.
-src/context/__tests__/recoverWithCode-salt-flag.test.ts
+# OWM-T0263 adds a third entry here (recoverWithCode-salt-flag.test.ts)
+# once that PR merges to dev. Not listed yet: it does not exist on this
+# branch's tree, and listing a file the tree does not have would fail
+# every PR with a false "missing from collection" error.
