@@ -36,6 +36,9 @@ const ROTATION_BODY = {
   transactions: [{ id: "row-1", enc_amount: "-42.10" }],
 };
 
+/** What supabase-js says when it has no upstream status to report. */
+const OPAQUE_PROXY_MESSAGE = "Edge Function returned a non-2xx status code";
+
 function fakeProxy(responses: Array<() => Promise<unknown>>) {
   const calls: Array<{ endpoint: string; payload: Payload }> = [];
   const fn = async (endpoint: string, payload: Payload): Promise<unknown> => {
@@ -75,7 +78,7 @@ describe("registerOpk rotation-guard retry", () => {
     // Status 0 and a message that says nothing, so the only thing left to
     // branch on is body.error. This is the assertion that fails if the
     // narrowing ever stops retaining it.
-    const err = new CallProxyError("Edge Function returned a non-2xx status code", 0, ROTATION_BODY);
+    const err = new CallProxyError(OPAQUE_PROXY_MESSAGE, 0, ROTATION_BODY);
     expect((err.body as { error?: string }).error).toBe("confirm_rotation required");
 
     const proxy = fakeProxy([rejectWith(err), resolveOk]);
