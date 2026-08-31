@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import { VALUE_SHAPE_REDACTED } from "@/lib/observability/value-shapes";
 
 const initMock = vi.fn();
 
@@ -57,5 +58,100 @@ describe("Sentry vs PostHog scrubber parity (DL-1584)", () => {
     for (const key of MUST_REDACT_KEYS) {
       expect(scrubbed.extra[key], `Sentry scrubber did not redact "${key}"`).toBe("[redacted]");
     }
+  });
+});
+
+// The public BIP32 test vector extended key. 111 characters, so it sits
+// comfortably under the PostHog 256 character truncation cap, and it is
+// nobody's key. Never put a real one in a public repo.
+const XPUB =
+  "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8";
+
+describe("key-shaped VALUES under innocuous key names", () => {
+  beforeEach(() => {
+    initMock.mockClear();
+    vi.stubEnv("VITE_SENTRY_DSN", "https://public@sentry.test/123");
+  });
+
+  it("redacts an extended key under a key named detail on the PostHog side", () => {
+    const r = scrubPostHogEvent({
+      uuid: "00000000-0000-0000-0000-000000000000",
+      event: "wallet_import_failed",
+      properties: { step: "decode", detail: XPUB },
+    } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
+
+    expect(r?.properties.detail).toBe(VALUE_SHAPE_REDACTED);
+    // The innocuous sibling must survive: a scrubber that eats ordinary
+    // fields costs the debugging signal telemetry exists for.
+    expect(r?.properties.step).toBe("decode");
+  });
+
+  it("redacts an extended key in front of a string past the truncation cap", () => {
+    // Regression guard for ordering. The cap keeps the FIRST 256
+    // characters, so capping before the shape pass ships the key.
+    const long = `${XPUB} ${"a".repeat(400)}`;
+    const r = scrubPostHogEvent({
+      uuid: "00000000-0000-0000-0000-000000000000",
+      event: "wallet_import_failed",
+      properties: { detail: long },
+    } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
+
+    expect(String(r?.properties.detail)).not.toContain("661MyMwAqRbcF");
+    expect(String(r?.properties.detail)).toContain(VALUE_SHAPE_REDACTED);
+  });
+
+  it("redacts an extended key under a key named detail on the Sentry side", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: { step: "decode", detail: XPUB },
+    }) as { extra: Record<string, unknown> };
+
+    expect(scrubbed.extra.detail).toBe(VALUE_SHAPE_REDACTED);
+    expect(scrubbed.extra.step).toBe("decode");
+  });
+
+  it("redacts a bare extended key in an exception message on the Sentry side", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      exception: { values: [{ value: `sync failed for ${XPUB}` }] },
+    }) as { exception: { values: Array<{ value: string }> } };
+
+    const value = scrubbed.exception.values[0].value;
+    expect(value).not.toContain("661MyMwAqRbcF");
+    expect(value).toContain(VALUE_SHAPE_REDACTED);
+  });
+
+  it("redacts a named extended key on the Sentry free-string path", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      exception: { values: [{ value: `sync failed for xpub=${XPUB}` }] },
+    }) as { exception: { values: Array<{ value: string }> } };
+
+    expect(scrubbed.exception.values[0].value).not.toContain("661MyMwAqRbcF");
+  });
+
+  it("leaves ordinary error prose untouched on both products", async () => {
+    const prose = "Failed to decode the wallet export file: unexpected end of input";
+
+    const r = scrubPostHogEvent({
+      uuid: "00000000-0000-0000-0000-000000000000",
+      event: "test",
+      properties: { detail: prose },
+    } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
+    expect(r?.properties.detail).toBe(prose);
+
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({ extra: { detail: prose } }) as {
+      extra: Record<string, unknown>;
+    };
+    expect(scrubbed.extra.detail).toBe(prose);
   });
 });
