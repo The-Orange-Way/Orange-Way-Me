@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { OrNamespaceDisabledError } from "@/lib/or/or-key-material";
+import { OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON, OrNamespaceDisabledError } from "@/lib/or/or-key-material";
 
 /**
  * Show a customer-friendly error toast. Logs the raw error to the
