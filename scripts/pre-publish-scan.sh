@@ -327,10 +327,18 @@ fi
 
 printf "\n\033[1m2. Structural naming checks\033[0m\n"
 
+# A delivery-board ticket id (OWM-T0402, OWM-T1234, ...) is allowed even
+# though it contains the literal bare-OWM regex, because a hyphen counts
+# as a word boundary and \bOWM\b matches it too. This is a content-level
+# exemption (not anchored to a path) so a ticket id is fine in any file;
+# a bare "OWM" on its own, or "OWM" followed by anything other than
+# "-T<digits>", is still a leak and still fails the scan.
+EXEMPT_OWM_TICKET_ID='OWM-T[0-9]+'
+
 scan "Internal codename: MB / OWM as acronym" \
      "\\(MB\\)|MB —| in MB\\b|MB's|\\bOWM\\b" \
      "" \
-     "$EXEMPT_OWM_RE"
+     "${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}"
 
 # ----------------------------------------------------------------------
 # Category 3: Internal milestone tags + dead PR refs
