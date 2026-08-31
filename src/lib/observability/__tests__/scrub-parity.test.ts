@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import { VALUE_SHAPE_REDACTED } from "@/lib/observability/value-shapes";
 
 const initMock = vi.fn();
 
