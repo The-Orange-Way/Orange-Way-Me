@@ -29,6 +29,13 @@ vi.mock("@sentry/react", () => ({
   captureMessage: captureMessageMock,
 }));
 
+/**
+ * A BIP32 extended key, long enough to match the shared value-shape pattern,
+ * which requires a base58 body of at least 50 characters. Used as a stand-in
+ * for any key-shaped value that reaches a free-form string.
+ */
+const EXTENDED_KEY = "xpub" + "6D4BDPcP2GT".repeat(6);
+
 async function freshSentryModule() {
   // initSentry guards on a module-scoped `initialised` boolean. Reset the
   // module registry so each test gets a clean copy and can call initSentry
@@ -156,6 +163,71 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.extra.wallet_xpub).toBe("[redacted]");
     expect(scrubbed.extra.my_secret).toBe("[redacted]");
     expect(scrubbed.extra.label).toBe("safe context");
+  });
+
+  /**
+   * The one free-form string beforeSend used to miss. Sentry.captureMessage
+   * populates the top-level message, and none of the walks (extra, contexts,
+   * tags, request, transaction, breadcrumbs, exception values) reach it. There
+   * is no application callsite for captureMessage today, so this pins a latent
+   * gap shut before one arrives rather than closing a live leak.
+   */
+  it("scrubs the top-level event message, which is what captureMessage populates", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      message: `wallet import failed for ${EXTENDED_KEY}`,
+    }) as { message: string };
+
+    expect(scrubbed.message).not.toContain(EXTENDED_KEY);
+    expect(scrubbed.message).toContain("[redacted-key-shape]");
+  });
+
+  it("scrubs logentry.message too, which is the other shape a message arrives in", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      logentry: { message: `wallet import failed for ${EXTENDED_KEY}` },
+    }) as { logentry: { message: string } };
+
+    expect(scrubbed.logentry.message).not.toContain(EXTENDED_KEY);
+    expect(scrubbed.logentry.message).toContain("[redacted-key-shape]");
+  });
+
+  /**
+   * Order, not coverage. The length cap keeps the FIRST characters, so a key
+   * that straddles the cap is the only input that tells the two orderings
+   * apart: cap first and what survives is a prefix of the key, short enough
+   * that the pattern no longer matches it, and it goes out on the wire.
+   *
+   * The space between the filler and the key is load-bearing. The shared
+   * pattern is \b-anchored, and there is no word boundary between a filler
+   * "a" and the "x" of "xpub", so gluing them together tests nothing.
+   */
+  it("scrubs a value before the 2000-character cap, not after", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: { detail: "a".repeat(1950) + " " + EXTENDED_KEY },
+    }) as { extra: Record<string, string> };
+
+    expect(scrubbed.extra.detail).not.toContain("xpub");
+    expect(scrubbed.extra.detail).toContain("[redacted-key-shape]");
+  });
+
+  it("scrubs an exception value before the 4000-character cap, not after", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      exception: { values: [{ value: "a".repeat(3950) + " " + EXTENDED_KEY }] },
+    }) as { exception: { values: Array<{ value: string }> } };
+
+    expect(scrubbed.exception.values[0].value).not.toContain("xpub");
+    expect(scrubbed.exception.values[0].value).toContain("[redacted-key-shape]");
   });
 
   it("fails closed: drops the event instead of throwing when the scrubber itself throws", async () => {
