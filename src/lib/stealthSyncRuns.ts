@@ -86,7 +86,7 @@ export async function finishStealthSyncRun(
         status: outcome.status,
         rows_attempted: outcome.rowsAttempted ?? null,
         rows_written: outcome.rowsWritten ?? null,
-        error_code: outcome.errorCode ?? null,
+        error_code: normalizeErrorCode(outcome.errorCode),
       })
       .eq("id", runId);
     if (error) {
