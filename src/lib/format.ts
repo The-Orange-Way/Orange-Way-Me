@@ -195,10 +195,12 @@ export function sumByCurrency(
  * carries no stamp. The absence there is correct rather than an omission,
  * because normalizeBitcoinToSats never consults the stamp for a sats amount.
  */
+export type BalanceEntry = { amount: string; currency: string; format_version?: number };
+
 export function toBalanceEntry(
   account: { balance: string; currency: string; format_version?: number },
   txnSum?: number,
-): { amount: string; currency: string; format_version?: number } {
+): BalanceEntry {
   const stored = Number(account.balance);
   const useTxnLive =
     Number.isFinite(stored) &&
@@ -216,6 +218,14 @@ export function toBalanceEntry(
     amount: String(txnSum),
     currency: isBitcoinCurrency(account.currency) ? "sats" : account.currency,
   };
+}
+
+/** Build Accounts-page subtotal entries, preserving each account's transaction lookup. */
+export function toAccountSubtotalEntries(
+  accounts: { id: string; balance: string; currency: string; format_version?: number }[],
+  txnSumByAccount: ReadonlyMap<string, number>,
+): BalanceEntry[] {
+  return accounts.map((account) => toBalanceEntry(account, txnSumByAccount.get(account.id)));
 }
 
 /**
