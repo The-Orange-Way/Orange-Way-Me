@@ -53,8 +53,19 @@ export interface OrKeyMaterialRow {
   enc_or_mek_ciphertext: string | null;
   /** The kdf_salt in force when the above was established. Null until then. */
   or_subkey_salt: string | null;
-  /** Generation of the pinned pair. Null until established. */
-  or_key_epoch: number | null;
+  /**
+   * Generation of the pinned pair. Null until established.
+   *
+   * Typed to admit a string as well as a number, which is a statement about
+   * the transport rather than about the column. PostgREST returns a Postgres
+   * `numeric` as a JSON string and only the integer types as a JSON number.
+   * The migration declares this column `integer`, so it arrives as a number
+   * today, but a module whose whole job is to refuse rather than guess must
+   * not silently read a string as "nothing is pinned": that is the
+   * derive-and-pin path, and taking it against a pinned row is the exact
+   * silent destruction this file exists to prevent.
+   */
+  or_key_epoch: number | string | null;
 }
 
 export type OrKeyMaterialPlan =
@@ -91,18 +102,35 @@ export type OrKeyMaterialPlan =
     };
 
 /**
- * Decide, from what is stored, how to obtain the Orange Rails key material.
+ * Read the stored generation, returning null for anything that is not one.
  *
- * The half-established cases are refusals rather than repairs on purpose. One
- * column without the others means something wrote a partial state, and the two
- * possible repairs (derive a fresh key, or reuse the current salt) both
- * silently produce a key that opens nothing if the salt has since rotated.
- * Guessing here is how a data-loss bug hides itself for months; refusing is
- * visible on the first attempt.
+ * Two things this does that a bare `typeof x === "number" && isFinite(x)`
+ * did not.
  *
- * @param row       what `vault_metadata` holds for this user
- * @param kdfSalt   the salt in force right now, used only when pinning
+ * A fractional value is not a generation. `Number.isFinite(1.5)` is true, so
+ * 1.5 used to read as a present generation and was then refused as unknown,
+ * which describes a format mismatch when what actually happened is a corrupt
+ * value. Treating it as absent routes it to the half-stored refusal instead,
+ * which is the honest description of the row.
+ *
+ * A string is read rather than ignored. See the note on `or_key_epoch` above:
+ * treating a transported number as absent would send a pinned row down
+ * derive-and-pin, which destroys history silently. This is a cheap contract
+ * that does not depend on a column type this module cannot see.
  */
+function readEpoch(value: number | string | null | undefined): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+    const parsed = Number(trimmed);
+    return Number.isInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export interface PlanOrKeyMaterialOptions {
   /**
    * Whether `kdfSalt` is still the salt that already-sealed rows were sealed
@@ -118,25 +146,41 @@ export interface PlanOrKeyMaterialOptions {
    * recovery by definition does not have it. So refusing is not a policy
    * preference, it is the only outcome that is not a lie.
    *
-   * Omitted defaults to true, which preserves the unlock and create paths.
-   * `resolveOrKeyMaterial` requires it explicitly so neither production caller
-   * can inherit that default by accident.
+   * REQUIRED, with no default. It was optional and defaulted to true, and a
+   * caller computing it from a lookup produces exactly `boolean | undefined`,
+   * so an undefined slipped through the type system and landed on
+   * derive-and-pin. Silence is not a claim that the salt is unchanged, so this
+   * is now the caller's statement to make, or the answer is a refusal.
    */
-  saltMatchesExistingRows?: boolean;
+  saltMatchesExistingRows: boolean;
 }
 
+/**
+ * Decide, from what is stored, how to obtain the Orange Rails key material.
+ *
+ * The half-established cases are refusals rather than repairs on purpose. One
+ * column without the others means something wrote a partial state, and the two
+ * possible repairs (derive a fresh key, or reuse the current salt) both
+ * silently produce a key that opens nothing if the salt has since rotated.
+ * Guessing here is how a data-loss bug hides itself for months; refusing is
+ * visible on the first attempt.
+ *
+ * @param row       what `vault_metadata` holds for this user
+ * @param kdfSalt   the salt in force right now, used only when pinning
+ * @param options   see `PlanOrKeyMaterialOptions`; required, no default
+ */
 export function planOrKeyMaterial(
   row: OrKeyMaterialRow,
   kdfSalt: string,
-  options: PlanOrKeyMaterialOptions = {},
+  options: PlanOrKeyMaterialOptions,
 ): OrKeyMaterialPlan {
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
-  const hasEpoch = typeof row.or_key_epoch === "number" && Number.isFinite(row.or_key_epoch);
+  const epoch = readEpoch(row.or_key_epoch);
+  const hasEpoch = epoch !== null;
 
-  if (hasCiphertext && hasSalt && hasEpoch) {
-    const epoch = row.or_key_epoch as number;
+  if (hasCiphertext && hasSalt && epoch !== null) {
     if (epoch !== CURRENT_OR_KEY_EPOCH) {
       // Deliberately refuses in BOTH directions. A newer epoch means this
       // build is the stale one and must not guess at a format it predates. An
@@ -175,7 +219,15 @@ export function planOrKeyMaterial(
     };
   }
 
-  if (options.saltMatchesExistingRows === false) {
+  // Read through an optional chain deliberately. The option is required in the
+  // type, so this is unreachable from typed code, but the callers this guard
+  // exists for are exactly the ones that lost their types at a boundary, and
+  // one of those shapes is omitting the argument entirely. Without the chain
+  // that caller gets a TypeError instead of a refusal, which turns a
+  // diagnosable answer back into a crash.
+  const stated = options?.saltMatchesExistingRows;
+
+  if (stated === false) {
     // Nothing is pinned AND the salt just rotated.
     // Deriving here is what silently destroyed history: it yields a well
     // formed key, pins it as authoritative, reports success, and every row the
@@ -185,6 +237,20 @@ export function planOrKeyMaterial(
       mode: "refuse",
       reason:
         "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.",
+    };
+  }
+
+  if (stated !== true) {
+    // Reached only from a caller that lost its types at a boundary, because
+    // the option is required. It is kept as a runtime guard rather than left
+    // to the compiler because the cost of the two outcomes is not symmetric:
+    // a wrong refusal disables one namespace for one session, and a wrong
+    // derivation permanently orphans everything the customer has already
+    // synced. Silence is not a claim that the salt is unchanged.
+    return {
+      mode: "refuse",
+      reason:
+        "Orange Rails key material was never pinned for this account and the caller did not state whether the vault salt still matches the rows already sealed, so deriving now could produce a key that opens none of them.",
     };
   }
 
