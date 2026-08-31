@@ -12,6 +12,7 @@ import {
   isBitcoinCurrency,
   normalizeBitcoinToSats,
   sumByCurrency,
+  toAccountSubtotalEntries,
   toBalanceEntry,
 } from "@/lib/format";
 import { AccountCard, type AccountConnectionStatus } from "@/components/accounts/AccountCard";
@@ -285,7 +286,7 @@ export function AccountsPage() {
 
         <div className="space-y-8">
           {grouped.map((group) => {
-            const totals = sumByCurrency(group.items.map((a) => toBalanceEntry(a)));
+            const totals = sumByCurrency(toAccountSubtotalEntries(group.items, txnSumByAccount));
             return (
               <section key={group.type}>
                 <div className="mb-3 flex items-center justify-between">
