@@ -25,7 +25,15 @@ create table if not exists public.stealth_sync_runs (
                     check (status in ('started', 'success', 'error')),
   rows_attempted  int,
   rows_written    int,
+  -- A short code only, never a message: capped at 32 chars and restricted
+  -- to [A-Za-z0-9_], which rules out any address or txid (34+ / 64 chars)
+  -- and any human-readable text (spaces, punctuation). Not a fixed value
+  -- list because the OR widget's code vocabulary is not ours to freeze.
   error_code      text
+                    check (
+                      error_code is null
+                      or (length(error_code) <= 32 and error_code ~ '^[A-Za-z0-9_]+$')
+                    )
 );
 
 create index if not exists idx_stealth_sync_runs_user_started
