@@ -31,6 +31,19 @@
  */
 
 /**
+ * The refuse reason for the one case with a concrete customer fix: nothing is
+ * pinned yet and the vault salt has just rotated, so deriving now would
+ * silently orphan every row already synced under the old key.
+ *
+ * Exported so friendly-error.ts's match, and the test that guards it, both
+ * read this exact value instead of each holding their own copy of the
+ * sentence. Two copies is how the match silently breaks: reword one and
+ * nothing fails until a customer report.
+ */
+export const OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON =
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
+
+/**
  * The generation of the pinned Orange Rails key material this build writes and
  * understands.
  *
