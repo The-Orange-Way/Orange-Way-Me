@@ -1,0 +1,32 @@
+name: Definer grant migration scan self test
+
+# Proves scripts/check-definer-grant-migrations.sh actually refuses what it
+# must, on every change to that script or its self test. A gate nobody has
+# watched fail is not a gate that has been tested.
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'scripts/check-definer-grant-migrations.sh'
+      - 'scripts/check-definer-grant-migrations-selftest.sh'
+      - '.github/workflows/definer-grant-migration-scan-selftest.yml'
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'scripts/check-definer-grant-migrations.sh'
+      - 'scripts/check-definer-grant-migrations-selftest.sh'
+      - '.github/workflows/definer-grant-migration-scan-selftest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: Migration scan refuses what it must
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run the self test
+        run: bash scripts/check-definer-grant-migrations-selftest.sh
