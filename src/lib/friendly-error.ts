@@ -32,28 +32,28 @@ export function toastError(err: unknown, fallback?: string): void {
  * Returns a short sentence ending in a period.
  */
 /**
- * Translate the reason carried by OrNamespaceDisabledError (DL-1506) into
- * copy the customer can act on.
+ * Translate the reason carried by OrNamespaceDisabledError into copy the
+ * customer can act on.
  *
  * A standalone export, not inlined into humanizeError, so ConnectionsPage
  * can show the reason the moment recoverWithCode / unlock sets it (via
  * useVault()'s orNamespaceDisabledReason) instead of waiting for the user
- * to trigger an OR call that throws. humanizeError also calls this so any
- * call site that lets the thrown error reach it gets the same copy.
+ * to trigger a call that throws. humanizeError also calls this so any call
+ * site that lets the thrown error reach it gets the same copy.
  */
 export function humanizeOrDisabledReason(reason: string): string {
   const lower = reason.toLowerCase();
-  // The one refuse reason with a concrete customer fix (DL-1506): the vault
-  // salt rotated (password change or recovery) before anything was pinned,
-  // so previously-synced Orange Rails data needs a re-sync to read again.
+  // The one refuse reason with a concrete customer fix: the vault salt
+  // rotated (password change or recovery) before anything was pinned, so
+  // previously-synced Connections data needs a re-sync to read again.
   if (lower.includes("needs a re-sync")) {
-    return "Your Orange Rails connection needs a quick re-sync. Go to Connections and sync your accounts to pick up where you left off.";
+    return "Your Connections need a quick re-sync. Go to Connections and sync your accounts to pick up where you left off.";
   }
   // Every other refuse reason (a stale or newer key generation, a partially
   // written row, a stored key that would not open) has no self-serve fix.
   // Honest and specific about scope beats "encryption service unreachable",
   // which points at an outage that is not happening.
-  return "Orange Rails features are unavailable in this browser session. Reload the page, or contact support if this continues.";
+  return "Connections features are unavailable in this browser session. Reload the page, or contact support if this continues.";
 }
 
 export function humanizeError(
