@@ -20,6 +20,21 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type StealthSyncRunStatus = "success" | "error";
 
+// Mirrors the CHECK constraint on stealth_sync_runs.error_code: a short
+// code only, never a message. Applied here too so a widget code that does
+// not fit (too long, or carrying anything other than [A-Za-z0-9_]) fails
+// closed to a fixed placeholder instead of failing the whole insert, and
+// so this column can never carry an address, a txid, or free text even if
+// the widget's own code vocabulary changes upstream.
+const ERROR_CODE_MAX_LEN = 32;
+const ERROR_CODE_PATTERN = /^[A-Za-z0-9_]+$/;
+
+function normalizeErrorCode(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const truncated = raw.slice(0, ERROR_CODE_MAX_LEN);
+  return ERROR_CODE_PATTERN.test(truncated) ? truncated : "UNRECOGNIZED";
+}
+
 /**
  * Insert the "started" row for one stealth sync execution. Returns the
  * new row's id (to pass to finishStealthSyncRun), or null if the insert
