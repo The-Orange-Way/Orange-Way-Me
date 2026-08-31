@@ -248,8 +248,7 @@ export function planOrKeyMaterial(
     // say so.
     return {
       mode: "refuse",
-      reason:
-        "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.",
+      reason: OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON,
     };
   }
 
