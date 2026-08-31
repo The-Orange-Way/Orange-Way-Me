@@ -201,13 +201,17 @@ describe("Sentry init no-PII contract", () => {
    * that straddles the cap is the only input that tells the two orderings
    * apart: cap first and what survives is a prefix of the key, short enough
    * that the pattern no longer matches it, and it goes out on the wire.
+   *
+   * The space between the filler and the key is load-bearing. The shared
+   * pattern is \b-anchored, and there is no word boundary between a filler
+   * "a" and the "x" of "xpub", so gluing them together tests nothing.
    */
   it("scrubs a value before the 2000-character cap, not after", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();
     const cfg = initMock.mock.calls[0][0];
     const scrubbed = cfg.beforeSend({
-      extra: { detail: "a".repeat(1950) + EXTENDED_KEY },
+      extra: { detail: "a".repeat(1950) + " " + EXTENDED_KEY },
     }) as { extra: Record<string, string> };
 
     expect(scrubbed.extra.detail).not.toContain("xpub");
@@ -219,7 +223,7 @@ describe("Sentry init no-PII contract", () => {
     mod.initSentry();
     const cfg = initMock.mock.calls[0][0];
     const scrubbed = cfg.beforeSend({
-      exception: { values: [{ value: "a".repeat(3950) + EXTENDED_KEY }] },
+      exception: { values: [{ value: "a".repeat(3950) + " " + EXTENDED_KEY }] },
     }) as { exception: { values: Array<{ value: string }> } };
 
     expect(scrubbed.exception.values[0].value).not.toContain("xpub");
