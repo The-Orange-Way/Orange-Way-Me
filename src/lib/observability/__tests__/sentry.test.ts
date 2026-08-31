@@ -29,6 +29,13 @@ vi.mock("@sentry/react", () => ({
   captureMessage: captureMessageMock,
 }));
 
+/**
+ * A BIP32 extended key, long enough to match the shared value-shape pattern,
+ * which requires a base58 body of at least 50 characters. Used as a stand-in
+ * for any key-shaped value that reaches a free-form string.
+ */
+const EXTENDED_KEY = "xpub" + "6D4BDPcP2GT".repeat(6);
+
 async function freshSentryModule() {
   // initSentry guards on a module-scoped `initialised` boolean. Reset the
   // module registry so each test gets a clean copy and can call initSentry
@@ -200,7 +207,7 @@ describe("Sentry init no-PII contract", () => {
     mod.initSentry();
     const cfg = initMock.mock.calls[0][0];
     const scrubbed = cfg.beforeSend({
-      extra: { detail: "a".repeat(1990) + EXTENDED_KEY },
+      extra: { detail: "a".repeat(1950) + EXTENDED_KEY },
     }) as { extra: Record<string, string> };
 
     expect(scrubbed.extra.detail).not.toContain("xpub");
@@ -212,7 +219,7 @@ describe("Sentry init no-PII contract", () => {
     mod.initSentry();
     const cfg = initMock.mock.calls[0][0];
     const scrubbed = cfg.beforeSend({
-      exception: { values: [{ value: "a".repeat(3990) + EXTENDED_KEY }] },
+      exception: { values: [{ value: "a".repeat(3950) + EXTENDED_KEY }] },
     }) as { exception: { values: Array<{ value: string }> } };
 
     expect(scrubbed.exception.values[0].value).not.toContain("xpub");
