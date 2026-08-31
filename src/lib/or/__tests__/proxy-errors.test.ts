@@ -1,14 +1,76 @@
 import { describe, it, expect } from "vitest";
-import { CallProxyError, isSubaccountNotFound } from "../proxy-errors";
+import { CallProxyError, isSubaccountNotFound, narrowProxyErrorBody } from "../proxy-errors";
+
+/**
+ * A response shape the sync endpoints really return: an error string sitting
+ * next to a list of application rows. The list is what must not survive onto
+ * the error; the string is what callers branch on and must survive.
+ */
+const RESPONSE_WITH_ROWS = {
+  error: "sync failed",
+  transactions: [
+    { id: "row-1", enc_amount: "-42.10", enc_description: "example", enc_merchant: "example" },
+  ],
+  count: 1,
+};
+
+describe("narrowProxyErrorBody", () => {
+  it("keeps the error string and drops everything alongside it", () => {
+    expect(narrowProxyErrorBody(RESPONSE_WITH_ROWS)).toEqual({ error: "sync failed" });
+  });
+
+  it("keeps the code-shaped siblings of error", () => {
+    const body = { error: "nope", error_code: "E_NOPE", code: 42, reason: "because" };
+    expect(narrowProxyErrorBody(body)).toEqual(body);
+  });
+
+  it("drops an allowlisted key whose value is not a scalar", () => {
+    // Otherwise a payload could travel under a name that is on the list.
+    const body = { error: { detail: "x", rows: [1, 2, 3] } };
+    expect(narrowProxyErrorBody(body)).toBeNull();
+  });
+
+  it("returns null for a top-level list, which is rows and never an error", () => {
+    expect(narrowProxyErrorBody([{ id: "row-1" }])).toBeNull();
+  });
+
+  it("returns null when nothing on the allowlist is present", () => {
+    expect(narrowProxyErrorBody({ transactions: [{ id: "row-1" }] })).toBeNull();
+  });
+
+  it("truncates a long string body rather than carrying it whole", () => {
+    const long = "x".repeat(5000);
+    expect(String(narrowProxyErrorBody(long))).toHaveLength(200);
+  });
+
+  it("passes null, undefined and scalars through unchanged", () => {
+    expect(narrowProxyErrorBody(null)).toBeNull();
+    expect(narrowProxyErrorBody(undefined)).toBeNull();
+    expect(narrowProxyErrorBody(503)).toBe(503);
+  });
+});
 
 describe("CallProxyError", () => {
-  it("carries the upstream status and body for callers that branch on them", () => {
+  it("carries the upstream status and the error-shaped body for callers", () => {
     const body = { error: "Subaccount not found" };
     const err = new CallProxyError("Subaccount not found", 404, body);
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("CallProxyError");
     expect(err.status).toBe(404);
-    expect(err.body).toBe(body);
+    expect(err.body).toEqual(body);
+  });
+
+  it("narrows in the constructor, so no throw site can attach rows", () => {
+    const err = new CallProxyError("sync failed", 500, RESPONSE_WITH_ROWS);
+    expect(err.body).toEqual({ error: "sync failed" });
+    expect(JSON.stringify(err.body)).not.toContain("row-1");
+  });
+
+  it("does not keep the caller's object, so later mutation cannot widen it", () => {
+    const body: Record<string, unknown> = { error: "sync failed" };
+    const err = new CallProxyError("sync failed", 500, body);
+    body.transactions = [{ id: "row-1" }];
+    expect(err.body).toEqual({ error: "sync failed" });
   });
 });
 
