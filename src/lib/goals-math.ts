@@ -7,6 +7,7 @@
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
+import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
 
 export interface GoalProgress {
   current: number;
@@ -67,6 +68,35 @@ export function untrackableReason(
 }
 
 /**
+ * Normalize one linked account's balance to a comparable magnitude before it
+ * is summed with any other account's. Mirrors sumByCurrency's BTC/sats
+ * handling in format.ts: a stamped row (format_version >= 1) trusts its
+ * unit, an unstamped row falls back to the magnitude heuristic. Non-bitcoin
+ * currencies pass through unchanged.
+ *
+ * Summing raw Number(a.balance) here was the bug: a row already written as
+ * enc_currency="BTC" but holding a sats-magnitude integer (OWM-T0139) got
+ * added as if it were whole bitcoin, inflating a goal's progress or a debt
+ * payoff preview by roughly 1e8 (OW-T0099 / OWM-T0348).
+ */
+function normalizedBalance(a: Account): number {
+  const n = Number(a.balance) || 0;
+  if (!isBitcoinCurrency(a.currency)) return n;
+  return normalizeBitcoinToSats(n, a.currency, { unitIsExact: unitIsExact(a.format_version) });
+}
+
+/**
+ * Total outstanding debt across a pay-down goal's linked accounts, in the
+ * same normalized magnitude as computeCurrent. Exported so a caller building
+ * its own preview (an amortization schedule, for example) sums debt the
+ * same way computeCurrent does, instead of re-deriving the raw sum locally.
+ */
+export function debtOf(goal: Goal, accounts: Account[]): number {
+  const linked = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
+  return linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a)), 0);
+}
+
+/**
  * Compute the goal's current amount from its linked accounts.
  *
  * - save_up + all_balance: sum of linked account balances (positive numbers)
@@ -81,13 +111,12 @@ export function computeCurrent(goal: Goal, accounts: Account[]): number {
     if (goal.strategy === "specific_amount") {
       return Number(goal.manual_allocation ?? "0") || 0;
     }
-    return linked.reduce((sum, a) => sum + Math.max(0, Number(a.balance) || 0), 0);
+    return linked.reduce((sum, a) => sum + Math.max(0, normalizedBalance(a)), 0);
   }
 
   // pay_down: amount paid off = starting - |current|
   const start = Number(goal.starting_balance ?? goal.target_amount) || 0;
-  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
-  return Math.max(0, start - currentDebt);
+  return Math.max(0, start - debtOf(goal, accounts));
 }
 
 export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
@@ -221,8 +250,7 @@ export function orderPayDown(
   const withDebt = goals
     .filter((g) => g.type === "pay_down" && !g.is_completed)
     .map((g) => {
-      const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
-      const debt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+      const debt = debtOf(g, accounts);
       const apr = Number(g.interest_rate ?? "0") || 0;
       return { goal: g, debt, apr };
     });
