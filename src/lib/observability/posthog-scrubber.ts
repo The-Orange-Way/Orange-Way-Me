@@ -11,9 +11,19 @@
  * which does the same job on the error-reporting side.
  */
 
+import { isKeyMaterialFieldName } from "./key-material-names";
+
 /**
  * Property keys whose VALUES are scrubbed unconditionally. Match by
  * lowercase substring against the property key name.
+ *
+ * These are the BUSINESS-DATA hints, and they are broad on purpose: an
+ * analytics payload has no legitimate need for a merchant or an account
+ * label, so over-blanking here costs a data point and nothing else.
+ *
+ * Wallet key-material names are NOT listed here. They live in
+ * key-material-names.ts and are shared with the error reporter, so that a
+ * name can no longer be added on one path and forgotten on the other.
  */
 const SCRUB_VALUE_KEY_HINTS = [
   "account",
@@ -104,6 +114,9 @@ function scrubUrl(input: unknown): unknown {
 
 function shouldScrubKey(key: string): boolean {
   const k = key.toLowerCase();
+  // Shared key-material inventory first: it is the list both scrubbers
+  // must agree on, and checking it here is what makes them agree.
+  if (isKeyMaterialFieldName(k)) return true;
   return SCRUB_VALUE_KEY_HINTS.some((hint) => k.includes(hint));
 }
 
@@ -186,23 +199,40 @@ import type { CaptureResult } from "posthog-js";
 
 /**
  * Exported as the `before_send` argument to `posthog.init`. PostHog
- * types this as `(event: CaptureResult | null) => CaptureResult | null`.
- * We always return the event (with scrubbed properties) rather than
- * dropping; dropping silently would hide a bug where a route renders
- * sensitive data in the URL.
+ * types this as `(event: CaptureResult | null) => CaptureResult | null`,
+ * and returning null drops the event.
+ *
+ * An event that scrubs cleanly is ALWAYS returned, never dropped:
+ * dropping it silently would hide a bug where a route renders sensitive
+ * data in the URL, and we would rather see the redacted evidence of that
+ * bug than see nothing.
+ *
+ * FAIL CLOSED on the other path. If scrubbing throws partway through
+ * walking a payload, drop the event rather than let a half-scrubbed one
+ * reach the network. A dropped analytics event costs a data point; a
+ * half-scrubbed one costs the customer the guarantee this hook exists to
+ * make. Catching here also settles a question that would otherwise have
+ * to be re-answered on every SDK bump, since a hook that throws could
+ * plausibly be treated either as "drop it" or as "send it unscrubbed",
+ * and those are opposite outcomes: this hook does not throw.
  */
 export function scrubPostHogEvent(event: CaptureResult | null): CaptureResult | null {
   if (!event) return event;
-  const properties = scrubProperties(event.properties as Record<string, unknown> | undefined) ?? {};
-  // Documented, reliable switch that tells PostHog's server-side enricher
-  // to skip GeoIP for this event. Nulling $ip alone can fall back to the
-  // connection's socket IP; this flag closes that gap. The socket IP still
-  // transiently reaches the collector on a direct browser connection by
-  // construction - a first-party proxy is the only way to stop that and is
-  // tracked separately.
-  properties.$geoip_disable = true;
-  return {
-    ...event,
-    properties,
-  };
+  try {
+    const raw = event.properties as Record<string, unknown> | undefined;
+    const properties = scrubProperties(raw) ?? {};
+    // Documented, reliable switch that tells PostHog's server-side enricher
+    // to skip GeoIP for this event. Nulling $ip alone can fall back to the
+    // connection's socket IP; this flag closes that gap. The socket IP still
+    // transiently reaches the collector on a direct browser connection by
+    // construction - a first-party proxy is the only way to stop that and is
+    // tracked separately.
+    properties.$geoip_disable = true;
+    return {
+      ...event,
+      properties,
+    };
+  } catch {
+    return null;
+  }
 }
