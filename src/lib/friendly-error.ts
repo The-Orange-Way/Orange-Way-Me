@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON, OrNamespaceDisabledError } from "@/lib/or/or-key-material";
 
 /**
  * Show a customer-friendly error toast. Logs the raw error to the
@@ -24,6 +25,35 @@ export function toastError(err: unknown, fallback?: string): void {
 }
 
 /**
+ * Translate the reason carried by OrNamespaceDisabledError into copy the
+ * customer can act on.
+ *
+ * A standalone export, not inlined into humanizeError, so ConnectionsPage
+ * can show the reason the moment recoverWithCode / unlock sets it (via
+ * useVault()'s orNamespaceDisabledReason) instead of waiting for the user
+ * to trigger a call that throws. humanizeError also calls this so any call
+ * site that lets the thrown error reach it gets the same copy.
+ *
+ * Matches against OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON, the single
+ * exported copy of the sentence, rather than a substring typed here: see
+ * that constant's comment in or-key-material.ts for why a second copy is
+ * the failure mode this guards against.
+ */
+export function humanizeOrDisabledReason(reason: string): string {
+  // The one refuse reason with a concrete customer fix: the vault salt
+  // rotated (password change or recovery) before anything was pinned, so
+  // previously-synced Connections data needs a re-sync to read again.
+  if (reason === OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON) {
+    return "Your Connections need a quick re-sync. Go to Connections and sync your accounts to pick up where you left off.";
+  }
+  // Every other refuse reason (a stale or newer key generation, a partially
+  // written row, a stored key that would not open) has no self-serve fix.
+  // Honest and specific about scope beats "encryption service unreachable",
+  // which points at an outage that is not happening.
+  return "Connections features are unavailable in this browser session. Reload the page, or contact support if this continues.";
+}
+
+/**
  * Translate a raw error into a customer-friendly message. The raw message
  * stays in the console for debugging; this just makes the toast readable for
  * someone who has no idea what "401" or "Failed to fetch" means.
@@ -34,6 +64,10 @@ export function humanizeError(
   err: unknown,
   fallback = "Something went wrong. Please try again.",
 ): string {
+  if (err instanceof OrNamespaceDisabledError) {
+    return humanizeOrDisabledReason(err.reason);
+  }
+
   const raw = err instanceof Error ? err.message : String(err ?? "");
   const lower = raw.toLowerCase();
 
