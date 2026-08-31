@@ -1,7 +1,7 @@
 # Phase 4 Design: Household Sharing with Zero-Knowledge Architecture
 
 > **Status:** Implemented (Phases 4.1 through 4.5).
-> **Companion:** `COMPETITIVE-ANALYSIS.md` — research against 10 personal-finance apps.
+> **Companion:** Competitive analysis research against 10 personal-finance apps is in the maintainer wiki Knowledge collection.
 
 ---
 
@@ -279,6 +279,6 @@ Orange Way with household ZKA + cryptographic revocation is a clean market gap. 
 
 ## 12. References
 
-- **Competitive analysis**: `COMPETITIVE-ANALYSIS.md` — 10 platforms, patterns, market gaps, cited URLs.
+- **Competitive analysis**: 10 platforms, patterns, market gaps, cited URLs. Now in the maintainer wiki Knowledge collection (moved from this repo, DL-1550).
 - **Orange Rails PQC reference**: `orange-rails/src/lib/pqc.ts`, `co-admin.ts`, `pqc-lifecycle.ts`.
 - **@noble/post-quantum** (ML-KEM-768, ML-DSA-65), **@noble/curves** (X25519), **@noble/hashes** (HKDF-SHA-256).
