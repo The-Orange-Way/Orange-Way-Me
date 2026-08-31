@@ -51,14 +51,16 @@ import {
   averageMonthlyContribution,
   balanceHistory,
   computeProgress,
+  debtOf,
   projectCompletionDate,
 } from "@/lib/goals-math";
 import { GoalFormDialog } from "./GoalFormDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
-import { useLocaleFormat } from "@/lib/locale";
+import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
+import { formatCurrencyWithMode } from "@/lib/format";
 
 function trailing12() {
   const end = new Date();
@@ -78,6 +80,7 @@ export function GoalDetailPage({ id }: { id: string }) {
   const { items: txns } = useTransactions(range);
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
   const fmtUSD = (n: number, frac = 0) =>
     fmt.formatCurrency(n, prefs.primaryCurrency, { maximumFractionDigits: frac });
   const [editOpen, setEditOpen] = useState(false);
@@ -128,10 +131,7 @@ export function GoalDetailPage({ id }: { id: string }) {
     .slice(0, 20);
 
   // Pay down amortization preview
-  const debt =
-    goal.type === "pay_down"
-      ? linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0)
-      : 0;
+  const debt = goal.type === "pay_down" ? debtOf(goal, accounts) : 0;
   const apr = Number(goal.interest_rate ?? "0") || 0;
   const minPayment = Number(goal.minimum_payment ?? "0") || 0;
   const previewPayment = Math.max(minPayment, monthly > 0 ? monthly : minPayment);
@@ -348,9 +348,7 @@ export function GoalDetailPage({ id }: { id: string }) {
                     </div>
                   </div>
                   <div className="font-mono tabular-nums text-sm">
-                    {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatCurrencyWithMode(a.balance, a.currency, prefs.btcDisplayMode, loc)}
                   </div>
                 </div>
               ))}
