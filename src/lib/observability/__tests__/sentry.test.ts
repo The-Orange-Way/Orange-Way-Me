@@ -230,6 +230,45 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.exception.values[0].value).toContain("[redacted-key-shape]");
   });
 
+  it("scrubs logentry.params, the array sibling of logentry.message", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      logentry: { message: "wallet import failed", params: [EXTENDED_KEY, "safe value"] },
+    }) as { logentry: { params: string[] } };
+
+    expect(scrubbed.logentry.params[0]).not.toContain(EXTENDED_KEY);
+    expect(scrubbed.logentry.params[0]).toContain("[redacted-key-shape]");
+    expect(scrubbed.logentry.params[1]).toBe("safe value");
+  });
+
+  it("scrubs a logentry.params element before the 4000-character cap, not after", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      logentry: { params: ["a".repeat(3950) + " " + EXTENDED_KEY] },
+    }) as { logentry: { params: string[] } };
+
+    expect(scrubbed.logentry.params[0]).not.toContain("xpub");
+    expect(scrubbed.logentry.params[0]).toContain("[redacted-key-shape]");
+  });
+
+  it("caps a breadcrumb message at 4000, consistent with every other free-form string", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const bc = cfg.beforeBreadcrumb({
+      category: "xhr",
+      message: "a".repeat(3950) + " " + EXTENDED_KEY,
+    }) as { message: string };
+
+    expect(bc.message.length).toBeLessThanOrEqual(4001);
+    expect(bc.message).not.toContain("xpub");
+    expect(bc.message).toContain("[redacted-key-shape]");
+  });
+
   it("fails closed: drops the event instead of throwing when the scrubber itself throws", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();
