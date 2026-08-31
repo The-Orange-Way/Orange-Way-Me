@@ -49,7 +49,7 @@ jobs:
   definer-grants-dev:
     name: SECURITY DEFINER EXECUTE grants (live dev database)
     runs-on: ubuntu-latest
-    if: github.event_name != 'push' || github.ref == 'refs/heads/dev'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     environment: dev
     steps:
       - uses: actions/checkout@v6
@@ -69,7 +69,7 @@ jobs:
     # A push to dev cannot move the production database, so a push event only
     # runs this job when the push landed on prod. Schedule and manual dispatch
     # are not scoped to a branch push, so they always run it.
-    if: github.event_name != 'push' || github.ref == 'refs/heads/prod'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/prod') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     environment: prod
     steps:
       - uses: actions/checkout@v6
