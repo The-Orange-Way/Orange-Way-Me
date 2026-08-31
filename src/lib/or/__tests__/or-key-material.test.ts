@@ -4,7 +4,9 @@ import {
   CURRENT_OR_KEY_EPOCH,
   OrNamespaceDisabledError,
   planOrKeyMaterial,
+  type OrKeyMaterialPlan,
   type OrKeyMaterialRow,
+  type PlanOrKeyMaterialOptions,
 } from "../or-key-material";
 
 const EMPTY: OrKeyMaterialRow = {
@@ -19,9 +21,28 @@ const PINNED: OrKeyMaterialRow = {
   or_key_epoch: CURRENT_OR_KEY_EPOCH,
 };
 
+/** The unlock and vault-creation case: the salt has not moved. */
+const UNCHANGED: PlanOrKeyMaterialOptions = { saltMatchesExistingRows: true };
+/** The recovery case: a new salt was minted before we got here. */
+const ROTATED: PlanOrKeyMaterialOptions = { saltMatchesExistingRows: false };
+
+/**
+ * A deliberately untyped view of the same function, standing in for a caller
+ * that lost its types at a boundary: an untyped JavaScript consumer, or one
+ * computing the flag from a lookup that yields `boolean | undefined`. That is
+ * the only way this call shape can now occur, and it is exactly the shape that
+ * used to fall through to derive-and-pin, so it needs a test the compiler
+ * cannot delete.
+ */
+const planWithoutTypes = planOrKeyMaterial as unknown as (
+  row: OrKeyMaterialRow,
+  kdfSalt: string,
+  options?: Partial<PlanOrKeyMaterialOptions>,
+) => OrKeyMaterialPlan;
+
 describe("planOrKeyMaterial", () => {
   it("derives and pins when nothing is stored yet", () => {
-    expect(planOrKeyMaterial(EMPTY, "current-salt")).toEqual({
+    expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED)).toEqual({
       mode: "derive-and-pin",
       saltContext: "current-salt",
       epoch: CURRENT_OR_KEY_EPOCH,
@@ -29,14 +50,14 @@ describe("planOrKeyMaterial", () => {
   });
 
   it("pins against the CURRENT salt, because that is what today's rows were sealed under", () => {
-    const plan = planOrKeyMaterial(EMPTY, "todays-salt");
+    const plan = planOrKeyMaterial(EMPTY, "todays-salt", UNCHANGED);
     expect(plan.mode).toBe("derive-and-pin");
     if (plan.mode !== "derive-and-pin") throw new Error("unreachable");
     expect(plan.saltContext).toBe("todays-salt");
   });
 
   it("unwraps when the pair is stored, and uses the PINNED salt not the current one", () => {
-    expect(planOrKeyMaterial(PINNED, "some-newer-salt")).toEqual({
+    expect(planOrKeyMaterial(PINNED, "some-newer-salt", UNCHANGED)).toEqual({
       mode: "unwrap",
       ciphertext: "sealed-blob",
       saltContext: "salt-at-pin-time",
@@ -50,23 +71,27 @@ describe("planOrKeyMaterial", () => {
    * be identical on both sides of a rotation.
    */
   it("returns the same plan before and after the salt rotates", () => {
-    expect(planOrKeyMaterial(PINNED, "salt-before")).toEqual(
-      planOrKeyMaterial(PINNED, "salt-after"),
+    expect(planOrKeyMaterial(PINNED, "salt-before", UNCHANGED)).toEqual(
+      planOrKeyMaterial(PINNED, "salt-after", UNCHANGED),
     );
   });
 
   it("refuses a generation it does not understand rather than unwrapping it", () => {
-    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: CURRENT_OR_KEY_EPOCH + 1 }, "s");
+    const plan = planOrKeyMaterial(
+      { ...PINNED, or_key_epoch: CURRENT_OR_KEY_EPOCH + 1 },
+      "s",
+      UNCHANGED,
+    );
     expect(plan.mode).toBe("refuse");
   });
 
   it("refuses an OLDER generation too, because a skipped migration is not a no-op", () => {
-    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 0 }, "s");
+    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 0 }, "s", UNCHANGED);
     expect(plan.mode).toBe("refuse");
   });
 
   it("names both generations in the refusal so the mismatch is diagnosable", () => {
-    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 7 }, "s");
+    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 7 }, "s", UNCHANGED);
     if (plan.mode !== "refuse") throw new Error("expected refuse");
     expect(plan.reason).toContain("7");
     expect(plan.reason).toContain(String(CURRENT_OR_KEY_EPOCH));
@@ -76,6 +101,7 @@ describe("planOrKeyMaterial", () => {
     const plan = planOrKeyMaterial(
       { enc_or_mek_ciphertext: "sealed-blob", or_subkey_salt: null, or_key_epoch: 1 },
       "current-salt",
+      UNCHANGED,
     );
     expect(plan.mode).toBe("refuse");
   });
@@ -84,12 +110,13 @@ describe("planOrKeyMaterial", () => {
     const plan = planOrKeyMaterial(
       { enc_or_mek_ciphertext: null, or_subkey_salt: "pinned-salt", or_key_epoch: 1 },
       "current-salt",
+      UNCHANGED,
     );
     expect(plan.mode).toBe("refuse");
   });
 
   it("refuses when the generation is present without the pair", () => {
-    const plan = planOrKeyMaterial({ ...EMPTY, or_key_epoch: 1 }, "current-salt");
+    const plan = planOrKeyMaterial({ ...EMPTY, or_key_epoch: 1 }, "current-salt", UNCHANGED);
     expect(plan.mode).toBe("refuse");
   });
 
@@ -97,6 +124,7 @@ describe("planOrKeyMaterial", () => {
     const plan = planOrKeyMaterial(
       { enc_or_mek_ciphertext: "sealed-blob", or_subkey_salt: null, or_key_epoch: null },
       "current-salt",
+      UNCHANGED,
     );
     if (plan.mode !== "refuse") throw new Error("expected refuse");
     expect(plan.reason).toContain("its salt");
@@ -115,7 +143,7 @@ describe("planOrKeyMaterial", () => {
       { enc_or_mek_ciphertext: null, or_subkey_salt: null, or_key_epoch: 1 },
       { enc_or_mek_ciphertext: "x", or_subkey_salt: "y", or_key_epoch: null },
     ]) {
-      expect(planOrKeyMaterial(row, "current-salt").mode).toBe("refuse");
+      expect(planOrKeyMaterial(row, "current-salt", UNCHANGED).mode).toBe("refuse");
     }
   });
 
@@ -124,18 +152,53 @@ describe("planOrKeyMaterial", () => {
       planOrKeyMaterial(
         { enc_or_mek_ciphertext: "", or_subkey_salt: "", or_key_epoch: null },
         "current-salt",
+        UNCHANGED,
       ).mode,
     ).toBe("derive-and-pin");
   });
 
   it("refuses to pin when there is no current salt to pin against", () => {
-    expect(planOrKeyMaterial(EMPTY, "").mode).toBe("refuse");
+    expect(planOrKeyMaterial(EMPTY, "", UNCHANGED).mode).toBe("refuse");
   });
 
   it("does not treat a non-finite generation as present", () => {
-    expect(planOrKeyMaterial({ ...EMPTY, or_key_epoch: Number.NaN }, "s").mode).toBe(
+    expect(planOrKeyMaterial({ ...EMPTY, or_key_epoch: Number.NaN }, "s", UNCHANGED).mode).toBe(
       "derive-and-pin",
     );
+  });
+
+  /**
+   * PostgREST returns a Postgres `numeric` as a JSON string and only the
+   * integer types as a JSON number. The migration declares this column
+   * `integer`, so this cannot bite today, but reading a transported number as
+   * "nothing is pinned" would send a pinned row down derive-and-pin, which is
+   * the silent destruction the whole module exists to prevent. Cheap contract,
+   * catastrophic failure if it ever stops holding.
+   */
+  it("reads a generation that arrives as a string, rather than treating it as absent", () => {
+    expect(
+      planOrKeyMaterial(
+        { ...PINNED, or_key_epoch: String(CURRENT_OR_KEY_EPOCH) },
+        "some-newer-salt",
+        UNCHANGED,
+      ),
+    ).toEqual({
+      mode: "unwrap",
+      ciphertext: "sealed-blob",
+      saltContext: "salt-at-pin-time",
+    });
+  });
+
+  /**
+   * `Number.isFinite(1.5)` is true, so a fractional value used to read as a
+   * present generation and was then refused as an unknown format, which
+   * describes the wrong problem. A non whole number is not a generation, so it
+   * reads as absent and the row is reported for what it is: partly stored.
+   */
+  it("does not treat a fractional generation as a generation", () => {
+    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 1.5 }, "s", UNCHANGED);
+    if (plan.mode !== "refuse") throw new Error("expected refuse");
+    expect(plan.reason).toContain("its generation");
   });
 
   /**
@@ -149,16 +212,12 @@ describe("planOrKeyMaterial", () => {
    * password, and recovery exists precisely because that is gone.
    */
   it("refuses when nothing is pinned and the salt has just rotated", () => {
-    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", {
-      saltMatchesExistingRows: false,
-    });
+    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", ROTATED);
     expect(plan.mode).toBe("refuse");
   });
 
   it("says in the refusal that earlier transactions need a re-sync", () => {
-    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", {
-      saltMatchesExistingRows: false,
-    });
+    const plan = planOrKeyMaterial(EMPTY, "brand-new-salt", ROTATED);
     expect(plan.mode === "refuse" && plan.reason).toMatch(/re-sync/i);
   });
 
@@ -170,17 +229,15 @@ describe("planOrKeyMaterial", () => {
    * loud one.
    */
   it("still unwraps a pinned row even though the salt has rotated", () => {
-    expect(planOrKeyMaterial(PINNED, "brand-new-salt", { saltMatchesExistingRows: false })).toEqual(
-      {
-        mode: "unwrap",
-        ciphertext: "sealed-blob",
-        saltContext: "salt-at-pin-time",
-      },
-    );
+    expect(planOrKeyMaterial(PINNED, "brand-new-salt", ROTATED)).toEqual({
+      mode: "unwrap",
+      ciphertext: "sealed-blob",
+      saltContext: "salt-at-pin-time",
+    });
   });
 
   it("derives and pins when the salt is explicitly unchanged, as on an unlock", () => {
-    expect(planOrKeyMaterial(EMPTY, "current-salt", { saltMatchesExistingRows: true })).toEqual({
+    expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED)).toEqual({
       mode: "derive-and-pin",
       saltContext: "current-salt",
       epoch: CURRENT_OR_KEY_EPOCH,
@@ -188,20 +245,37 @@ describe("planOrKeyMaterial", () => {
   });
 
   /**
-   * Every caller that predates the flag was an unlock or a vault creation, so
-   * omitting it has to keep behaving as one. If this ever flips to refusing,
-   * unlock stops pinning and the rows it was meant to protect stay exposed.
+   * The defect this ticket exists for. Silence is not a claim that the salt is
+   * unchanged. An undefined flag used to fall through to derive-and-pin, which
+   * mints a key, pins it as authoritative, reports success, and orphans every
+   * row the customer had already synced with nothing on screen to say so.
    */
-  it("treats an omitted flag as the unchanged-salt case", () => {
-    expect(planOrKeyMaterial(EMPTY, "current-salt", {}).mode).toBe("derive-and-pin");
-    expect(planOrKeyMaterial(EMPTY, "current-salt").mode).toBe("derive-and-pin");
+  it("refuses when the caller did not state whether the salt matches", () => {
+    expect(planWithoutTypes(EMPTY, "current-salt", {}).mode).toBe("refuse");
+    expect(planWithoutTypes(EMPTY, "current-salt").mode).toBe("refuse");
+    expect(
+      planWithoutTypes(EMPTY, "current-salt", { saltMatchesExistingRows: undefined }).mode,
+    ).toBe("refuse");
+  });
+
+  it("says in that refusal that the caller did not state it, so it is diagnosable", () => {
+    const plan = planWithoutTypes(EMPTY, "current-salt");
+    if (plan.mode !== "refuse") throw new Error("expected refuse");
+    expect(plan.reason).toMatch(/did not state/i);
+  });
+
+  /**
+   * A missing flag must not turn a pinned account into a disabled one. The
+   * refusal above is for the derive path only: an account with material
+   * pinned needs no statement about the salt, because it is not deriving.
+   */
+  it("still unwraps a pinned row when the flag is missing", () => {
+    expect(planWithoutTypes(PINNED, "some-newer-salt").mode).toBe("unwrap");
   });
 
   it("refuses a half-pinned row on recovery too, not just on unlock", () => {
     const halfPinned: OrKeyMaterialRow = { ...PINNED, or_subkey_salt: null };
-    expect(
-      planOrKeyMaterial(halfPinned, "brand-new-salt", { saltMatchesExistingRows: false }).mode,
-    ).toBe("refuse");
+    expect(planOrKeyMaterial(halfPinned, "brand-new-salt", ROTATED).mode).toBe("refuse");
   });
 });
 
