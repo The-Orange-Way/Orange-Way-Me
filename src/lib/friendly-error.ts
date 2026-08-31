@@ -49,6 +49,13 @@ export function humanizeOrDisabledReason(reason: string): string {
   return "Connections features are unavailable in this browser session. Reload the page, or contact support if this continues.";
 }
 
+/**
+ * Translate a raw error into a customer-friendly message. The raw message
+ * stays in the console for debugging; this just makes the toast readable for
+ * someone who has no idea what "401" or "Failed to fetch" means.
+ *
+ * Returns a short sentence ending in a period.
+ */
 export function humanizeError(
   err: unknown,
   fallback = "Something went wrong. Please try again.",
