@@ -143,7 +143,7 @@ function readEpoch(value: number | string | null | undefined): number | null {
  * until a customer report.
  */
 export const OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON =
-  "TEMP-REWORDED-FOR-OWM-T0396-PROOF: Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced.";
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
 
 export interface PlanOrKeyMaterialOptions {
   /**
