@@ -47,6 +47,7 @@
 // referenced inside initSentry, and the cost is tiny (a few KB minified
 // gzip, dwarfed by the React + Supabase chunks already on the page).
 import * as Sentry from "@sentry/react";
+import { redactValueShapes } from "./value-shapes";
 
 /** Object keys (case-insensitive) we scrub from event payloads. */
 const SECRET_KEY_PATTERNS = [
@@ -111,7 +112,7 @@ const TOKEN_PATTERNS: Array<[RegExp, string]> = [
     "$1=[redacted]",
   ],
   [
-    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed)=[^&\s#"']+/gi,
+    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub)=[^&\s#"']+/gi,
     "$1=[redacted]",
   ],
   // Bearer Authorization headers
@@ -148,7 +149,12 @@ function scrubString(s: string): string {
   for (const [re, repl] of TOKEN_PATTERNS) {
     out = out.replace(re, repl);
   }
-  return out;
+  // TOKEN_PATTERNS only sees name=value pairs, Bearer headers and
+  // JWT-shaped strings. A bare extended key pasted into an error message
+  // matches none of them, so match on the shape of the value itself.
+  // Shared with the PostHog scrubber: two lists that must agree have
+  // already drifted apart once.
+  return redactValueShapes(out);
 }
 
 /**
