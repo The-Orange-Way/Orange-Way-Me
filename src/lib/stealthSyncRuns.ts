@@ -31,8 +31,16 @@ const ERROR_CODE_PATTERN = /^[A-Za-z0-9_]+$/;
 
 function normalizeErrorCode(raw: string | undefined | null): string | null {
   if (!raw) return null;
-  const truncated = raw.slice(0, ERROR_CODE_MAX_LEN);
-  return ERROR_CODE_PATTERN.test(truncated) ? truncated : "UNRECOGNIZED";
+  // Length is tested FIRST, on the original, and an over-long value is
+  // rejected outright rather than cut down to fit. Never test a truncated
+  // copy: base58 addresses, xpubs, bech32 address bodies and hex txids are
+  // all pure alphanumeric, so any 32-character slice of one still satisfies
+  // the pattern below and would be written to error_code verbatim. The
+  // database CHECK cannot catch that, because the value arriving at the
+  // insert is already short and already legal. Truncating here is what
+  // turns a rejected value into a stored wallet-identifying fragment.
+  if (raw.length > ERROR_CODE_MAX_LEN) return "UNRECOGNIZED";
+  return ERROR_CODE_PATTERN.test(raw) ? raw : "UNRECOGNIZED";
 }
 
 /**
