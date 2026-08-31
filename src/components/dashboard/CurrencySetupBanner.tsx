@@ -24,6 +24,7 @@ import { useHousehold, type HouseholdCurrency } from "@/hooks/useHousehold";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { SUPPORTED_CURRENCIES } from "@/lib/fx-rates";
+import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
 
 function dismissKey(userId: string | undefined): string {
   return `orangeway.currencyBannerDismissed.${userId ?? "anon"}`;
@@ -48,14 +49,18 @@ function useDismissed(userId: string | undefined, bump: number): boolean {
 }
 
 function dominantCurrency(
-  accounts: ReadonlyArray<{ currency: string; balance: number | string }>,
+  accounts: ReadonlyArray<{ currency: string; balance: number | string; format_version?: number }>,
 ): HouseholdCurrency | null {
   if (accounts.length === 0) return null;
   const totals: Record<string, number> = {};
   for (const a of accounts) {
     const code = (a.currency ?? "").toUpperCase();
     if (!(SUPPORTED_CURRENCIES as readonly string[]).includes(code)) continue;
-    totals[code] = (totals[code] ?? 0) + Math.abs(Number(a.balance) || 0);
+    const n = Number(a.balance) || 0;
+    const magnitude = isBitcoinCurrency(a.currency)
+      ? Math.abs(normalizeBitcoinToSats(n, a.currency, { unitIsExact: unitIsExact(a.format_version) }))
+      : Math.abs(n);
+    totals[code] = (totals[code] ?? 0) + magnitude;
   }
   const top = Object.entries(totals).sort((a, b) => b[1] - a[1])[0];
   return (top?.[0] as HouseholdCurrency | undefined) ?? null;
