@@ -99,8 +99,9 @@ jobs:
           # (not a ternary). Re-enable on dev by changing to a ternary:
           # github.ref_name == 'dev' && '1' || ''.
           VITE_DEV_SIGNUP_OPEN: ""
-          # Serve the v2 onboarding flow (DL-0429) ONLY on the dev branch
-          # deploy. `ONBOARDING_V2_ENABLED` in
+          # Serve the v2 onboarding flow (DL-0429). See the branch condition
+          # on the value line below for where it is on: dev and prod both,
+          # since the 2026-08-11 go. `ONBOARDING_V2_ENABLED` in
           # src/features/onboarding/onboarding-flow.tsx reads
           # `import.meta.env.VITE_ONBOARDING_V2 === "true"`, and
           # `beforeLoad` in src/routes/onboarding.tsx redirects /onboarding
