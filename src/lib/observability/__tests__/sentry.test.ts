@@ -138,4 +138,57 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.extra.credKeyB64).toBe("[redacted]");
     expect(scrubbed.extra.label).toBe("safe context");
   });
+
+  it("redacts xpub and bare secret key names (DL-1584)", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: {
+        xpub: "xpub6D4BDPcP2GT...",
+        wallet_xpub: "xpub6D4BDPcP2GT...",
+        my_secret: "s".repeat(20),
+        label: "safe context",
+      },
+    }) as { extra: Record<string, unknown> };
+
+    expect(scrubbed.extra.xpub).toBe("[redacted]");
+    expect(scrubbed.extra.wallet_xpub).toBe("[redacted]");
+    expect(scrubbed.extra.my_secret).toBe("[redacted]");
+    expect(scrubbed.extra.label).toBe("safe context");
+  });
+
+  it("fails closed: drops the event instead of throwing when the scrubber itself throws", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    // A throwing getter is the cheapest way to fail the scrubber partway
+    // through walking a payload. The point of the assertion is that a
+    // half-scrubbed event never reaches the network, and that calling
+    // beforeSend does not itself throw out of the SDK's hands.
+    const hostile = {};
+    Object.defineProperty(hostile, "extra", {
+      enumerable: true,
+      get() {
+        throw new Error("scrubber blew up");
+      },
+    });
+    expect(() => cfg.beforeSend(hostile)).not.toThrow();
+    expect(cfg.beforeSend(hostile)).toBeNull();
+  });
+
+  it("fails closed on breadcrumbs too: drops the breadcrumb when scrubbing it throws", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const hostileBc = { category: "xhr" };
+    Object.defineProperty(hostileBc, "data", {
+      enumerable: true,
+      get() {
+        throw new Error("scrubber blew up");
+      },
+    });
+    expect(() => cfg.beforeBreadcrumb(hostileBc)).not.toThrow();
+    expect(cfg.beforeBreadcrumb(hostileBc)).toBeNull();
+  });
 });
