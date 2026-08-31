@@ -104,6 +104,7 @@ let sealedPayload = "";
 let openedAfterRotation = "";
 
 /** The pre-fix path: no pin, so the client re-derives against the new salt. */
+let orKeyPreFixNewPassword = new Uint8Array();
 let orKeyPreFixSameSalt = new Uint8Array();
 let credsKeyPreFix: CryptoKey | null = null;
 
@@ -176,9 +177,9 @@ beforeAll(async () => {
   //    password and the salt together, which is what a password change does.
   //    The second holds the password and moves only the salt, which isolates
   //    the salt as the cause and is the shape recovery takes.
-  const orKeyPreFix = await deriveOrMekBytes(NEW_PASSWORD, USER_ID, saltNew);
+  orKeyPreFixNewPassword = await deriveOrMekBytes(NEW_PASSWORD, USER_ID, saltNew);
   orKeyPreFixSameSalt = await deriveOrMekBytes(OLD_PASSWORD, USER_ID, saltNew);
-  credsKeyPreFix = await deriveOrCredsKeyFromMek(orKeyPreFix, saltNew);
+  credsKeyPreFix = await deriveOrCredsKeyFromMek(orKeyPreFixNewPassword, saltNew);
 }, SETUP_TIMEOUT_MS);
 
 describe("Orange Rails key material across a vault salt rotation", () => {
@@ -231,7 +232,8 @@ describe("Orange Rails key material across a vault salt rotation", () => {
   it("C5 CONTROL: the pre-fix path derives a DIFFERENT key after the rotation", async () => {
     const derivedWithoutThePin = credsKeyPreFix;
     if (!derivedWithoutThePin) throw new Error("setup did not run");
-    expect(toHex(orKeyPreFixSameSalt)).not.toBe(toHex(orKeyAtPin));
+    expect(orKeyPreFixNewPassword).toHaveLength(32);
+    expect(toHex(orKeyPreFixNewPassword)).not.toBe(toHex(orKeyAtPin));
     await expect(decryptText(sealedPayload, derivedWithoutThePin)).rejects.toThrow();
   });
 
