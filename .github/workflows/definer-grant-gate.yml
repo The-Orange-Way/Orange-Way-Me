@@ -25,6 +25,11 @@ name: Definer grant gate
 # one moment a human is still looking before the grant ever reaches a
 # database, which the live jobs cannot cover: they only ever report on a
 # grant that is already live.
+#
+# The two live-database jobs below are gated with a positive list of their
+# three intended triggers (push to their own branch, schedule, dispatch),
+# not by excluding pull_request by name, so adding a future trigger cannot
+# silently switch them on again.
 
 on:
   push:
