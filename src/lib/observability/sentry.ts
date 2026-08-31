@@ -355,7 +355,8 @@ function scrubEventLoose(event: unknown): unknown {
   if (breadcrumbs) {
     e.breadcrumbs = breadcrumbs.map((bc) => ({
       ...bc,
-      message: typeof bc.message === "string" ? scrubString(bc.message) : bc.message,
+      message:
+        typeof bc.message === "string" ? capString(scrubString(bc.message), 4000) : bc.message,
       data: bc.data ? scrubValue(bc.data) : bc.data,
     }));
   }
