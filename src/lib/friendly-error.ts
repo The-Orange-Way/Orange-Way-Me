@@ -25,13 +25,6 @@ export function toastError(err: unknown, fallback?: string): void {
 }
 
 /**
- * Translate a raw error into a customer-friendly message. The raw message
- * stays in the console for debugging; this just makes the toast readable for
- * someone who has no idea what "401" or "Failed to fetch" means.
- *
- * Returns a short sentence ending in a period.
- */
-/**
  * Translate the reason carried by OrNamespaceDisabledError into copy the
  * customer can act on.
  *
