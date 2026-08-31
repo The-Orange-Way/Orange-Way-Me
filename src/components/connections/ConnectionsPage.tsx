@@ -379,6 +379,12 @@ export function ConnectionsPage() {
   // OR action that throws.
   useEffect(() => {
     if (!orNamespaceDisabledReason) return;
+    // Deliberately no else-branch clearing the banner here. The reason only
+    // goes back to null on a path (unlock, subaccount change) that also
+    // re-runs the OPK registration effect below, which clears securingError
+    // itself on every run. If that coupling is ever broken, the banner will
+    // stick after the customer has fixed the problem, so this comment is the
+    // thing to update alongside whatever changes that guarantee.
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
   }, [orNamespaceDisabledReason]);
 
