@@ -81,6 +81,9 @@ EXEMPT_GENERIC=(
   # This script and the PR template document the forbidden patterns
   # as examples; they intentionally contain the strings they scan for.
   "scripts/pre-publish-scan.sh"
+  # Its test harness plants the same kind of example matches on purpose,
+  # to prove the scanner still catches them. See OWM-T0406.
+  "scripts/test-leak-scan-red.sh"
   # The pre-push gate's private-host regex contains the literal strings
   # it scans for; install-hooks.sh references it.
   "scripts/pre-push-gate.sh"
@@ -204,6 +207,13 @@ EXIT_CODE=0
 #   $5  "1" to print file and line only and withhold the matched text. Set it
 #       for any category whose pattern comes from the internal list. Empty for
 #       the hardcoded categories, whose matches are safe to show.
+#   $6  optional id-level exemption pattern. Unlike $4, this does not drop a
+#       whole line just because it CONTAINS an allowed id: it strips every
+#       occurrence of this pattern out of a copy of the matched text and
+#       re-tests that copy against $2. A line whose only match was the id
+#       is dropped; a line that still matches once the id is stripped out
+#       carries a separate, real finding and is reported with the original
+#       (unstripped) line.
 
 scan() {
   local name="$1"
@@ -211,6 +221,7 @@ scan() {
   local flags="$3"
   local extra_exempt="$4"
   local redact="${5:-}"
+  local strip_exempt="${6:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -248,6 +259,31 @@ scan() {
     filtered=$(printf '%s\n' "$raw" | grep -Ev "$drop_patterns" || true)
   else
     filtered="$raw"
+  fi
+
+  # Id-level exemption: re-test each surviving line with the id pattern
+  # stripped out of a copy of its matched text, rather than dropping the
+  # whole line because it contains an allowed id. A line whose only match
+  # was the id no longer matches the stripped copy and is dropped here; a
+  # line that still matches carries a separate, real finding and is kept,
+  # with the original (unstripped) line printed below.
+  if [[ -n "$strip_exempt" && -n "$filtered" ]]; then
+    local kept="" line text stripped still_matches
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      text="${line#*:}"
+      text="${text#*:}"
+      stripped="$(printf '%s' "$text" | sed -E "s/${strip_exempt}//g")"
+      if [[ -n "$flags" ]]; then
+        still_matches=$(printf '%s' "$stripped" | grep -E $flags -q "$pattern" && echo yes || echo no)
+      else
+        still_matches=$(printf '%s' "$stripped" | grep -Eq "$pattern" && echo yes || echo no)
+      fi
+      if [[ "$still_matches" == "yes" ]]; then
+        kept+="${kept:+$'\n'}${line}"
+      fi
+    done <<< "$filtered"
+    filtered="$kept"
   fi
 
   if [[ -z "$filtered" ]]; then
@@ -329,16 +365,28 @@ printf "\n\033[1m2. Structural naming checks\033[0m\n"
 
 # A delivery-board ticket id (OWM-T0402, OWM-T1234, ...) is allowed even
 # though it contains the literal bare-OWM regex, because a hyphen counts
-# as a word boundary and \bOWM\b matches it too. This is a content-level
-# exemption (not anchored to a path) so a ticket id is fine in any file;
-# a bare "OWM" on its own, or "OWM" followed by anything other than
-# "-T<digits>", is still a leak and still fails the scan.
+# as a word boundary and \bOWM\b matches it too. Unlike EXEMPT_OWM_RE
+# below, this is not a drop-the-whole-line exemption: it is passed as
+# scan()'s strip_exempt argument, which strips every OWM-T<digits>
+# occurrence out of a copy of the matched text and re-tests that copy. A
+# line whose ONLY match was the ticket id is dropped; a line that ALSO
+# carries a separate, real match (a bare "OWM", or "OWM" followed by
+# anything other than "-T<digits>") still matches the stripped copy and
+# is still reported, with the original line (id intact) printed.
+#
+# Kept as its own argument rather than folded into extra_exempt below:
+# concatenating the two into one string ("${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}")
+# meant an emptied EXEMPT_OWM_FUNCTION_URLS array would leave a leading
+# "|", which matches the empty string and silently drops every line of
+# the category. Two separate arguments removes that composition.
 EXEMPT_OWM_TICKET_ID='OWM-T[0-9]+'
 
 scan "Internal codename: MB / OWM as acronym" \
      "\\(MB\\)|MB —| in MB\\b|MB's|\\bOWM\\b" \
      "" \
-     "${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}"
+     "${EXEMPT_OWM_RE}" \
+     "" \
+     "${EXEMPT_OWM_TICKET_ID}"
 
 # ----------------------------------------------------------------------
 # Category 3: Internal milestone tags + dead PR refs
