@@ -1,6 +1,6 @@
 /**
  * Does the pinned Orange Rails key material actually survive a vault salt
- * rotation? (OWM-T0391, the execution check for OWM-T0176 / DL-1506.)
+ * rotation? (DL-1506, the execution check for the pinned key material fix.)
  *
  * WHY THIS FILE EXISTS. The fix pins the Orange Rails key bytes by WRAPPING
  * them under the vault key rather than deriving them from
@@ -82,16 +82,26 @@ const toBuffer = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer as Arr
 let saltOld = "";
 let saltNew = "";
 
+/**
+ * Every shared buffer below is annotated rather than left to inference.
+ *
+ * `new Uint8Array()` infers `Uint8Array<ArrayBuffer>`, while the vault
+ * primitives return the default `Uint8Array<ArrayBufferLike>`, and the second
+ * is not assignable to the first. Left alone, the placeholder initializer
+ * would decide the type instead of the value that actually matters, and the
+ * file would not typecheck.
+ */
+
 /** The Orange Rails key derived and pinned before anything rotated. */
-let orKeyAtPin = new Uint8Array();
+let orKeyAtPin: Uint8Array = new Uint8Array();
 /** The same key, re-derived, to show the derivation is deterministic. */
-let orKeyRederived = new Uint8Array();
+let orKeyRederived: Uint8Array = new Uint8Array();
 /** What the pinned blob opens to AFTER the password change. */
-let orKeyAfterRotation = new Uint8Array();
+let orKeyAfterRotation: Uint8Array = new Uint8Array();
 
 /** The vault key bytes, before and after the password change. */
-let vaultKeyBytesBefore = new Uint8Array();
-let vaultKeyBytesAfter = new Uint8Array();
+let vaultKeyBytesBefore: Uint8Array = new Uint8Array();
+let vaultKeyBytesAfter: Uint8Array = new Uint8Array();
 
 /** The row as the pin writes it, and the plan read back after the rotation. */
 let pinnedRow: OrKeyMaterialRow = NOTHING_PINNED;
@@ -104,8 +114,8 @@ let sealedPayload = "";
 let openedAfterRotation = "";
 
 /** The pre-fix path: no pin, so the client re-derives against the new salt. */
-let orKeyPreFixNewPassword = new Uint8Array();
-let orKeyPreFixSameSalt = new Uint8Array();
+let orKeyPreFixNewPassword: Uint8Array = new Uint8Array();
+let orKeyPreFixSameSalt: Uint8Array = new Uint8Array();
 let credsKeyPreFix: CryptoKey | null = null;
 
 beforeAll(async () => {
