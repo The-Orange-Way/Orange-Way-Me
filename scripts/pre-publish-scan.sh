@@ -81,6 +81,9 @@ EXEMPT_GENERIC=(
   # This script and the PR template document the forbidden patterns
   # as examples; they intentionally contain the strings they scan for.
   "scripts/pre-publish-scan.sh"
+  # Its test harness plants the same kind of example matches on purpose,
+  # to prove the scanner still catches them. See OWM-T0406.
+  "scripts/test-leak-scan-red.sh"
   # The pre-push gate's private-host regex contains the literal strings
   # it scans for; install-hooks.sh references it.
   "scripts/pre-push-gate.sh"
