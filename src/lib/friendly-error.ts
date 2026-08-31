@@ -40,13 +40,17 @@ export function toastError(err: unknown, fallback?: string): void {
  * useVault()'s orNamespaceDisabledReason) instead of waiting for the user
  * to trigger a call that throws. humanizeError also calls this so any call
  * site that lets the thrown error reach it gets the same copy.
+ *
+ * Matches against OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON, the single
+ * exported copy of the sentence, rather than a substring typed here: see
+ * that constant's comment in or-key-material.ts for why a second copy is
+ * the failure mode this guards against.
  */
 export function humanizeOrDisabledReason(reason: string): string {
-  const lower = reason.toLowerCase();
   // The one refuse reason with a concrete customer fix: the vault salt
   // rotated (password change or recovery) before anything was pinned, so
   // previously-synced Connections data needs a re-sync to read again.
-  if (lower.includes("needs a re-sync")) {
+  if (reason === OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON) {
     return "Your Connections need a quick re-sync. Go to Connections and sync your accounts to pick up where you left off.";
   }
   // Every other refuse reason (a stale or newer key generation, a partially
