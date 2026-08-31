@@ -371,12 +371,12 @@ export function ConnectionsPage() {
     };
   }, [user, subaccountId, isUnlocked]);
 
-  // OWM-T0355. The OR namespace can come back refused (DL-1506: salt rotated
-  // while unpinned, most commonly right after a vault recovery) before the
-  // OPK-registration effect below ever runs. Surface that specific, actionable
-  // reason through the same securingError banner the OPK effect uses, rather
-  // than letting the customer land on Connections and see nothing until they
-  // trigger an OR action that throws.
+  // The OR namespace can come back refused (salt rotated while unpinned,
+  // most commonly right after a vault recovery) before the OPK-registration
+  // effect below ever runs. Surface that specific, actionable reason through
+  // the same securingError banner the OPK effect uses, rather than letting
+  // the customer land on Connections and see nothing until they trigger an
+  // OR action that throws.
   useEffect(() => {
     if (!orNamespaceDisabledReason) return;
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
