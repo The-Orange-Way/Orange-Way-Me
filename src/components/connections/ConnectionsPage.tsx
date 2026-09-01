@@ -73,7 +73,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, refreshRuntimeFlags } from "@/lib/stealth/runtimeFlags";
 import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
@@ -577,6 +577,14 @@ export function ConnectionsPage() {
     // put the key in a popup. planCatalogueAdd names no slug here because this
     // button names none: it opens the whole list, which can reach a gated
     // entry, and that is why an unnamed add is refused while the flag is off.
+    //
+    // The flag is READ HERE, at the press, not taken from the copy cached when
+    // the page loaded (OWM-T0504). A tab opened before operations turned the
+    // switch off used to keep the old answer for as long as it stayed open, so
+    // the door this gate protects stood open for exactly the customer already
+    // in the app. One round trip, and it fails closed: a read that errors
+    // leaves the gate false and this press is refused.
+    await refreshRuntimeFlags();
     const addGate = planCatalogueAdd({ stealthSyncEnabled: isStealthSyncEnabled() });
     if (!addGate.allowed) {
       toast.error(addGate.message);
