@@ -4,9 +4,9 @@ import { readStealthSyncEnabled, STEALTH_SYNC_FLAG_KEY } from "./stealth-flag.ts
 
 describe("readStealthSyncEnabled", () => {
   it("allows only when the row was read and enabled is exactly true", async () => {
-    expect(await readStealthSyncEnabled(async () => ({ data: { enabled: true }, error: null }))).toBe(
-      true,
-    );
+    expect(
+      await readStealthSyncEnabled(async () => ({ data: { enabled: true }, error: null })),
+    ).toBe(true);
   });
 
   it("refuses when the row says false", async () => {
