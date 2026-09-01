@@ -74,6 +74,7 @@ import {
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
@@ -565,6 +566,20 @@ export function ConnectionsPage() {
   async function handleAddConnection() {
     if (!user) {
       toast.error("Please sign in first.");
+      return;
+    }
+    // The add door of the kill switch. Same flag the sync gate below reads, so
+    // one answer turns the whole feature on or off rather than half of it.
+    //
+    // This is above exportOrCredsKey on purpose. The catalogue we open is the
+    // provider's, not ours, and its private-wallet entries seal an envelope
+    // with whatever key we hand over, so refusing after the export would still
+    // put the key in a popup. planCatalogueAdd names no slug here because this
+    // button names none: it opens the whole list, which can reach a gated
+    // entry, and that is why an unnamed add is refused while the flag is off.
+    const addGate = planCatalogueAdd({ stealthSyncEnabled: isStealthSyncEnabled() });
+    if (!addGate.allowed) {
+      toast.error(addGate.message);
       return;
     }
     setOpening(true);
