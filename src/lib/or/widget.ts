@@ -25,6 +25,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { isStealthSyncEnabled, loadRuntimeFlags } from "@/lib/stealth/runtimeFlags";
 
 // Must be a host that serves the widget directly. The apex
 // orangerails.com/connect does not: it redirects to
@@ -90,6 +91,19 @@ export interface OrLinkSuccess {
   source_wallets: OrLinkSourceWallet[];
 }
 
+/**
+ * Thrown when the add path is asked to open the connect catalogue while the
+ * stealth kill switch is off. A distinct type rather than a bare Error so the
+ * caller can say "this route is off right now" instead of showing the generic
+ * "we couldn't open the connect window" failure, which would read as a bug.
+ */
+export class StealthCatalogueDisabledError extends Error {
+  constructor() {
+    super("The connect catalogue is disabled by the stealth kill switch");
+    this.name = "StealthCatalogueDisabledError";
+  }
+}
+
 /** Open the OR hosted connect widget; resolves on success, rejects on
  *  cancel/close. Omit `provider` to let OR's widget show its own provider
  *  picker step. */
@@ -99,6 +113,35 @@ export async function openOrConnect(args: {
   credKeyB64: string;
   txnKeyB64: string;
 }): Promise<OrLinkSuccess> {
+  // The kill switch controls BOTH doors, not just sync.
+  //
+  // The catalogue this opens contains the stealth sources (xpub, Sparrow), and
+  // picking one of those seals another envelope under the credentials
+  // namespace key. That is exactly what the switch exists to stop, and until
+  // now it stopped it only at sync time: the add path never read the flag, so
+  // a feature everyone believed was off still accepted new connections.
+  //
+  // The whole entry point is gated rather than the two slugs, because the
+  // catalogue is rendered by the connect provider and our only lever on it is
+  // the all-or-one `provider` parameter. There is no way from here to hide two
+  // entries and keep the rest of the list, so with the switch off this route
+  // is closed and the bank route (a separate, provider-named entry point in
+  // ./bank-connect.ts, which does not import this module) carries on working.
+  //
+  // Refused BEFORE the token mint and BEFORE window.open, so a disabled add
+  // path costs no round trip and can never reach the provider with keys in a
+  // fragment.
+  //
+  // loadRuntimeFlags() is awaited rather than trusting whatever the cached
+  // value happens to be: the read is idempotent, never throws, and folds to
+  // false on every failure (no row, query error, exception), so the gate is
+  // correct whether or not boot has already loaded the flag. FAILS CLOSED. An
+  // unreadable kill switch is not an open one.
+  await loadRuntimeFlags();
+  if (!isStealthSyncEnabled()) {
+    throw new StealthCatalogueDisabledError();
+  }
+
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
     platform: OR_PLATFORM_SLUG,
