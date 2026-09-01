@@ -39,19 +39,42 @@ function retainScalar(value: unknown): string | number | boolean | null {
 }
 
 /**
+ * Cap a message. Same rule and same constant as a retained body string: an
+ * upstream error string is a sentence, and anything longer is a payload
+ * wearing an error's name.
+ *
+ * Truncation is from the END on purpose. Every predicate that reads a message
+ * matches near its front (isSubaccountNotFound below, and the rotation-guard
+ * scan in bank-sync-opk), so cutting the tail keeps those working while a cut
+ * from the front would silently disable them.
+ */
+export function clampProxyErrorMessage(message: string): string {
+  return message.length > MAX_RETAINED_STRING ? message.slice(0, MAX_RETAINED_STRING) : message;
+}
+
+/**
  * Read the message for a CallProxyError out of a proxy response body.
  *
- * DELIBERATELY DEFECTIVE IN THIS COMMIT (OWM-T0452). This is the rule that
- * lives inline at the two callProxy throw sites today, lifted here verbatim so
- * the tests that arrive with it can be watched failing before anything is
- * changed. It joins whatever sits under `error` through String() and caps
- * nothing, which is why an array of strings rides out in the message while the
- * body drops it. Fixed in the next commit.
+ * Only a short scalar under `error` can become a message. That is the same
+ * rule the body is narrowed under, and it exists for the same reason: the
+ * message and the body belong to the same thrown Error and reach the same
+ * console sink, so bounding one and not the other closes one door out of two.
+ *
+ * The concrete case this refuses: `{"error": ["aaa", "bbb"]}`. The body
+ * correctly drops a list, while `String(["aaa","bbb"])` is `"aaa,bbb"`, so
+ * before this the same content the body dropped rode out in the message beside
+ * it, unbounded. An object was harmless only by luck, since `String({})` is
+ * `"[object Object]"`.
+ *
+ * Returning null rather than a placeholder is deliberate: the caller already
+ * has better fallbacks (the transport's own message, then the endpoint name),
+ * and a placeholder would replace a useful message with a useless one.
  */
 export function proxyErrorMessageFromBody(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   if (!("error" in body)) return null;
-  return String((body as { error: unknown }).error);
+  const scalar = retainScalar((body as { error: unknown }).error);
+  return scalar === null ? null : String(scalar);
 }
 
 /**
@@ -94,13 +117,15 @@ export function narrowProxyErrorBody(body: unknown): unknown {
  *
  * `body` is narrowed by `narrowProxyErrorBody` in the constructor rather than
  * at the throw sites. A throw site can be added without remembering to narrow;
- * a constructor cannot be bypassed.
+ * a constructor cannot be bypassed. The message is capped in the constructor
+ * for the same reason: both properties travel on the same Error to the same
+ * sink, so both are bounded in the one place a throw site cannot skip.
  */
 export class CallProxyError extends Error {
   status: number;
   body: unknown;
   constructor(message: string, status: number, body: unknown) {
-    super(message);
+    super(clampProxyErrorMessage(message));
     this.name = "CallProxyError";
     this.status = status;
     this.body = narrowProxyErrorBody(body);
