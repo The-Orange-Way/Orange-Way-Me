@@ -64,7 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { planSyncRoute } from "@/lib/or/sync-route";
+import { dispatchSync } from "@/lib/or/sync-dispatch";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -947,17 +947,20 @@ export function ConnectionsPage() {
     // refuse a private connection: it fell through to the or-sync branch below
     // and exported two vault keys for a request or-sync answers with a 400
     // (OWM-T0530, OWM-T0528, OWM-T0533).
-    const route = planSyncRoute(conn);
+    // OWM-T0544: the routing RULE was tested and the CALL to it was not.
+    // Deleting the private arm here left every test in the repository passing
+    // and restored OWM-T0530 in full, because nothing renders this component
+    // in a test and nothing can, there being no DOM test environment. The arms
+    // now live in dispatchSync, where sync-dispatch.test.ts calls them, and
+    // every member of SyncHandlers is required, so deleting one HERE is a
+    // typecheck error rather than a silent redirect onto the only handler that
+    // exports vault keys.
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
     // vault OPK key, and imports. The or-sync path below is for
     // Bitcoin sources (Blink/Strike/etc.) only.
-    if (route === "bank") {
-      setBankSyncConnId(conn.id);
-      return;
-    }
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
@@ -978,17 +981,28 @@ export function ConnectionsPage() {
     // consulted in this condition. It is read at the press inside
     // handleStealthSync, which awaits refreshRuntimeFlags and refuses ABOVE
     // the credentials key export. An off switch has to refuse a private
-    // connection; it must never redirect one onto the branch below, which is
-    // the only branch in this handler that exports vault keys.
+    // connection; it must never redirect one onto the orSync handler, which is
+    // the only handler here that exports vault keys.
     //
     // Routing on is_stealth alone also matches planSyncAll, which has always
     // held private connections back from or-sync unconditionally. This path
     // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
-    }
+    await dispatchSync(conn, {
+      bank: () => {
+        setBankSyncConnId(conn.id);
+      },
+      privateWallet: () => handleStealthSync(conn),
+      orSync: () => syncViaOrSync(conn, subaccount),
+    });
+  }
 
+  /**
+   * The or-sync request: the one path in this component that exports the
+   * credentials key and the transactions key from the vault. It is reachable
+   * only through the orSync member of the dispatch above, never by falling off
+   * the end of a condition, which is how OWM-T0530 happened.
+   */
+  async function syncViaOrSync(conn: ConnectionRow, subaccount: string) {
     setSyncingId(conn.id);
     try {
       const credentials_key = await exportOrCredsKey();
