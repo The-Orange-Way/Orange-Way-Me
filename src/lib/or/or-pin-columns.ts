@@ -23,11 +23,7 @@
  * assert on values rather than on mocks agreeing with each other.
  */
 
-import {
-  deriveOrMekBytes,
-  importMekFromRaw,
-  wrapOrMekWithVaultMek,
-} from "@/lib/vault";
+import { deriveOrMekBytes, importMekFromRaw, wrapOrMekWithVaultMek } from "@/lib/vault";
 
 import { planOrKeyMaterial, type OrKeyMaterialRow } from "./or-key-material";
 
