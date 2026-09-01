@@ -45,6 +45,7 @@ import { OR_CONNECT_BASE, OR_PLATFORM_SLUG } from "../or/widget";
 import { launchStealthConnect } from "./launch";
 import { STEALTH_MESSAGE } from "./protocol";
 import type { StealthChannel, StealthInboundMessage } from "./channel";
+import { planStealthScan, StealthScanDisabledError } from "./scan-gate";
 
 /** The widget route that scans. Distinct from `/connect`, which is the picker. */
 export const STEALTH_WIDGET_PATH = "/stealth";
@@ -414,6 +415,20 @@ export async function startStealthSync(args: {
   appUserId: string;
   credKeyB64: string;
   widgetToken: string;
+  /**
+   * The effective stealth kill switch, as the caller read it.
+   *
+   * Required, with no default, and it is a statement rather than a lookup on
+   * purpose. This function is the only thing that opens the widget, so it is
+   * the one place a refusal covers every entry to the scan, including the
+   * retry action on the failure toast and any caller added later. Making it an
+   * argument means a call site that fails to state it is a compile error, and
+   * it keeps the Supabase client that runtimeFlags imports out of this
+   * module's graph, so the contract tests still run with no network.
+   *
+   * Anything that is not the boolean true refuses. See scan-gate.ts.
+   */
+  stealthSyncEnabled: boolean;
   onProgress?: (progress: StealthSyncProgress) => void;
   onComplete?: (outcome: StealthSyncOutcome) => void;
   /**
@@ -429,6 +444,13 @@ export async function startStealthSync(args: {
   launch?: typeof launchStealthConnect;
   baseUrl?: string;
 }): Promise<StealthSyncHandle> {
+  // The kill switch, checked before anything is opened and before any key
+  // leaves this process. The caller checks it too, earlier, so the customer
+  // gets a sentence instead of a thrown error; this one is the check a future
+  // caller cannot walk past.
+  const gate = planStealthScan({ stealthSyncEnabled: args.stealthSyncEnabled });
+  if (!gate.allowed) throw new StealthScanDisabledError(gate.message);
+
   const launch = args.launch ?? launchStealthConnect;
 
   const { channel } = await launch({
