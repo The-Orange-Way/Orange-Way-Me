@@ -60,7 +60,12 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import {
+  openOrConnect,
+  mintWidgetToken,
+  StealthCatalogueDisabledError,
+  type OrLinkSourceWallet,
+} from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
@@ -73,7 +78,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, loadRuntimeFlags } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
@@ -95,13 +100,23 @@ import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
-// Gate the Orange Rails stealth-sync connector to environments where it is
-// actually provisioned. Branch-derived in .github/workflows/deploy.yml
-// (VITE_OR_CONNECT_ENABLED), exactly like VITE_ONBOARDING_V2: "true" on the
-// dev build, empty on prod. Empty folds the compare to a constant false, so
-// the prod bundle never renders the "+ Connect a Bitcoin source" button and
-// no route can reach the OR connect widget (DL-0393). `=== "true"` so an
-// absent or empty value reads as OFF.
+// Gate the Orange Rails connect catalogue to the environments where it is
+// actually provisioned. Branch derived in .github/workflows/deploy.yml
+// (VITE_OR_CONNECT_ENABLED), same shape as VITE_ONBOARDING_V2. `=== "true"`
+// so an absent or empty value reads as OFF, which is what makes a build that
+// forgets the flag ship dark rather than half wired (DL-0393).
+//
+// This comment used to say the value is empty on prod and that the prod
+// bundle therefore never renders the "+ Connect a Bitcoin source" button.
+// That stopped being true when the prod arm was turned on: deploy.yml sets
+// this to "true" on BOTH dev and prod, so the button ships on both. Checked
+// against deploy.yml at dev on 2026-08-31. It is worth correcting rather than
+// leaving, because reading it as still true leads to the wrong conclusion
+// that the add path is already closed in production.
+//
+// This is a BUILD time environment gate and it is not the kill switch. The
+// kill switch is `stealthCatalogueEnabled` below, read at runtime from
+// app_flags, which is what operations can turn off with no redeploy.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
@@ -281,6 +296,26 @@ export function ConnectionsPage() {
   const [opkRegistered, setOpkRegistered] = useState(false);
   const [opkRetryNonce, setOpkRetryNonce] = useState(0);
   const [opening, setOpening] = useState(false);
+  // The runtime half of the add-time gate (the build time half is
+  // OR_CONNECT_ENABLED above). The catalogue this button opens contains the
+  // stealth sources, and every one of those added seals another envelope under
+  // the credentials namespace key, so while the kill switch is off there is no
+  // route to it. openOrConnect refuses regardless of what is rendered; this
+  // exists so we do not show a button whose only outcome is a refusal.
+  //
+  // Starts false and is only ever set from a completed flag read, so the
+  // boot window and every failure mode of that read leave it hidden. Same
+  // fail closed rule as the sync gate.
+  const [stealthCatalogueEnabled, setStealthCatalogueEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void loadRuntimeFlags().then(() => {
+      if (!cancelled) setStealthCatalogueEnabled(isStealthSyncEnabled());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Connection to ring and scroll to after the connect widget closes. The
   // "you already have this" case has nothing new to show, so without this the
   // toast points at a row the user then has to hunt for themselves.
@@ -629,6 +664,17 @@ export function ConnectionsPage() {
         });
       }
     } catch (err) {
+      if (err instanceof StealthCatalogueDisabledError) {
+        // Not a failure and not the user's doing: the route is switched off.
+        // Say that, say what still works, and drop the button so nobody walks
+        // into the same refusal twice. Deliberately not toastError: this is
+        // not something to report or retry.
+        setStealthCatalogueEnabled(false);
+        toast.info(
+          "Connecting a Bitcoin source is unavailable right now. Connecting a bank still works.",
+        );
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === "User cancelled" || msg === "Widget closed before completion") {
         toast.info("Connection cancelled.");
@@ -1621,7 +1667,7 @@ export function ConnectionsPage() {
             >
               + Connect a bank
             </Button>
-            {OR_CONNECT_ENABLED && (
+            {OR_CONNECT_ENABLED && stealthCatalogueEnabled && (
               <Button
                 onClick={() => void handleAddConnection()}
                 disabled={opening || securing || !opkRegistered}
