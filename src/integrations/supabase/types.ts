@@ -1125,6 +1125,32 @@ export type Database = {
         };
         Relationships: [];
       };
+      // hand-added ahead of next `supabase gen types` pass.
+      // SELECT and INSERT only: this table carries no UPDATE or DELETE grant
+      // and no update or delete policy, so the database refuses both. The
+      // Update shape below exists only because `supabase gen types` emits one
+      // for every table.
+      or_connection_key_namespace: {
+        Row: {
+          connection_id: string;
+          established_at: string;
+          namespace: string;
+          user_id: string;
+        };
+        Insert: {
+          connection_id: string;
+          established_at?: string;
+          namespace: string;
+          user_id: string;
+        };
+        Update: {
+          connection_id?: string;
+          established_at?: string;
+          namespace?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       vault_metadata: {
         Row: {
           created_at: string;
