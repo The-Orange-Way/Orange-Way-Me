@@ -89,9 +89,9 @@ describe("subscribeStealthSyncEnabled", () => {
     const m = await freshModule();
 
     const second = vi.fn();
-    let unsubscribeFirst = () => {};
+    let unsubscribeFirst: (() => void) | null = null;
     unsubscribeFirst = m.subscribeStealthSyncEnabled(() => {
-      unsubscribeFirst();
+      unsubscribeFirst?.();
     });
     m.subscribeStealthSyncEnabled(second);
 
