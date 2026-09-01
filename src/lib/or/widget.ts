@@ -25,6 +25,21 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+
+/** What the user is told when the catalogue is shut. Exported so the page
+ *  shows the same sentence rather than a second wording of it. */
+export const SOURCE_CATALOGUE_DISABLED_MESSAGE =
+  "Connecting a Bitcoin source is temporarily unavailable.";
+
+/** Thrown when the catalogue is opened while the kill switch is off. A named
+ *  class so a caller can tell a deliberate refusal from a failure. */
+export class SourceCatalogueDisabledError extends Error {
+  constructor() {
+    super(SOURCE_CATALOGUE_DISABLED_MESSAGE);
+    this.name = "SourceCatalogueDisabledError";
+  }
+}
 
 // Must be a host that serves the widget directly. The apex
 // orangerails.com/connect does not: it redirects to
@@ -99,6 +114,19 @@ export async function openOrConnect(args: {
   credKeyB64: string;
   txnKeyB64: string;
 }): Promise<OrLinkSuccess> {
+  // The kill switch, on the add door as well as the sync door.
+  //
+  // isStealthSyncEnabled() is false until a successful read of the flag row
+  // says otherwise, so an unreadable flag, a missing row, a failed query and
+  // a page that has not finished booting all land here. That is deliberate:
+  // an unreadable kill switch is not an open one.
+  //
+  // First statement in the function on purpose. Nothing is minted and no URL
+  // is built above it, so with the flag off no widget token exists and
+  // neither vault key is ever written into a URL.
+  if (!isStealthSyncEnabled()) {
+    throw new SourceCatalogueDisabledError();
+  }
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
     platform: OR_PLATFORM_SLUG,
