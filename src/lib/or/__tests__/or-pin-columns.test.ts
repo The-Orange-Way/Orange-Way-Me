@@ -21,6 +21,19 @@
  * against a helper that pinned the wrong salt in a way that merely looked
  * self consistent.
  *
+ * THE THIRD POPULATION, ASSERTED HERE RATHER THAN ARGUED ABOUT. An account
+ * that changed its vault password BEFORE the pin shipped rotated its kdf_salt
+ * with all three Orange Rails columns still null. For that row the salt in
+ * force is no longer the salt its already synced rows were sealed under, and
+ * nothing stored can tell the two apart, so the helper derives and pins
+ * against the salt it can see. That is deliberate, and it loses nothing that
+ * was not already lost: deriveOrMekBytes takes the PASSWORD as well as the
+ * salt, so the key that sealed those rows stopped being reproducible at the
+ * earlier password change, whatever gets pinned now. The two cases at the
+ * bottom of this file state that in assertions, so the next reader finds a
+ * decision instead of an accident. Whether a refusal would be the better
+ * answer for that population is OWM-T0233's question, not this file's.
+ *
  * ZKA. Every input is synthetic. No plaintext, no address, no txid, no wallet
  * identifying value and no customer material is involved.
  */
@@ -62,6 +75,11 @@ interface Fixture {
   kAgainstNew: Uint8Array;
   /** The columns the helper actually produced for the unpinned row. */
   columns: Awaited<ReturnType<typeof computeOrPinColumns>>;
+  /**
+   * The columns produced for a row that rotated while unpinned: kdf_salt is
+   * the salt that rotation minted, and all three columns are still null.
+   */
+  rotatedWhileUnpinned: Awaited<ReturnType<typeof computeOrPinColumns>>;
 }
 
 let fixture!: Fixture;
@@ -88,8 +106,33 @@ beforeAll(async () => {
     mekBytes,
   });
 
-  fixture = { saltOld, saltNew, mekBytes, kAgainstOld, kAgainstNew, columns };
-}, 120_000);
+  // The account that rotated while unpinned. Same shape as the row above, but
+  // the salt on it is the one a password change already minted, so it is not
+  // the salt the rows this account already synced were sealed under.
+  //
+  // The password is held constant across the fixture on purpose: it isolates
+  // the salt, which is the variable under test. In the real population the
+  // password changed too, which is exactly why the old key was already
+  // unreproducible before this helper ever ran.
+  const rotatedWhileUnpinned = await computeOrPinColumns({
+    row: unpinnedRow(saltNew),
+    password: PASSWORD,
+    userId: USER_ID,
+    mekBytes,
+  });
+
+  fixture = {
+    saltOld,
+    saltNew,
+    mekBytes,
+    kAgainstOld,
+    kAgainstNew,
+    columns,
+    rotatedWhileUnpinned,
+  };
+  // Raised from 120s with the fourth Argon2id derivation this block now pays
+  // for. The work is deliberately expensive; the timeout is not the subject.
+}, 180_000);
 
 describe("computeOrPinColumns", () => {
   it("pins the salt already on the row, not one minted during the change", () => {
@@ -167,5 +210,30 @@ describe("computeOrPinColumns", () => {
         mekBytes: fixture.mekBytes,
       }),
     ).resolves.toBeNull();
+  });
+
+  it("still pins a row that rotated while unpinned, against the salt it can see", () => {
+    // Nothing stored distinguishes this row from one that never rotated, so
+    // the helper cannot refuse it selectively even in principle. Asserting the
+    // outcome makes the limit visible rather than leaving it to a comment.
+    expect(fixture.rotatedWhileUnpinned).not.toBeNull();
+    expect(fixture.rotatedWhileUnpinned?.or_subkey_salt).toBe(fixture.saltNew);
+    expect(fixture.rotatedWhileUnpinned?.or_subkey_salt).not.toBe(fixture.saltOld);
+    expect(fixture.rotatedWhileUnpinned?.or_key_epoch).toBe(CURRENT_OR_KEY_EPOCH);
+  });
+
+  it("seals for that row a key that does not open what was sealed before the rotation", async () => {
+    const vaultMek = await importMekFromRaw(fixture.mekBytes);
+    const sealedKey = await unwrapOrMekWithVaultMek(
+      fixture.rotatedWhileUnpinned?.enc_or_mek_ciphertext ?? "",
+      vaultMek,
+    );
+
+    // The bytes are the ones the current salt produces, and they are NOT the
+    // bytes that opened the pre rotation rows. Said out loud in a test so that
+    // "a re-sync is needed for anything synced earlier" is a documented
+    // consequence of pinning here, not a surprise found in production.
+    expect(toHex(sealedKey)).toBe(toHex(fixture.kAgainstNew));
+    expect(toHex(sealedKey)).not.toBe(toHex(fixture.kAgainstOld));
   });
 });
