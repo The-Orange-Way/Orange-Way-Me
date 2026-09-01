@@ -1,0 +1,46 @@
+-- Revoke TRUNCATE, REFERENCES, TRIGGER and MAINTAIN from anon and authenticated
+-- on every table in schema public.
+--
+-- WHY THIS EXISTS
+-- 20260512000000_grant_table_privileges.sql runs
+--   GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role
+-- so that PostgREST can route to tables created by migration. GRANT ALL is
+-- wider than PostgREST needs. It also hands over four privileges that row level
+-- security does not constrain and that PostgREST never uses:
+--   TRUNCATE    no HTTP verb in PostgREST, and TRUNCATE ignores RLS entirely
+--   REFERENCES  lets a role point a foreign key at the table
+--   TRIGGER     lets a role attach a trigger to the table
+--   MAINTAIN    VACUUM / ANALYZE / REINDEX / CLUSTER (PostgreSQL 17 and newer)
+--
+-- SCOPE, DELIBERATELY NARROW
+-- This removes ONLY those four. SELECT, INSERT, UPDATE and DELETE are load
+-- bearing and are NOT touched. PostgREST connects as `authenticated` for every
+-- logged in user, and RLS is a filter on top of a granted privilege, never a
+-- substitute for one: revoke the privilege and the policy becomes unreachable
+-- and the API returns "permission denied for table X" instead of rows. Dead DML
+-- grants are handled separately, after a per table privilege against policy
+-- matrix, because that change can break the product and this one cannot.
+--
+-- SEVERITY: latent, not live. TRUNCATE has no PostgREST verb. TRIGGER and
+-- REFERENCES both require object creation rights, and anon and authenticated
+-- hold USAGE and not CREATE on schema public. This closes the hole before some
+-- later change makes it reachable.
+--
+-- REQUIRES PostgreSQL 17 or newer for MAINTAIN. Measured on the dev instance
+-- before writing this: PostgreSQL 17.6. On 15 or 16 the statement below is a
+-- syntax error, not a no-op.
+--
+-- IDEMPOTENT: REVOKE of a privilege that is not held is a no-op, so a re-run
+-- changes nothing.
+-- REVERSIBLE: the exact undo is
+--   GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN
+--     ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+--
+-- NOT FIXED HERE: a table created after this migration still arrives with the
+-- wide grant, because ALTER DEFAULT PRIVILEGES is recorded per grantor role and
+-- this schema has two grantor rows (postgres and supabase_admin). That is a
+-- separate change.
+
+REVOKE TRUNCATE, REFERENCES, TRIGGER, MAINTAIN
+  ON ALL TABLES IN SCHEMA public
+  FROM anon, authenticated;
