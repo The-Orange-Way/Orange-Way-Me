@@ -64,7 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { planSyncRoute, PRIVATE_SYNC_DISABLED_MESSAGE } from "@/lib/or/sync-route";
+import { planSyncRoute } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -945,7 +945,7 @@ export function ConnectionsPage() {
     // tests: planSyncRoute in src/lib/or/sync-route.ts. It used to be a stack
     // of inline conditions here with no test, which is how the fall-through
     // described below survived a review and a production flag flip.
-    const route = planSyncRoute(conn, { stealthSyncEnabled: isStealthSyncEnabled() });
+    const route = planSyncRoute(conn);
 
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
@@ -984,15 +984,20 @@ export function ConnectionsPage() {
     // consulted, and control fell through to the branch below, which calls
     // exportOrCredsKey and exportOrTxnsKey and posts BOTH vault keys in the
     // or-sync body of a request that is then rejected by the 400 above. Two
-    // keys left the browser and nothing was gained. planSyncRoute now decides
-    // on `is_stealth === true` alone, exactly as planSyncAll already did for
-    // the bulk path, and the switch only chooses refuse or scan. No state of
-    // the switch can put a private connection on the or-sync path.
-    if (route.kind === "private-refused") {
-      toast.error(PRIVATE_SYNC_DISABLED_MESSAGE);
-      return;
-    }
-    if (route.kind === "private-scan") {
+    // keys left the browser and nothing was gained by sending them.
+    //
+    // planSyncRoute decides on `is_stealth === true` alone, exactly as
+    // planSyncAll already did for the bulk path. So no state of the switch,
+    // and no state of its cache, can put a private connection on the or-sync
+    // path. Scan or refuse is then decided ONCE, at the door:
+    // handleStealthSync opens with `await refreshRuntimeFlags()` and refuses
+    // there when the switch is off. That is the right place for it and not
+    // merely a convenient one, because that function has a second caller, the
+    // "Try again" action on the failure toast, which never comes through here.
+    // Deciding it here as well would give one state two refusal sentences, and
+    // this one would be the staler of the two: routing reads the cached answer
+    // while the door forces a read.
+    if (route.kind === "private") {
       await handleStealthSync(conn);
       return;
     }
