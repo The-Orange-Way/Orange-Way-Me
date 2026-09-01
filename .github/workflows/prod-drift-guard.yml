@@ -73,7 +73,7 @@ jobs:
           if [ "$prod_ahead" -gt 0 ]; then
             # An absent files array is NOT the same fact as an empty one. A
             # compare the API declined to diff must never read as clean.
-            if [ "$(echo "$ahead_json" | jq -r 'has("files")')" != "true" ]; then
+            if [ "$(echo "$ahead_json" | jq -r '.files | type')" != "array" ]; then
               echo "::error::prod is ahead by ${prod_ahead} commit(s) and the compare carried no files array, so prod-only content could not be checked. Refusing to report green." >&2
               exit 1
             fi
