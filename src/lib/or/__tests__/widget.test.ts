@@ -21,6 +21,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { OR_LINK_SUCCESS, OR_LINK_SUCCESS_STEALTH } from "./__fixtures__/or-connect-messages";
 
+// openOrConnect reads the stealth kill switch out of app_flags before it does
+// anything else and refuses when that read fails (OWM-T0478), so this mock has
+// to answer it. Every case below is about what happens once the gate has
+// passed: minting, URL building, and how the promise settles. The switch being
+// OFF is covered in widget-stealth-gate.test.ts.
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: {
@@ -28,6 +33,13 @@ vi.mock("@/integrations/supabase/client", () => ({
         data: { session: { access_token: "test-jwt" } },
       }),
     },
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: vi.fn().mockResolvedValue({ data: { enabled: true }, error: null }),
+        }),
+      }),
+    }),
   },
 }));
 
