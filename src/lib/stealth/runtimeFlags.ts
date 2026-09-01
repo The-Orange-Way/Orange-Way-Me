@@ -30,12 +30,43 @@ import { supabase } from "@/integrations/supabase/client";
 let stealthSyncEnabled = false;
 let loaded = false;
 
+type FlagListener = () => void;
+const listeners = new Set<FlagListener>();
+
 /**
  * The effective stealth-sync gate. Read at the call site instead of the
  * build-time constant so the runtime override applies.
  */
 export function isStealthSyncEnabled(): boolean {
   return stealthSyncEnabled;
+}
+
+/**
+ * Subscribe to changes in the gate. Returns an unsubscribe function, which
+ * is the contract React's useSyncExternalStore expects.
+ *
+ * This exists because the value is false until the boot read resolves, so a
+ * component that renders on the gate would otherwise be stuck on the
+ * pre-load value. Nothing here can make the gate true: it only reports that
+ * the one write below has happened.
+ */
+export function subscribeStealthSyncEnabled(listener: FlagListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * The ONLY place stealthSyncEnabled is written. Single writer on purpose:
+ * every path that could turn the gate on or off is visible here, and every
+ * subscriber is told. Notifies over a copy so a listener that unsubscribes
+ * inside its own callback cannot mutate the set mid-iteration.
+ */
+function setStealthSyncEnabled(next: boolean): void {
+  if (next === stealthSyncEnabled) return;
+  stealthSyncEnabled = next;
+  for (const listener of [...listeners]) listener();
 }
 
 /**
@@ -59,14 +90,14 @@ export async function loadRuntimeFlags(): Promise<void> {
     if (error) {
       // Query failed (table absent, network). Fail closed, do not inherit a
       // build-time default that may be true.
-      stealthSyncEnabled = false;
+      setStealthSyncEnabled(false);
       return;
     }
     // Query succeeded. A present row is authoritative; an absent row folds to
     // false because the flag is undefined server-side.
-    stealthSyncEnabled = data?.enabled === true;
+    setStealthSyncEnabled(data?.enabled === true);
   } catch {
     // Same reasoning as the error branch: an unreadable flag is an off flag.
-    stealthSyncEnabled = false;
+    setStealthSyncEnabled(false);
   }
 }
