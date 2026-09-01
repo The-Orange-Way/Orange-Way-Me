@@ -40,6 +40,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http.ts";
 import { getOrGatewayFromEnv, OR_GATEWAY_NOT_ALLOWED_ERROR } from "../_shared/or-gateway.ts";
+import {
+  type AppFlagReader,
+  readStealthSyncEnabled,
+  STEALTH_SYNC_DISABLED_CODE,
+  STEALTH_SYNC_DISABLED_ERROR,
+  STEALTH_SYNC_DISABLED_STATUS,
+} from "../_shared/stealth-flag.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -93,6 +100,48 @@ const ALLOWED_ENDPOINTS = new Set([
   // background-synced bank transactions to it. app_user_id forced to user.id.
   "or-sync-key-register",
 ]);
+
+/**
+ * Actions refused while the private wallet kill switch is off.
+ *
+ * Every action in ALLOWED_ENDPOINTS was considered, and the disposition of
+ * each is recorded here so a future reader does not have to re-derive it:
+ *
+ *   or-link-mint-token            GATED. It mints the widget token the browser
+ *                                 trades for a widget origin that receives the
+ *                                 credentials key. This is the server side edge
+ *                                 of the self custody boundary.
+ *   or-stealth-connection-delete  NOT gated. It removes a private connection
+ *                                 and carries no key material. Gating a removal
+ *                                 would strand a customer with a connection
+ *                                 they cannot delete while the switch is off,
+ *                                 which is the opposite of what the switch is
+ *                                 for.
+ *   or-stealth-transactions-list  NOT gated. It returns rows that were sealed
+ *                                 to the user's own key before they were
+ *                                 stored. The server never holds the plaintext
+ *                                 and no key crosses a boundary on this call,
+ *                                 so refusing it would only hide data the
+ *                                 customer already owns.
+ *   or-sync-key-register          NOT gated. It registers the user's X25519
+ *                                 PUBLIC key. A public key is not secret
+ *                                 material, and the bank sealing path needs the
+ *                                 same registration, so gating it would break a
+ *                                 feature this switch has nothing to do with.
+ *   or-provision                  NOT gated. Creates the subaccount. No key
+ *                                 material.
+ *   or-connection-list            NOT gated. Connection metadata only.
+ *   or-connection-delete          NOT gated. Removal, and not a private wallet
+ *                                 path at all.
+ *   or-sync                       NOT gated. Bank sync through the subaccount.
+ *   or-transactions-list          NOT gated. Bank transactions through the
+ *                                 subaccount.
+ *
+ * Adding an action that exports, transports or re-mints vault key material
+ * without adding it to this set is the one way this gate can silently stop
+ * covering something.
+ */
+const STEALTH_GATED_ENDPOINTS = new Set(["or-link-mint-token"]);
 
 /**
  * x-region: us-east-1 -- pin OR's edge function execution to Virginia so
@@ -198,6 +247,31 @@ Deno.serve(async (req: Request) => {
         400,
         cors,
       );
+    }
+
+    // -- Private wallet kill switch, enforced server side ---------------------
+    // public.app_flags key stealth_sync_enabled is read here, on every gated
+    // request, and never cached: an edge instance is reused across requests, so
+    // a cached answer would outlive a flip of the row by an unbounded amount.
+    //
+    // This sits ABOVE the request build on purpose. There is no path where the
+    // flag is off and a token is nonetheless constructed, and the refusal body
+    // carries an error and a code and nothing else, so there is no partial
+    // success that still contains a token.
+    //
+    // Fail closed: readStealthSyncEnabled returns false for a read that errors,
+    // a read that throws, an absent row, and a value that is not exactly true.
+    if (STEALTH_GATED_ENDPOINTS.has(endpoint)) {
+      const stealthEnabled = await readStealthSyncEnabled(
+        serviceClient as unknown as AppFlagReader,
+      );
+      if (!stealthEnabled) {
+        return jsonResponse(
+          { error: STEALTH_SYNC_DISABLED_ERROR, code: STEALTH_SYNC_DISABLED_CODE },
+          STEALTH_SYNC_DISABLED_STATUS,
+          cors,
+        );
+      }
     }
 
     // -- Build the OR request body --------------------------------------------
