@@ -315,7 +315,7 @@ function sleep(ms: number): Promise<void> {
  * a well formed key that opens nothing and reports success, which is precisely
  * the failure being removed.
  */
-async function resolveOrKeyMaterial(params: {
+export async function resolveOrKeyMaterial(params: {
   userId: string;
   password: string;
   mek: CryptoKey;
@@ -1084,15 +1084,22 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // is not worse than the status quo, where that material is password
     // derived directly. Writing a second code path for a shape no row in the
     // system has would mean shipping a branch no test can reach.
+    // Computed, not asserted (DEV-0049). An unlock never rotates kdf_salt
+    // itself, but that says nothing about whether something ELSE rotated it
+    // while the Orange Rails material was unpinned (recovery, before the
+    // paired fix below). The only signal stored for that today is a
+    // half-established row: or_subkey_salt present, enc_or_mek_ciphertext
+    // absent. planOrKeyMaterial refuses that shape unconditionally already
+    // (the anyPresent check runs before this flag is read), so this makes
+    // the assertion honest rather than changing behaviour for that case.
+    const saltRotatedWhileUnpinned = Boolean(row.or_subkey_salt) && !row.enc_or_mek_ciphertext;
     const orMaterial = await resolveOrKeyMaterial({
       userId: user.id,
       password,
       mek,
       row,
       kdfSalt: row.kdf_salt,
-      // An unlock does not rotate the salt, so deriving here reproduces the
-      // same key the existing rows were sealed under.
-      saltMatchesExistingRows: true,
+      saltMatchesExistingRows: !saltRotatedWhileUnpinned,
     });
 
     mekRef.current = mek;
@@ -1188,13 +1195,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // Fetch the current wrapper so the old password is verified against the
     // KDF version this row actually stores, rather than the current default.
     const { data, error } = await vaultTable()
-      .select("kdf_salt,kdf_iterations,enc_mek_ciphertext,vault_key_version")
+      .select(
+        "kdf_salt,kdf_iterations,enc_mek_ciphertext,vault_key_version,enc_or_mek_ciphertext,or_subkey_salt,or_key_epoch",
+      )
       .eq("user_id", user.id)
       .maybeSingle();
     if (error || !data) throw new Error("Vault metadata not found");
     const row = data as Pick<
       VaultMetadataRow,
-      "kdf_salt" | "kdf_iterations" | "enc_mek_ciphertext" | "vault_key_version"
+      | "kdf_salt"
+      | "kdf_iterations"
+      | "enc_mek_ciphertext"
+      | "vault_key_version"
+      | "enc_or_mek_ciphertext"
+      | "or_subkey_salt"
+      | "or_key_epoch"
     >;
     if (!row.enc_mek_ciphertext)
       throw new Error("Legacy vault — recreate to enable password change.");
@@ -1213,6 +1228,54 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Current vault password is incorrect");
     }
 
+    // Orange Rails key material is pinned HERE, before the salt is minted, and
+    // written in the same UPDATE below (DEV-0044). This path used to rotate
+    // kdf_salt and never touch the three OR columns, so an account that had
+    // not unlocked since DL-1506 shipped was left rotated but unpinned: the
+    // next unlock plans "derive-and-pin" against the NEW salt while asserting
+    // the salt still matches the rows already sealed, which produces a well
+    // formed key that opens nothing and looks exactly like success.
+    //
+    // Everything needed is local. The old password is in hand and has just
+    // been verified, the old salt is row.kdf_salt, and the MEK bytes are held
+    // in the ref, so the legacy value is reproduced with no network call.
+    // Planning against the CURRENT salt with saltMatchesExistingRows: true is
+    // honest here and only here, because newSalt does not exist yet.
+    const orPlan = planOrKeyMaterial(row, row.kdf_salt, { saltMatchesExistingRows: true });
+    let orPinColumns: Record<string, unknown> | null = null;
+
+    if (orPlan.mode === "derive-and-pin") {
+      const vaultMek = await importMekFromRaw(mekBytesRef.current);
+      const orMekBytes = await deriveOrMekBytes(currentPassword, user.id, orPlan.saltContext);
+      try {
+        orPinColumns = {
+          enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(orMekBytes, vaultMek),
+          // The OLD salt. These subkeys were established against it and must
+          // not move when kdf_salt does.
+          or_subkey_salt: orPlan.saltContext,
+          or_key_epoch: orPlan.epoch,
+        };
+      } finally {
+        // Our own copy, wrapped and no longer needed.
+        orMekBytes.fill(0);
+      }
+      // A throw above leaves nothing written and the password unchanged, which
+      // the customer can retry. That is the better failure: rotating without
+      // the pin would make the material unreproducible permanently.
+    } else if (orPlan.mode === "refuse") {
+      // Rotate anyway and write no OR column. In both refusal cases the
+      // material is already unreproducible and the namespace is already
+      // disabled, so the rotation makes nothing worse, while blocking a
+      // password change over an unrelated namespace generation would be a real
+      // harm for no gain. Reason only: no salt, ciphertext or key material.
+      console.warn(
+        "[vault] Orange Rails material not pinned during password change:",
+        orPlan.reason,
+      );
+    }
+    // "unwrap" needs nothing. The row is already pinned and the pin does not
+    // move with the password or the salt, which is the whole point of it.
+
     // Opportunistic upgrade: every password change lands the vault on the
     // current best KDF. Fresh salt, current wrapper. kdf_iterations is not
     // read by Argon2id but the column stays populated for back-compat.
@@ -1228,13 +1291,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     // Recovery ciphertext is unaffected — MEK bytes don't change on password change.
 
+    // ONE statement. The OR columns ride along with the salt rotation, so
+    // "rotated but unpinned" is not a state the row can hold rather than a
+    // state that is merely unlikely (DEV-0044).
+    const updatePayload: Record<string, unknown> = {
+      kdf_salt: newSalt,
+      kdf_iterations: iterations,
+      enc_mek_ciphertext: newEncMek,
+      vault_key_version: CURRENT_VAULT_KEY_VERSION,
+      ...(orPinColumns ?? {}),
+    };
+
     const { error: upErr } = await vaultTable()
-      .update({
-        kdf_salt: newSalt,
-        kdf_iterations: iterations,
-        enc_mek_ciphertext: newEncMek,
-        vault_key_version: CURRENT_VAULT_KEY_VERSION,
-      })
+      .update(updatePayload as Database["public"]["Tables"]["vault_metadata"]["Update"])
       .eq("user_id", user.id);
     if (upErr) throw new Error(upErr.message);
     setVaultKeyVersion(CURRENT_VAULT_KEY_VERSION);
@@ -1323,6 +1392,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const newHmacSalt = randomBytesB64(16);
     const iterations = 600_000;
 
+    // DEV-0049 / DL-2266. If this row had no Orange Rails material pinned
+    // before this recovery, the rotation below is about to leave it with
+    // three null OR columns under a brand new salt -- indistinguishable from
+    // a vault that never had OR material at all. Recording the pre-rotation
+    // salt (already read above, already needed for the keypair re-wrap)
+    // turns that into a half-established row, which planOrKeyMaterial
+    // refuses permanently rather than a state that reads as "safe to derive
+    // and pin" on the very next unlock.
+    const hadNoOrMaterialBeforeRecovery =
+      !data.enc_or_mek_ciphertext && !data.or_subkey_salt && data.or_key_epoch == null;
+
     const mek = await importMekFromRaw(mekBytes);
     const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
     // Recovery always promotes the vault to the current best KDF.
@@ -1388,6 +1468,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       recovery_ciphertext: freshRecovery,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
+      // See hadNoOrMaterialBeforeRecovery above. Marks the row so the next
+      // unlock refuses instead of silently re-pinning under this salt.
+      ...(hadNoOrMaterialBeforeRecovery ? { or_subkey_salt: data.kdf_salt } : {}),
     };
     // Only include enc_private_key in the payload when we had one to
     // re-wrap. Leaving the key out of the UPDATE preserves the existing

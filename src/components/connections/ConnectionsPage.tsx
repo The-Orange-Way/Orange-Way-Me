@@ -64,6 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
   describeStealthProgress,
@@ -89,7 +90,7 @@ import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
-import { humanizeError, toastError } from "@/lib/friendly-error";
+import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
 import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
@@ -211,6 +212,7 @@ export function ConnectionsPage() {
     exportOrTxnsKey,
     buildHouseholdSignatureFields,
     getOpkKeypair,
+    orNamespaceDisabledReason,
   } = useVault();
   const { accounts, updateAccount } = useAccounts();
   const {
@@ -369,6 +371,17 @@ export function ConnectionsPage() {
       cancelled = true;
     };
   }, [user, subaccountId, isUnlocked]);
+
+  // The OR namespace can come back refused (salt rotated while unpinned,
+  // most commonly right after a vault recovery) before the OPK-registration
+  // effect below ever runs. Surface that specific, actionable reason through
+  // the same securingError banner the OPK effect uses, rather than letting
+  // the customer land on Connections and see nothing until they trigger an
+  // OR action that throws.
+  useEffect(() => {
+    if (!orNamespaceDisabledReason) return;
+    setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
+  }, [orNamespaceDisabledReason]);
 
   // Register the OPK public key on OR once the subaccount exists. or-quiltt-sync
   // seals background-synced bank transactions to this key; if registration
@@ -671,12 +684,20 @@ export function ConnectionsPage() {
     // user has no way to detect.
     setStealthProgress(null);
     setStealthScanId(conn.id);
+    // DL-1447: durable run record. Written once we are actually about to
+    // launch the widget (both key export and token mint succeeded), so this
+    // covers every real execution attempt including one whose popup is then
+    // blocked or whose channel setup throws below. runId stays null when the
+    // insert itself failed; finishStealthSyncRun no-ops on null rather than
+    // retrying the insert, so a logging failure never blocks the sync.
+    let runId: string | null = null;
     try {
       // Read the key immediately before use, like handleAddConnection does, so
       // a vault that locked while this page sat open fails here rather than
       // part-way through a scan.
       const credKeyB64 = await exportOrCredsKey();
       const widgetToken = await mintWidgetToken(user.id);
+      runId = await startStealthSyncRun(user.id, conn.id);
 
       const { channel } = await startStealthSync({
         connectionId: conn.id,
@@ -702,6 +723,11 @@ export function ConnectionsPage() {
           setSyncingId(null);
           setStealthProgress(null);
           setStealthScanId(null);
+          void finishStealthSyncRun(runId, {
+            status: "success",
+            rowsAttempted: outcome.txCount,
+            rowsWritten: outcome.txCount,
+          });
           // DL-1171. Record what this frame told us about the scan position
           // BEFORE anything else, because the next failure toast reads it and
           // an early return further down would leave it stale. Note what is
@@ -773,6 +799,10 @@ export function ConnectionsPage() {
           setSyncingId(null);
           setStealthProgress(null);
           setStealthScanId(null);
+          void finishStealthSyncRun(runId, {
+            status: "error",
+            errorCode: failure.code,
+          });
           // The code is for us, not for the user: it is the difference between
           // a support conversation that starts with a cause and one that
           // starts with "it said something went wrong".
@@ -804,6 +834,7 @@ export function ConnectionsPage() {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
       toast.error(humanizeError(new Error(msg)));
+      void finishStealthSyncRun(runId, { status: "error", errorCode: "launch_failed" });
     }
   }
 

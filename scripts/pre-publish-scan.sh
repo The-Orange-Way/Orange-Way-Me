@@ -129,10 +129,66 @@ EXEMPT_OWM_FUNCTION_URLS=(
 # (the structural checks below still run). Outside contributors therefore
 # get a working scanner with zero exposure to the internal list.
 
-RESERVED_TERMS="${OW_RESERVED_TERMS:-}"
-if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
-  RESERVED_TERMS="$(grep -vE '^[[:space:]]*(#|$)' .reserved-terms | paste -sd'|' -)"
+# The canonicalizer is NOT defined here. This scan, the pre-push gate, the
+# post-merge identity-scan workflow and the leak-check workflow all source
+# ONE implementation, so they cannot drift the way they had. See
+# scripts/canon-terms.sh for what each step of the pipeline is holding up.
+#
+# Fail closed when the library is absent. Without this check the script
+# would carry on with canon_terms undefined, RESERVED_TERMS would resolve
+# empty, category 1 would print itself as skipped, and the whole run would
+# still exit 0. An unrunnable scanner is a broken guard, not a clean tree.
+CANON_TERMS_LIB="$REPO_ROOT/scripts/canon-terms.sh"
+if [[ ! -f "$CANON_TERMS_LIB" ]]; then
+  printf "\n\033[31m▎ scripts/canon-terms.sh is missing; the reserved-term scan cannot run.\033[0m\n\n" >&2
+  exit 1
 fi
+# shellcheck source=scripts/canon-terms.sh
+. "$CANON_TERMS_LIB"
+
+# Present is not the same as usable. The file can exist and fail to source,
+# which is what a syntax error introduced by a later edit looks like, and
+# this script has no set -e: canon_terms would simply be undefined, the
+# list would resolve empty, category 1 would print itself as skipped and
+# the run would still exit 0. In CI the canonicalizer self test runs as an
+# earlier step and would catch that first, so the property would be held by
+# step ORDER rather than by this script. Ask for the function itself.
+if ! declare -f canon_terms >/dev/null 2>&1; then
+  printf "\n\033[31m▎ scripts/canon-terms.sh was sourced but defines no canon_terms; the reserved-term scan cannot run.\033[0m\n\n" >&2
+  exit 1
+fi
+
+RESERVED_TERMS=""
+if [[ -n "${OW_RESERVED_TERMS:-}" ]]; then
+  RESERVED_TERMS="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+fi
+if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
+  RESERVED_TERMS="$(canon_terms < .reserved-terms)"
+fi
+
+# A list that cannot be scanned with is not a clean tree, and it fails in
+# three different ways: grep refuses the pattern (the unbalanced
+# parenthesis case), it compiles and matches the empty string so it hits
+# every line of every file, or it is empty. All three arrive here looking
+# identical, because scan() below discards grep's status with "|| true" and
+# the category prints a green tick having matched nothing. Refuse the run
+# while we still know why, and say WHICH why: telling someone whose list
+# matches everything that it "does not compile" sends them hunting a typo
+# that is not there, in a value nobody can read back.
+if [[ -n "$RESERVED_TERMS" ]] && ! canon_terms_usable "$RESERVED_TERMS"; then
+  printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
+  printf "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line).\n" >&2
+  printf "  No part of the list is printed here.\n\n" >&2
+  exit 1
+fi
+
+# Withhold matched text when running in CI. A CI log on a public repository
+# is public, and the reserved-term category matches strings that are internal
+# by definition, so printing the offending line there publishes the very
+# thing this scan exists to keep out of the tree. Locally the full line is
+# what makes a finding fixable, so it is printed in full. CI is set by GitHub
+# Actions and by most other runners.
+REDACT_MATCHES="${CI:+1}"
 
 EXIT_CODE=0
 
@@ -145,12 +201,16 @@ EXIT_CODE=0
 #   $2  grep pattern (extended regex)
 #   $3  grep flags (e.g. -i for case-insensitive). Empty string for none.
 #   $4  extra-exemption pattern (extended regex). Empty string for none.
+#   $5  "1" to print file and line only and withhold the matched text. Set it
+#       for any category whose pattern comes from the internal list. Empty for
+#       the hardcoded categories, whose matches are safe to show.
 
 scan() {
   local name="$1"
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
+  local redact="${5:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -166,10 +226,18 @@ scan() {
     return 0
   fi
 
-  # Always-drop exemptions
+  # Always-drop exemptions.
+  #
+  # Each entry is anchored to the PATH COLUMN of the grep -rnE output,
+  # whose lines are "./path:LINE:text". An unanchored bare filename
+  # matches anywhere on the line, including inside the matched text of an
+  # unrelated file, which silently drops a real finding in that other
+  # file. Anchor as ^\./<path>: so an entry exempts only the file it names.
   local drop_patterns=""
+  local e esc
   for e in "${EXEMPT_GENERIC[@]}"; do
-    drop_patterns+="${drop_patterns:+|}$(printf '%s' "$e" | sed 's/[.[\]*]/\\&/g')"
+    esc=$(printf '%s' "$e" | sed 's/[.[\]*]/\\&/g')
+    drop_patterns+="${drop_patterns:+|}^\\./${esc}:"
   done
   if [[ -n "$extra_exempt" ]]; then
     drop_patterns+="${drop_patterns:+|}$extra_exempt"
@@ -190,7 +258,14 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31m✗\033[0m  %s (%d findings)\n" "$name" "$count"
-  printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
+  if [[ -n "$redact" ]]; then
+    # file and line only. The matched text is an internal string by
+    # definition, so it must never reach a log that may be public.
+    printf '%s\n' "$filtered" | cut -d: -f1,2 | sed 's/^/      /' | head -30
+    printf "      (matched text withheld; run this scan locally to see it)\n"
+  else
+    printf '%s\n' "$filtered" | sed 's/^/      /' | head -30
+  fi
   if [[ "$count" -gt 30 ]]; then
     printf "      ... %d more\n" "$((count - 30))"
   fi
@@ -222,11 +297,26 @@ printf "  repo: %s\n\n" "$REPO_ROOT"
 
 printf "\033[1m1. Reserved terms\033[0m\n"
 
+# Line-anchored exemptions for tree content that matches ONLY under
+# case-insensitive comparison and is not a leak. Each entry anchors to a
+# path AND to surrounding prose (^\./path:[0-9]+:.*context), so it exempts
+# one line rather than a whole file, and no entry needs to carry the
+# matched term itself. Never add an unanchored bare filename here.
+EXEMPT_RESERVED_CI="$(join_pipe \
+  "^\\./src/lib/vault-envelope\\.ts:[0-9]+:.*straight from the password" \
+  "^\\./src/lib/vault\\.ts:[0-9]+:.*is not 32 bytes; refusing to use it" \
+  "^\\./supabase/migrations/20260625130000_beta_allowlist\\.sql:[0-9]+:.*seeded with the migration" \
+)"
+
 if [[ -n "$RESERVED_TERMS" ]]; then
+  # -i: the post-merge identity scan already compares case-insensitively.
+  # This gate runs first, so it has to be at least as strict, or a term in
+  # another case passes here and is only caught after the merge.
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
-       "" \
-       ""
+       "-i" \
+       "$EXEMPT_RESERVED_CI" \
+       "$REDACT_MATCHES"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
@@ -237,10 +327,18 @@ fi
 
 printf "\n\033[1m2. Structural naming checks\033[0m\n"
 
+# A delivery-board ticket id (OWM-T0402, OWM-T1234, ...) is allowed even
+# though it contains the literal bare-OWM regex, because a hyphen counts
+# as a word boundary and \bOWM\b matches it too. This is a content-level
+# exemption (not anchored to a path) so a ticket id is fine in any file;
+# a bare "OWM" on its own, or "OWM" followed by anything other than
+# "-T<digits>", is still a leak and still fails the scan.
+EXEMPT_OWM_TICKET_ID='OWM-T[0-9]+'
+
 scan "Internal codename: MB / OWM as acronym" \
      "\\(MB\\)|MB —| in MB\\b|MB's|\\bOWM\\b" \
      "" \
-     "$EXEMPT_OWM_RE"
+     "${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}"
 
 # ----------------------------------------------------------------------
 # Category 3: Internal milestone tags + dead PR refs

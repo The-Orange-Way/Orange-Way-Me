@@ -1,9 +1,9 @@
 /**
  * Co-admin emergency access orchestration.
  *
- * Implements the grant / consume / revoke lifecycle described in
- * docs/OrangeRails-CoAdmins.md. All cryptographic work happens in the
- * browser; the server never sees plaintext subkeys.
+ * Implements the grant / consume / revoke lifecycle for co-admin emergency
+ * access, enumerated step by step below. All cryptographic work happens in
+ * the browser; the server never sees plaintext subkeys.
  *
  * ## Grant flow (owner side)
  *   1. Re-derive MEK raw bytes from the owner's vault password.
@@ -36,7 +36,8 @@
  *   bytes ..end                                : AES-GCM(sharedSecret, blob64) + 16-byte tag
  *
  * MVP limitation: cached subkeys in the admin's browser tab survive
- * revocation until the tab is closed. See docs/OrangeRails-CoAdmins.md.
+ * revocation until the tab is closed. Revoking deletes the stored grant, it
+ * does not reach a session that has already unwrapped the blob.
  */
 
 import { deriveMekRaw, importAesKey } from "./vault";

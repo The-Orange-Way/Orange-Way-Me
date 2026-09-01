@@ -11,9 +11,15 @@
  * which does the same job on the error-reporting side.
  */
 
+import { redactValueShapes } from "./value-shapes";
+
 /**
  * Property keys whose VALUES are scrubbed unconditionally. Match by
  * lowercase substring against the property key name.
+ *
+ * This is a KEY-NAME list. It cannot see a sensitive value that arrives
+ * under an innocuous name; that case is handled by redactValueShapes,
+ * which both this scrubber and sentry.ts import from value-shapes.ts.
  */
 const SCRUB_VALUE_KEY_HINTS = [
   "account",
@@ -29,6 +35,12 @@ const SCRUB_VALUE_KEY_HINTS = [
   "vault",
   "mek",
   "opk",
+  "or_stealth_key",
+  "stealth_key",
+  "key",
+  "seed",
+  "secret",
+  "xpub",
   "recovery",
   "verifier",
   "ciphertext",
@@ -93,7 +105,9 @@ function scrubUrl(input: unknown): unknown {
   out = out.replace(UUID_RE, "[uuid]");
   out = out.replace(LONG_NUM_RE, "/[id]");
   out = out.replace(BASE64ISH_RE, "/[opaque]");
-  return out;
+  // A key-shaped path segment or query value is not necessarily a UUID,
+  // a long number, or long enough to trip BASE64ISH_RE.
+  return redactValueShapes(out);
 }
 
 function shouldScrubKey(key: string): boolean {
@@ -135,11 +149,18 @@ function scrubValue(key: string, value: unknown, depth: number): unknown {
   if (shouldScrubKey(key)) {
     return "[redacted]";
   }
-  if (typeof value === "string" && value.length > 256) {
-    // Cap long strings: a 1KB string in an event property is almost
-    // never a deliberate analytics signal, but it's a great way to
-    // accidentally exfiltrate ciphertext or a base64-encoded key.
-    return value.slice(0, 256) + "…";
+  if (typeof value === "string") {
+    // Value-shape pass first. The cap below keeps the FIRST 256
+    // characters, so a long string carrying an extended key near its
+    // front would otherwise be truncated and still ship the key.
+    const shaped = redactValueShapes(value);
+    if (shaped.length > 256) {
+      // Cap long strings: a 1KB string in an event property is almost
+      // never a deliberate analytics signal, but it's a great way to
+      // accidentally exfiltrate ciphertext or a base64-encoded key.
+      return shaped.slice(0, 256) + "…";
+    }
+    return shaped;
   }
   if (depth >= MAX_SCRUB_DEPTH) {
     // Past the depth cap: pass primitives through, but redact any

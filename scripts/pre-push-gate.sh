@@ -81,6 +81,17 @@ else
 fi
 
 # ---- Check 2: pre-publish leak scan ----
+# Fail closed. A check that cannot run is not a check that passed, and with
+# no else branch here a cleared executable bit made this check disappear:
+# nothing ran, nothing printed, FAIL stayed untouched and the gate went on to
+# report PASSED. Every other unrunnable-check path below now refuses with a
+# reason; this was the one left answering "I could not check" with silence.
+#
+# The bit is tested and the scanner is then invoked with bash, which does not
+# need it. That looks redundant and is deliberate: the post-merge
+# identity-scan workflow tests the same bit and hard errors on it, so
+# accepting a non-executable scanner here would pass a push the server
+# refuses after the merge. Same rule in both places, same wording.
 if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
   if bash "$REPO_ROOT/scripts/pre-publish-scan.sh" >/tmp/.pps.out 2>&1; then
     green "✓ pre-publish-scan clean."
@@ -89,6 +100,10 @@ if [ -x "$REPO_ROOT/scripts/pre-publish-scan.sh" ]; then
     tail -20 /tmp/.pps.out
     FAIL=1
   fi
+else
+  red "✗ scripts/pre-publish-scan.sh is missing or not executable; the tree scan cannot run."
+  red "  Restore the file, or run: chmod +x scripts/pre-publish-scan.sh"
+  FAIL=1
 fi
 
 # ---- Shared helper: the base a push is measured against ----
@@ -122,16 +137,69 @@ push_base() {
 # publish the very strings it exists to keep out of the public tree. It is
 # sourced at runtime from the OW_RESERVED_TERMS environment variable or a
 # gitignored .reserved-terms file (one regex fragment per line; see
-# .reserved-terms.example). The post-merge identity-scan workflow sources
-# the same list from the repository secret, so local and server-side
-# enforcement share one source of truth and cannot drift.
-PRIVATE_PATTERN="${OW_RESERVED_TERMS:-}"
-if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
-  PRIVATE_PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$REPO_ROOT/.reserved-terms" | paste -sd'|' -)"
+# .reserved-terms.example). The post-merge identity-scan workflow reads the
+# same list from the repository secret.
+#
+# BOTH sources are canonicalized, and by the SAME code the leak scan and
+# the post-merge identity scan use: scripts/canon-terms.sh. The environment
+# value used to be taken raw here, which is not a small omission. grep -E
+# treats each line of a multi-line pattern as a separate pattern, so a
+# blank line in the value matched every input and refused every push, a
+# comment line became a live fragment matching its own text, and a
+# carriage return made every branch match nothing while the gate reported
+# no reserved terms found.
+CANON_TERMS_LIB="$REPO_ROOT/scripts/canon-terms.sh"
+PRIVATE_PATTERN=""
+# Set when a list WAS supplied and could not be turned into a usable
+# pattern. That is a refusal with a reason already printed, not a skip, and
+# the two must not print the same line.
+RESERVED_UNUSABLE=0
+if [ ! -f "$CANON_TERMS_LIB" ]; then
+  # Fail closed. A check that cannot run is not a check that passed.
+  red "✗ scripts/canon-terms.sh is missing; the reserved-term check cannot run."
+  FAIL=1
+else
+  # shellcheck source=scripts/canon-terms.sh
+  . "$CANON_TERMS_LIB"
+  # Present is not the same as usable: a file that exists and fails to
+  # source leaves canon_terms undefined. Ask for the function.
+  if ! declare -f canon_terms >/dev/null 2>&1; then
+    red "✗ scripts/canon-terms.sh was sourced but defines no canon_terms; the reserved-term check cannot run."
+    FAIL=1
+  else
+    if [ -n "${OW_RESERVED_TERMS:-}" ]; then
+      PRIVATE_PATTERN="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+    fi
+    if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
+      PRIVATE_PATTERN="$(canon_terms < "$REPO_ROOT/.reserved-terms")"
+    fi
+    # A pattern this check cannot scan with fails in three different ways:
+    # grep refuses it (one typo in a fragment, an unbalanced parenthesis
+    # say, and grep exits 2 on every use below), it compiles and matches
+    # the empty string so it hits every line of every file, or it is empty.
+    # Both scans read all three as "no match" and the gate prints that no
+    # reserved terms were found. Refuse instead, with the reason that
+    # actually applies, and without printing any part of the list.
+    if [ -n "$PRIVATE_PATTERN" ] && ! canon_terms_usable "$PRIVATE_PATTERN"; then
+      red "✗ $(canon_terms_reason_text)"
+      red "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line)."
+      red "  No part of the list is printed here."
+      FAIL=1
+      RESERVED_UNUSABLE=1
+      PRIVATE_PATTERN=""
+    fi
+  fi
 fi
 
-if [ -z "$PRIVATE_PATTERN" ]; then
-  yellow "– Reserved-term scan skipped (no OW_RESERVED_TERMS / .reserved-terms)."
+if [ "$RESERVED_UNUSABLE" != "0" ]; then
+  # Already refused above, with the reason. Do not also claim it was skipped.
+  :
+elif [ -z "$PRIVATE_PATTERN" ]; then
+  # Says which of the two real causes this is. "Not configured" and
+  # "configured, but every line is a comment or blank" look identical from
+  # here and send a contributor looking in different places.
+  yellow "– Reserved-term scan skipped: no usable terms found."
+  yellow "  OW_RESERVED_TERMS and .reserved-terms are unset, or hold only comments and blank lines."
   yellow "  The server-side post-merge identity scan still enforces the list."
 else
   # Scan commits being pushed: messages + diff
@@ -172,7 +240,13 @@ else
       FAIL=1
     fi
   done
-  [ "$FAIL" = "0" ] && green "✓ No reserved terms in commits being pushed."
+  # Not a short-circuit AND: under set -e, an AND-list whose final status is
+  # non-zero ends the script. So when a leak WAS found this line used to be
+  # the last thing that ran, and the gitleaks check, the Seat trailer check
+  # and the PUSH REFUSED summary were all skipped.
+  if [ "$FAIL" = "0" ]; then
+    green "✓ No reserved terms in commits being pushed."
+  fi
 fi
 
 # ---- Check 4: gitleaks on the prepared commits (if installed) ----
@@ -208,6 +282,21 @@ if command -v gitleaks >/dev/null; then
   else
     FAIL=1
   fi
+else
+  # An absent scanner is not a clean scan. This branch did not exist: with
+  # gitleaks off PATH nothing ran, nothing printed, FAIL was untouched, and
+  # the gate went on to print PASSED, which reads as "a secret scan covered
+  # these commits". Announce the gap every time instead.
+  #
+  # This warns rather than refusing, unlike check 3, and the difference is
+  # deliberate: canon-terms.sh ships in the repository, so its absence means
+  # a broken tree, while gitleaks is an optional external binary that a
+  # fresh clone will not have. Whether this should also refuse is being
+  # settled on evidence about server-side coverage, not guessed here.
+  yellow "- gitleaks is not installed: NO secret scan ran on the commits being pushed."
+  yellow "  The checks above look for reserved terms and seat trailers. None of them"
+  yellow "  looks for secret-shaped strings such as API keys, tokens or private keys."
+  yellow "  Install gitleaks and push again for that cover: https://github.com/gitleaks/gitleaks"
 fi
 
 # ---- Check 5: Seat trailer on every pushed non-merge commit ----

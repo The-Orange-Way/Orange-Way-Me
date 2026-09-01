@@ -47,6 +47,7 @@
 // referenced inside initSentry, and the cost is tiny (a few KB minified
 // gzip, dwarfed by the React + Supabase chunks already on the page).
 import * as Sentry from "@sentry/react";
+import { redactValueShapes } from "./value-shapes";
 
 /** Object keys (case-insensitive) we scrub from event payloads. */
 const SECRET_KEY_PATTERNS = [
@@ -61,8 +62,13 @@ const SECRET_KEY_PATTERNS = [
   /credentials_key/i,
   /transactions_key/i,
   /cred_key/i,
+  /or_stealth_key/i,
+  /stealth_key/i,
+  /key/i,
   /txn_key/i,
   /seed/i,
+  /secret/i,
+  /xpub/i,
   /private_key/i,
   /privatekey/i,
   /api_key/i,
@@ -106,7 +112,7 @@ const TOKEN_PATTERNS: Array<[RegExp, string]> = [
     "$1=[redacted]",
   ],
   [
-    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed)=[^&\s#"']+/gi,
+    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub)=[^&\s#"']+/gi,
     "$1=[redacted]",
   ],
   // Bearer Authorization headers
@@ -143,7 +149,22 @@ function scrubString(s: string): string {
   for (const [re, repl] of TOKEN_PATTERNS) {
     out = out.replace(re, repl);
   }
-  return out;
+  // TOKEN_PATTERNS only sees name=value pairs, Bearer headers and
+  // JWT-shaped strings. A bare extended key pasted into an error message
+  // matches none of them, so match on the shape of the value itself.
+  // Shared with the PostHog scrubber: two lists that must agree have
+  // already drifted apart once.
+  return redactValueShapes(out);
+}
+
+/**
+ * Length cap for a free-form string. Always applied AFTER scrubbing, never
+ * before: the cap keeps the first characters, so capping first can slice a key
+ * or token in half, leaving something the patterns no longer match while the
+ * dangerous prefix is the part that survives.
+ */
+function capString(s: string, limit: number): string {
+  return s.length > limit ? s.slice(0, limit) + "…" : s;
 }
 
 /**
@@ -162,8 +183,7 @@ function scrubValue(v: unknown, depth = 0): unknown {
   if (depth > 8) return REDACTED;
   if (v == null) return v;
   if (typeof v === "string") {
-    const trimmed = v.length > 2000 ? v.slice(0, 2000) + "…" : v;
-    return scrubString(trimmed);
+    return capString(scrubString(v), 2000);
   }
   if (typeof v === "number" || typeof v === "boolean") return v;
   if (Array.isArray(v)) return v.map((item) => scrubValue(item, depth + 1));
@@ -241,20 +261,36 @@ export function initSentry(): void {
     // silently vacuous. The companion test asserts each name is
     // dropped against a synthetic defaults list.
     integrations: (defaults) => defaults.filter((i) => !DROPPED_INTEGRATIONS.has(i.name)),
-    beforeSend: (event) => scrubEventLoose(event) as Sentry.ErrorEvent,
+    beforeSend: (event) => {
+      // Fail closed. If scrubbing throws partway through walking a
+      // payload, drop the event rather than let a half-scrubbed one
+      // reach the network. A dropped crash report costs us debugging
+      // signal; a half-scrubbed one costs the customer the guarantee
+      // this whole wrapper exists to make.
+      try {
+        return scrubEventLoose(event) as Sentry.ErrorEvent;
+      } catch {
+        return null;
+      }
+    },
     beforeBreadcrumb: (bc) => {
       // Drop noisy console.log/info/debug breadcrumbs — Sentry's default
       // BrowserClient grabs every console call by default. We only want
       // error/warn breadcrumbs reaching the buffer, partly to keep volume
       // sane, partly to guarantee the DEV-only key-fingerprint console.log
       // can never end up attached to a captured event.
-      if (bc.category === "console") {
-        const level = (bc.level ?? "log").toLowerCase();
-        if (level !== "error" && level !== "warn") return null;
+      // Fail closed, for the same reason as beforeSend above.
+      try {
+        if (bc.category === "console") {
+          const level = (bc.level ?? "log").toLowerCase();
+          if (level !== "error" && level !== "warn") return null;
+        }
+        if (bc.message) bc.message = scrubString(bc.message);
+        if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
+        return bc;
+      } catch {
+        return null;
       }
-      if (bc.message) bc.message = scrubString(bc.message);
-      if (bc.data) bc.data = scrubValue(bc.data) as Record<string, unknown>;
-      return bc;
     },
   });
 }
@@ -264,6 +300,7 @@ export function initSentry(): void {
  * the optional `@sentry/react` package; without them we work in `unknown`.
  *
  * Covers:
+ *   - message / logentry.message (what captureMessage populates)
  *   - extra / contexts / tags  (key + value)
  *   - request.data            (POST body)
  *   - request.url             (high-risk: recovery URL fragments)
@@ -277,6 +314,16 @@ function scrubEventLoose(event: unknown): unknown {
   if (e.extra) e.extra = scrubValue(e.extra);
   if (e.contexts) e.contexts = scrubValue(e.contexts);
   if (e.tags) e.tags = scrubValue(e.tags);
+
+  // The top-level message is what Sentry.captureMessage populates, and
+  // logentry.message is the shape some SDK paths use instead. Neither is
+  // reached by any of the walks below, so until this ran they were the only
+  // free-form strings on an event that left unscrubbed.
+  if (typeof e.message === "string") e.message = capString(scrubString(e.message), 4000);
+  const logentry = e.logentry as { message?: string } | undefined;
+  if (logentry && typeof logentry.message === "string") {
+    logentry.message = capString(scrubString(logentry.message), 4000);
+  }
 
   const req = e.request as Record<string, unknown> | undefined;
   if (req) {
@@ -307,10 +354,7 @@ function scrubEventLoose(event: unknown): unknown {
   if (exc?.values) {
     exc.values = exc.values.map((ex) => ({
       ...ex,
-      value:
-        typeof ex.value === "string"
-          ? scrubString(ex.value.length > 4000 ? ex.value.slice(0, 4000) + "…" : ex.value)
-          : ex.value,
+      value: typeof ex.value === "string" ? capString(scrubString(ex.value), 4000) : ex.value,
     }));
   }
   return e;

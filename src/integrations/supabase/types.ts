@@ -1089,6 +1089,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      stealth_sync_runs: {
+        Row: {
+          connection_id: string;
+          error_code: string | null;
+          finished_at: string | null;
+          id: string;
+          rows_attempted: number | null;
+          rows_written: number | null;
+          started_at: string;
+          status: string;
+          user_id: string;
+        };
+        Insert: {
+          connection_id: string;
+          error_code?: string | null;
+          finished_at?: string | null;
+          id?: string;
+          rows_attempted?: number | null;
+          rows_written?: number | null;
+          started_at?: string;
+          status?: string;
+          user_id: string;
+        };
+        Update: {
+          connection_id?: string;
+          error_code?: string | null;
+          finished_at?: string | null;
+          id?: string;
+          rows_attempted?: number | null;
+          rows_written?: number | null;
+          started_at?: string;
+          status?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       vault_metadata: {
         Row: {
           created_at: string;
