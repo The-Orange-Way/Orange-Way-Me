@@ -91,11 +91,7 @@ describe("CallProxyError", () => {
     // The exact asymmetry this ticket exists to close: narrowProxyErrorBody
     // returns null for a list, and String(["aaa","bbb"]) is "aaa,bbb".
     const body = { error: ["aaa", "bbb"] };
-    const err = new CallProxyError(
-      proxyErrorMessageFromBody(body) ?? "or-sync failed",
-      502,
-      body,
-    );
+    const err = new CallProxyError(proxyErrorMessageFromBody(body) ?? "or-sync failed", 502, body);
     expect(err.message).not.toContain("aaa,bbb");
     expect(err.body).toBeNull();
   });
