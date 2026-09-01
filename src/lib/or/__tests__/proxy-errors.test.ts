@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { CallProxyError, isSubaccountNotFound, narrowProxyErrorBody } from "../proxy-errors";
+import {
+  buildProxyErrorMessage,
+  CallProxyError,
+  capProxyErrorMessage,
+  isSubaccountNotFound,
+  MAX_RETAINED_STRING,
+  narrowProxyErrorBody,
+} from "../proxy-errors";
 
 /**
  * A response shape the sync endpoints really return: an error string sitting
@@ -113,5 +120,106 @@ describe("isSubaccountNotFound", () => {
     expect(isSubaccountNotFound(null)).toBe(false);
     expect(isSubaccountNotFound(undefined)).toBe(false);
     expect(isSubaccountNotFound("Subaccount not found")).toBe(false);
+  });
+
+  // The message is now capped, so the predicate is asserted against a message
+  // that has actually been through the cap rather than a short literal. If a
+  // future change moves the match later in the string, or rewrites the message
+  // instead of truncating it, this goes red instead of the re-provision path
+  // silently never firing again.
+  it("still matches when the message was truncated by the cap", () => {
+    const err = new CallProxyError(`Subaccount not found. ${"x".repeat(5000)}`, 404, null);
+    expect(err.message.length).toBe(MAX_RETAINED_STRING);
+    expect(isSubaccountNotFound(err)).toBe(true);
+  });
+
+  it("still matches when the message came from the body through the builder", () => {
+    const message = buildProxyErrorMessage({ error: "Subaccount not found" }, "or-sync failed");
+    expect(isSubaccountNotFound(new CallProxyError(message, 404, null))).toBe(true);
+  });
+});
+
+/**
+ * The message half of the same problem the body allowlist solved.
+ *
+ * `body` and `message` are two properties of the same thrown Error, built from
+ * the same untrusted response. The body was narrowed and capped; the message
+ * was built with String(body.error) and was neither. So the shape the body
+ * rule refuses hardest, an array of strings, was the shape the message copied
+ * out verbatim, because String(["aaa","bbb"]) is "aaa,bbb".
+ */
+describe("buildProxyErrorMessage", () => {
+  it("refuses to join an array under error into the message", () => {
+    const message = buildProxyErrorMessage({ error: ["aaa", "bbb"] }, "or-sync failed");
+    expect(message).not.toContain("aaa,bbb");
+    expect(message).not.toContain("aaa");
+    expect(message).toBe("or-sync failed");
+  });
+
+  it("is the exact conversion the old call site performed", () => {
+    // Kept as an executable record of the defect rather than a sentence in a
+    // commit message: this is what the replaced line produced.
+    expect(String(["aaa", "bbb"])).toBe("aaa,bbb");
+  });
+
+  it("agrees with the body rule: what the body drops, the message drops too", () => {
+    const body = { error: ["aaa", "bbb"] };
+    expect(narrowProxyErrorBody(body)).toBeNull();
+    expect(buildProxyErrorMessage(body, "or-sync failed")).toBe("or-sync failed");
+  });
+
+  it("does not repeat an object under error, which used to read [object Object]", () => {
+    const message = buildProxyErrorMessage({ error: { detail: "x" } }, "or-sync failed");
+    expect(message).toBe("or-sync failed");
+    expect(message).not.toContain("object Object");
+  });
+
+  it("uses the upstream string when there is one", () => {
+    expect(buildProxyErrorMessage({ error: "Subaccount not found" }, "fallback")).toBe(
+      "Subaccount not found",
+    );
+  });
+
+  it("falls back when error is an empty or whitespace string", () => {
+    // An empty upstream sentence is not a message; "or-sync failed" is.
+    expect(buildProxyErrorMessage({ error: "   " }, "or-sync failed")).toBe("or-sync failed");
+  });
+
+  it("falls back for a top-level array, a string body and a null body", () => {
+    expect(buildProxyErrorMessage([{ id: "row-1" }], "or-sync failed")).toBe("or-sync failed");
+    expect(buildProxyErrorMessage("<html>error page</html>", "or-sync failed")).toBe(
+      "or-sync failed",
+    );
+    expect(buildProxyErrorMessage(null, "or-sync failed")).toBe("or-sync failed");
+  });
+
+  it("caps a long upstream string with the same constant the body uses", () => {
+    const message = buildProxyErrorMessage({ error: "y".repeat(5000) }, "or-sync failed");
+    expect(message.length).toBe(MAX_RETAINED_STRING);
+    expect(String(narrowProxyErrorBody("y".repeat(5000)))).toHaveLength(MAX_RETAINED_STRING);
+  });
+
+  it("caps the fallback too, since supabase-js puts an upstream string there", () => {
+    expect(buildProxyErrorMessage(null, "z".repeat(5000)).length).toBe(MAX_RETAINED_STRING);
+  });
+});
+
+describe("capProxyErrorMessage", () => {
+  it("leaves a message that is already short alone, byte for byte", () => {
+    expect(capProxyErrorMessage("Subaccount not found")).toBe("Subaccount not found");
+  });
+
+  it("marks the cut so a truncated message cannot read as a complete one", () => {
+    const capped = capProxyErrorMessage("w".repeat(5000));
+    expect(capped.length).toBe(MAX_RETAINED_STRING);
+    expect(capped.endsWith("...")).toBe(true);
+  });
+
+  // THE RED ONE. dev's constructor is super(message) with no bound, so this
+  // assertion sees length 5000 there and fails. It is the assertion that makes
+  // the cap a property of the class rather than of one call site.
+  it("bounds a message built anywhere, not only one built by the helper", () => {
+    const err = new CallProxyError("q".repeat(5000), 500, null);
+    expect(err.message.length).toBe(MAX_RETAINED_STRING);
   });
 });
