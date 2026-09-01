@@ -105,6 +105,9 @@ beforeAll(async () => {
     password: PASSWORD,
     userId: USER_ID,
     mekBytes,
+    // The password change reads the row before it mints the new salt, so the
+    // salt on the row is still the one existing rows were sealed under.
+    saltMatchesExistingRows: true,
   });
 
   // The account that rotated while unpinned. Same shape as the row above, but
@@ -120,6 +123,10 @@ beforeAll(async () => {
     password: PASSWORD,
     userId: USER_ID,
     mekBytes,
+    // True as the caller can see it: nothing stored distinguishes this row
+    // from one that never rotated, which is exactly why the pin lands on the
+    // salt it can see. The two cases at the bottom of this file assert that.
+    saltMatchesExistingRows: true,
   });
 
   fixture = {
@@ -177,6 +184,7 @@ describe("computeOrPinColumns", () => {
       password: PASSWORD,
       userId: USER_ID,
       mekBytes: fixture.mekBytes,
+      saltMatchesExistingRows: true,
     });
 
     // Null means the caller spreads nothing, so an existing pin is never
@@ -198,6 +206,7 @@ describe("computeOrPinColumns", () => {
         password: PASSWORD,
         userId: USER_ID,
         mekBytes: fixture.mekBytes,
+        saltMatchesExistingRows: true,
       }),
     ).resolves.toBeNull();
   });
@@ -209,6 +218,7 @@ describe("computeOrPinColumns", () => {
         password: PASSWORD,
         userId: USER_ID,
         mekBytes: fixture.mekBytes,
+        saltMatchesExistingRows: true,
       }),
     ).resolves.toBeNull();
   });
@@ -236,5 +246,26 @@ describe("computeOrPinColumns", () => {
     // consequence of pinning here, not a surprise found in production.
     expect(toHex(sealedKey)).toBe(toHex(fixture.kAgainstNew));
     expect(toHex(sealedKey)).not.toBe(toHex(fixture.kAgainstOld));
+  });
+
+  it("refuses to pin when the caller states the salt no longer matches the sealed rows", async () => {
+    // The statement is the caller's, not this helper's. A caller that read the
+    // row AFTER a rotation says false, and the only honest answer is a
+    // refusal: deriving here would produce a well formed key that opens none
+    // of the rows the account already synced, and pin it as authoritative.
+    //
+    // Costs no Argon2id time. planOrKeyMaterial refuses before any derivation
+    // runs, which is why this case sits outside the fixture block above and
+    // does not move its timeout.
+    const columns = await computeOrPinColumns({
+      row: unpinnedRow(fixture.saltNew),
+      password: PASSWORD,
+      userId: USER_ID,
+      mekBytes: fixture.mekBytes,
+      saltMatchesExistingRows: false,
+    });
+
+    // Null, so the caller spreads nothing: no ciphertext, no salt, no epoch.
+    expect(columns).toBeNull();
   });
 });

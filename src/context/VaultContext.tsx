@@ -1249,6 +1249,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       password: currentPassword,
       userId: user.id,
       mekBytes: mekBytesRef.current,
+      // True, and checkable from here rather than taken on trust: `row` was
+      // read at the top of this function and `newSalt` is minted below, so
+      // the salt on the row is still the one existing rows were sealed
+      // under. The helper no longer states this on a caller's behalf, so a
+      // future caller that reads the row AFTER a rotation has to say false
+      // and gets a refusal instead of a key that opens nothing.
+      saltMatchesExistingRows: true,
     });
 
     // Opportunistic upgrade: every password change lands the vault on the

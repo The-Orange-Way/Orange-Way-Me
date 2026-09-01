@@ -56,6 +56,23 @@ export interface ComputeOrPinColumnsArgs {
   userId: string;
   /** Raw vault MEK bytes, held while the vault is unlocked. */
   mekBytes: Uint8Array;
+  /**
+   * The caller's statement that `row.kdf_salt` is still the salt the rows
+   * already sealed for this account were sealed under.
+   *
+   * REQUIRED, with no default, and passed straight through to
+   * `planOrKeyMaterial`. It was a hard-coded `true` here, which meant this
+   * helper made the claim on behalf of every future caller, one layer above
+   * the place that removed exactly this default and said why (see
+   * `PlanOrKeyMaterialOptions` in ./or-key-material). A caller that reads the
+   * row AFTER a rotation would otherwise get a pin computed against the new
+   * salt while the plan asserts the salt still matches the rows already
+   * sealed, which is a well formed key that opens nothing.
+   *
+   * This is not a salt parameter and does not become one: the salt still
+   * comes off the row, so the newly minted salt stays out of reach.
+   */
+  saltMatchesExistingRows: boolean;
 }
 
 /**
@@ -76,11 +93,17 @@ export async function computeOrPinColumns({
   password,
   userId,
   mekBytes,
+  saltMatchesExistingRows,
 }: ComputeOrPinColumnsArgs): Promise<OrPinColumns | null> {
   // The salt comes off the ROW and is never a parameter, so no caller can hand
   // in the salt a password change is about to mint. That is the hazard this
   // module exists to make unrepresentable rather than merely detectable.
-  const orPlan = planOrKeyMaterial(row, row.kdf_salt, { saltMatchesExistingRows: true });
+  //
+  // Whether that salt still matches the rows already sealed is a different
+  // question, and it is the CALLER's to answer. This helper passes the answer
+  // through untouched rather than supplying one, so a caller that reads the
+  // row after a rotation has to say so and gets a refusal instead of a pin.
+  const orPlan = planOrKeyMaterial(row, row.kdf_salt, { saltMatchesExistingRows });
 
   if (orPlan.mode === "derive-and-pin") {
     const vaultMek = await importMekFromRaw(mekBytes);
