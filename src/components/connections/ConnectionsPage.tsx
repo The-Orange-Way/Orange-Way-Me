@@ -1302,9 +1302,9 @@ export function ConnectionsPage() {
     // grepping this repo for it lands on the sync path and not on the add
     // path a reader was probably tracing. Either way the widget seals with
     // whatever it was handed. So every stealth envelope that exists was
-    // sealed under
-    // creds, while this loop was opening them with txns. An envelope only
-    // opens with the key it was sealed under, so every row failed, the
+    // sealed under creds, while this loop was opening them with txns. An
+    // envelope only opens with the key it was sealed under, so every row
+    // failed, the
     // import received an empty list, and the run summary reported zero rows
     // with zero decrypt failures -- because the bridge counts its own
     // failures, not ours. On production that surfaced as the toast
