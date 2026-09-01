@@ -22,7 +22,6 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getOrGatewayFromEnv } from "../_shared/or-gateway.ts";
-import { STEALTH_SYNC_FLAG_KEY } from "../_shared/stealth-flag.ts";
 import { handleProxyRequest, type ProxyDeps } from "./handler.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -117,9 +116,5 @@ const deps: ProxyDeps = {
     });
   },
 };
-
-// Referenced so the flag key this function gates on is visible in this file
-// too, not only inside the handler. The caller guard reads both.
-void STEALTH_SYNC_FLAG_KEY;
 
 Deno.serve((req: Request) => handleProxyRequest(req, deps));
