@@ -546,11 +546,29 @@ export function ConnectionsPage() {
    * provider's side. We do not drive that handshake from here; our part ends
    * when the list posts the completed connection back to us.
    *
-   * The two vault keys travel in the URL fragment, which is never sent to a
-   * server. They lock the stored credential and the per-wallet metadata, so
-   * the connect provider holds ciphertext and we hold the only keys that open
-   * it. Read immediately before the call so a vault that locked while this
-   * page sat open fails here rather than part-way through.
+   * The two vault keys travel in the URL fragment. They lock the stored
+   * credential and the per-wallet metadata, so the connect provider holds
+   * ciphertext and we hold the only keys that open it. Read immediately
+   * before the call so a vault that locked while this page sat open fails
+   * here rather than part-way through.
+   *
+   * WHAT THE FRAGMENT BUYS, AND WHAT IT DOES NOT. This comment used to say
+   * the fragment "is never sent to a server" and stop there. That sentence is
+   * true and it answers exactly one threat: a fragment is not transmitted
+   * with the request, so the keys stay out of the provider's request logs,
+   * their proxy logs and their referrer headers. That is why they are placed
+   * there and it is worth keeping.
+   *
+   * It is not client-side secrecy. This URL is opened as a real navigation
+   * (widget.ts:113, window.open of a named popup), so the fragment is part of
+   * that browsing context's URL: it appears in the address bar, it is kept in
+   * that context's history entry, and anything able to read the tab's URL can
+   * read it. Both halves are stated because a reader judging whether this
+   * delivery is good enough needs both, and the half sentence has already
+   * been read as a blanket safety claim.
+   *
+   * Changing how the keys are delivered is a cross-app contract change and is
+   * not this comment's business: it is tracked on OWM-T0464.
    */
   async function handleAddConnection() {
     if (!user) {
@@ -1270,10 +1288,21 @@ export function ConnectionsPage() {
     //
     // Stealth envelopes are sealed with the CREDENTIALS subkey
     // (orangerails-creds-v1), not the transactions subkey
-    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
-    // flow hands OR `credKeyB64` in the /connect fragment as
-    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
-    // it was handed. So every stealth envelope that exists was sealed under
+    // (orangerails-txns-v1).
+    //
+    // The chain, one hop per sentence, because two different field names
+    // carry the same value and an earlier version of this comment merged
+    // them into one that exists nowhere. On the ADD flow we put the
+    // credentials subkey into the /connect fragment under the parameter named
+    // `cred_key` (widget.ts:230; bank-connect.ts:112 for the bank popup), and
+    // the connect provider reads it from there. On the RE-SYNC flow this app
+    // builds the widget's init itself and names the same value
+    // `or_stealth_key_b64` (sync.ts:160, buildStealthSyncInit). The provider's
+    // own inline stealth step uses that second name as well, which is why
+    // grepping this repo for it lands on the sync path and not on the add
+    // path a reader was probably tracing. Either way the widget seals with
+    // whatever it was handed. So every stealth envelope that exists was
+    // sealed under
     // creds, while this loop was opening them with txns. An envelope only
     // opens with the key it was sealed under, so every row failed, the
     // import received an empty list, and the run summary reported zero rows
@@ -1285,6 +1314,11 @@ export function ConnectionsPage() {
     // is handed to the widget would orphan every envelope already stored:
     // they would still be creds-sealed and nothing would ever open them
     // again. sync.ts says exactly this and it is right.
+    //
+    // All of the above describes what the code does today, not what it should
+    // do. Whether the credentials namespace key should be the stealth sealing
+    // key at all is a larger question with a migration attached, and it is
+    // tracked on OWM-T0464. Do not change the key here.
     //
     // Both keys are tried, creds first. Creds is what today's rows use; txns
     // is attempted second so that if any row anywhere was ever sealed the
