@@ -18,7 +18,7 @@
  * open the catalogue at all. That cost is real and it is deliberate: adding an
  * exchange or a Lightning service is closed for as long as the switch is off.
  *
- * WHY THE BANK ROUTE IS EXEMT BY CONSTRUCTION, which is the property that must
+ * WHY THE BANK ROUTE IS EXEMPT BY CONSTRUCTION, which is the property that must
  * not break. Bank connect never goes near the catalogue. It builds its own URL
  * in src/lib/or/bank-connect.ts and opens the provider's bank page directly at
  * /connect/quiltt with a pre-minted session bundle; its only fallback names
