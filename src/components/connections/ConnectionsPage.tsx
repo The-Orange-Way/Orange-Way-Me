@@ -64,6 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import { planSyncRoute, PRIVATE_SYNC_DISABLED_MESSAGE } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -940,38 +941,58 @@ export function ConnectionsPage() {
     const subaccount = requireSubaccount();
     if (!subaccount) return;
 
+    // Where this press goes is decided in ONE place, by a pure function with
+    // tests: planSyncRoute in src/lib/or/sync-route.ts. It used to be a stack
+    // of inline conditions here with no test, which is how the fall-through
+    // described below survived a review and a production flag flip.
+    const route = planSyncRoute(conn, { stealthSyncEnabled: isStealthSyncEnabled() });
+
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The old or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
-    if (conn.provider_type === "quiltt") {
+    // vault OPK key, and imports. The or-sync path below is for Bitcoin
+    // sources (Blink/Strike/etc.) only.
+    if (route.kind === "bank") {
       setBankSyncConnId(conn.id);
       return;
     }
 
-    // Stealth connections are scanned by the OR widget in this browser, never
+    // Private connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, which does not contain this row. Routing them below
+    // `connections` table, which does not contain this row. Routing one below
     // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the quiltt branch above: a provider whose sync lives
-    // somewhere else gets sent there.
+    // date.
     //
-    // Do NOT read the branch below as a safe fallthrough. This comment used to
-    // say or-sync "matches nothing and honestly returns { synced: 0 }". That
-    // was never measured and it is wrong. Observed on production 2026-08-18,
-    // signed in, with the network recorded: one request, or-sync via the
-    // proxy, answered 400 "stealth connections cannot be synced via this
-    // endpoint". It is a rejection, not an empty success, and it is raised
-    // before or-sync ever selects anything.
+    // Do NOT read the branch below as a safe fallthrough for a private row.
+    // This comment used to say or-sync "matches nothing and honestly returns
+    // { synced: 0 }". That was never measured and it is wrong. Observed on
+    // production 2026-08-18, signed in, with the network recorded: one
+    // request, or-sync via the proxy, answered 400 "stealth connections cannot
+    // be synced via this endpoint". It is a rejection, not an empty success,
+    // and it is raised before or-sync ever selects anything.
     //
     // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
     // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
     // environment in .github/workflows/deploy.yml), and public.app_flags can
     // override it at runtime with no redeploy. isStealthSyncEnabled() returns
-    // the effective value. A build that lands here with the switch off gives
-    // the customer the 400 above rather than a graceful skip.
-    if (isStealthSyncEnabled() && conn.is_stealth) {
+    // the effective value.
+    //
+    // THE DEFECT THIS FIXES. The condition here read
+    // `isStealthSyncEnabled() && conn.is_stealth`, which ANDs the switch into
+    // the ROUTING decision rather than using it as a gate. Switch OFF plus a
+    // private connection short-circuited to false, `is_stealth` was never
+    // consulted, and control fell through to the branch below, which calls
+    // exportOrCredsKey and exportOrTxnsKey and posts BOTH vault keys in the
+    // or-sync body of a request that is then rejected by the 400 above. Two
+    // keys left the browser and nothing was gained. planSyncRoute now decides
+    // on `is_stealth === true` alone, exactly as planSyncAll already did for
+    // the bulk path, and the switch only chooses refuse or scan. No state of
+    // the switch can put a private connection on the or-sync path.
+    if (route.kind === "private-refused") {
+      toast.error(PRIVATE_SYNC_DISABLED_MESSAGE);
+      return;
+    }
+    if (route.kind === "private-scan") {
       await handleStealthSync(conn);
       return;
     }
