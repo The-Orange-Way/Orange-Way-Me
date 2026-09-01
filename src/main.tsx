@@ -3,7 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getRouter } from "./router";
 import { initSentry } from "./lib/observability/sentry";
 import { installChunkReloadHandler } from "./lib/chunk-reload";
-import { loadRuntimeFlags } from "./lib/stealth/runtimeFlags";
+import { loadRuntimeFlags, startRuntimeFlagAutoRefresh } from "./lib/stealth/runtimeFlags";
 import { initChatwoot } from "./lib/chatwoot";
 import "./styles.css";
 
@@ -17,10 +17,19 @@ void initSentry();
 // a deploy renamed the hashed files. Rationale + loop guard in the module.
 installChunkReloadHandler();
 
-// DL-1378: read runtime feature flags (the stealth-sync kill switch) once at
-// boot. Fired in the background so it never delays first paint; the runtime
-// module keeps the build-time value until this resolves.
+// DL-1378: read runtime feature flags (the stealth-sync kill switch) at boot,
+// then keep the answer fresh for the life of the page (OWM-T0504).
+//
+// Fired in the background so it never delays first paint. The gate reads false
+// until this resolves, and on every failure after it, so a slow or broken read
+// costs a refusal rather than an open door.
+//
+// The refresh is installed HERE because this is where the page's lifetime is
+// owned. Without it the boot read is the only read, and turning the flag off
+// would reach new page loads while every tab already open kept the feature on
+// for as long as it stayed open. Bounds and reasoning are in the module.
 void loadRuntimeFlags();
+startRuntimeFlagAutoRefresh();
 
 const router = getRouter();
 
