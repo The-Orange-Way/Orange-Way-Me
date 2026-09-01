@@ -64,6 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import { chooseSyncRoute } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -940,12 +941,18 @@ export function ConnectionsPage() {
     const subaccount = requireSubaccount();
     if (!subaccount) return;
 
+    // WHERE a connection syncs is a property of the connection, never of a
+    // feature flag. chooseSyncRoute holds that rule as one pure decision so it
+    // can be tested and so there is one place to read rather than two
+    // conditions in a click handler (src/lib/or/sync-route.ts).
+    const route = chooseSyncRoute(conn);
+
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The old or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
-    if (conn.provider_type === "quiltt") {
+    // vault OPK key, and imports. The or-sync path below is for Bitcoin
+    // sources (Blink/Strike/etc.) only.
+    if (route === "bank-dialog") {
       setBankSyncConnId(conn.id);
       return;
     }
@@ -965,13 +972,22 @@ export function ConnectionsPage() {
     // endpoint". It is a rejection, not an empty success, and it is raised
     // before or-sync ever selects anything.
     //
-    // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
-    // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
-    // environment in .github/workflows/deploy.yml), and public.app_flags can
-    // override it at runtime with no redeploy. isStealthSyncEnabled() returns
-    // the effective value. A build that lands here with the switch off gives
-    // the customer the 400 above rather than a graceful skip.
-    if (isStealthSyncEnabled() && conn.is_stealth) {
+    // OWM-T0530. This test used to be `isStealthSyncEnabled() && conn.is_stealth`,
+    // which put the kill switch (DL-1047 / DL-1378) into the ROUTING decision
+    // rather than inside the route. With the switch OFF and the connection
+    // private the condition was false, so the press did not refuse: it fell
+    // through to the or-sync branch below, which exports the credentials key
+    // and the transactions key and posts both. The 400 above is not a defence,
+    // because it is raised after the request body carrying both keys has left
+    // the browser. The switch that exists to stop key material leaving was, on
+    // this one path, the thing that selected the path which sends it.
+    //
+    // The flag still decides refuse-or-scan, but inside handleStealthSync,
+    // which awaits refreshRuntimeFlags() and shows the designed refusal above
+    // any key export. That placement also covers the "Try again" toast action,
+    // which re-enters handleStealthSync directly and never passes through here.
+    // Do not fold the flag back into this condition.
+    if (route === "private-wallet") {
       await handleStealthSync(conn);
       return;
     }
