@@ -19,6 +19,7 @@ import {
   STEALTH_WIDGET_PATH,
   type StealthCursorKnowledge,
 } from "../sync";
+import { StealthScanDisabledError } from "../scan-gate";
 import { STEALTH_MESSAGE } from "../protocol";
 import type { StealthInboundMessage, StealthChannel } from "../channel";
 
@@ -27,6 +28,10 @@ const ARGS = {
   appUserId: "user-abc",
   credKeyB64: "a".repeat(44),
   widgetToken: "widget-tok",
+  // Every test below this line was written to describe the switch-on path, so
+  // the default states the switch is on. The refusal has its own block and
+  // overrides it there rather than leaving it to be inferred from silence.
+  stealthSyncEnabled: true,
 };
 
 type LaunchFn = NonNullable<Parameters<typeof startStealthSync>[0]["launch"]>;
@@ -94,6 +99,42 @@ describe("buildStealthSyncInit", () => {
     const init = buildStealthSyncInit(ARGS);
     expect(init).not.toHaveProperty("return_callback_origin");
     expect(init).not.toHaveProperty("protocol_version");
+  });
+});
+
+describe("startStealthSync, the kill switch", () => {
+  it("refuses when the switch is off, and never opens the widget", async () => {
+    const { launch } = makeLaunch();
+
+    await expect(startStealthSync({ ...ARGS, stealthSyncEnabled: false, launch })).rejects.toThrow(
+      StealthScanDisabledError,
+    );
+    // The assertion that makes this test fail if the guard is deleted. A
+    // refusal that still opened the popup would have handed the key over.
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a value truthiness would have let through", async () => {
+    const { launch } = makeLaunch();
+
+    await expect(
+      startStealthSync({
+        ...ARGS,
+        // What an env var read produces. `if (enabled)` would open the widget.
+        stealthSyncEnabled: "true" as unknown as boolean,
+        launch,
+      }),
+    ).rejects.toThrow(StealthScanDisabledError);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("opens the widget as before when the switch is on", async () => {
+    const { launch, captured } = makeLaunch();
+
+    await startStealthSync({ ...ARGS, stealthSyncEnabled: true, launch });
+
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(captured.init).toMatchObject({ mode: "sync", connection_id: "conn-123" });
   });
 });
 
