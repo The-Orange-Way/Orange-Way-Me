@@ -25,6 +25,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { BITCOIN_SOURCE_UNAVAILABLE_MESSAGE } from "@/lib/or/add-gate";
 
 // Must be a host that serves the widget directly. The apex
 // orangerails.com/connect does not: it redirects to
@@ -99,6 +101,20 @@ export async function openOrConnect(args: {
   credKeyB64: string;
   txnKeyB64: string;
 }): Promise<OrLinkSuccess> {
+  // OWM-T0478. The stealth kill switch is checked HERE, at the one function
+  // that opens the source catalogue, and not only in the page that draws the
+  // button. The catalogue is rendered by the connect provider and carries the
+  // xpub and Sparrow slugs; our only lever on it is the all-or-one `provider`
+  // parameter below, so while the switch is off the honest move is not to open
+  // it at all. A check that lives only in a component is a check that vanishes
+  // in the next refactor, and this gate has already been missing once.
+  //
+  // Before the mint on purpose: nothing is minted, and no keys are put into a
+  // URL, when the answer is no.
+  if (!isStealthSyncEnabled()) {
+    throw new Error(BITCOIN_SOURCE_UNAVAILABLE_MESSAGE);
+  }
+
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
     platform: OR_PLATFORM_SLUG,
