@@ -74,6 +74,7 @@ import {
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { planStealthScan } from "@/lib/stealth/scan-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
@@ -684,6 +685,24 @@ export function ConnectionsPage() {
    * and saying otherwise is the bug this ticket exists to fix.
    */
   async function handleStealthSync(conn: ConnectionRow) {
+    // The kill switch, read HERE rather than only on the route into here.
+    //
+    // handleSync checks the flag before it sends a private row this way, and
+    // that was the only check. The failure toast raised further down carries a
+    // "Try again" action that calls this function directly, so a scan that
+    // failed while the switch was on could be restarted after the switch was
+    // turned off: the flag is a runtime row and takes effect with no redeploy
+    // and no reload, while the toast is still on screen. Taking effect for
+    // someone already mid-session is the whole point of a switch like this,
+    // and this was the one path where it did not.
+    //
+    // Checked before the key export and before the run record is opened, so a
+    // refused press exports no vault key, opens no row, and says why.
+    const gate = planStealthScan({ stealthSyncEnabled: isStealthSyncEnabled() });
+    if (!gate.allowed) {
+      toast.error(gate.message);
+      return;
+    }
     if (!user) {
       toast.error("Please sign in first.");
       return;
@@ -730,6 +749,9 @@ export function ConnectionsPage() {
         appUserId: user.id,
         credKeyB64,
         widgetToken,
+        // Stated, not looked up. The launcher refuses on anything that is not
+        // true, which is the check a caller added later cannot walk past.
+        stealthSyncEnabled: isStealthSyncEnabled(),
         /**
          * DL-1111. The widget posts roughly one of these per second for the
          * whole scan, and until now nobody passed this callback, so all of it
