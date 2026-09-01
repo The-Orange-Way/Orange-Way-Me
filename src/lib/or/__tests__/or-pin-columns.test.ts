@@ -85,8 +85,9 @@ interface Fixture {
 let fixture!: Fixture;
 
 /**
- * Argon2id is deliberately expensive, so the three derivations this suite
- * needs are paid once here rather than per test.
+ * Argon2id is deliberately expensive, so the four derivations this suite
+ * needs are paid once here rather than per test: two reference keys, and one
+ * inside each of the two computeOrPinColumns calls below.
  */
 beforeAll(async () => {
   const saltOld = randomBytesB64(16);
