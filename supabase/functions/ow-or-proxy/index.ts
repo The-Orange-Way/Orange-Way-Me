@@ -28,7 +28,10 @@
  *
  * For or-provision: external_user_id is set to the authenticated user.id.
  * For or-link-mint-token: app_user_id is set to user.id; ttl_seconds
- *   passed through if numeric.
+ *   passed through if numeric. Refused outright while the private wallet
+ *   kill switch (public.app_flags.stealth_sync_enabled) is not true: the
+ *   minted token is what lets the widget receive the credentials key, so the
+ *   switch has to be enforced here and not only in the browser.
  * For all others: subaccount_id is resolved server-side from
  *   user_profiles.or_subaccount_id on the authenticated user. A
  *   client-supplied subaccount_id is ignored, so a user cannot act on
@@ -40,6 +43,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildCorsHeaders, jsonResponse, readBoundedText } from "../_shared/http.ts";
 import { getOrGatewayFromEnv, OR_GATEWAY_NOT_ALLOWED_ERROR } from "../_shared/or-gateway.ts";
+import {
+  readStealthSyncEnabled,
+  STEALTH_SYNC_DISABLED_ERROR,
+  STEALTH_SYNC_DISABLED_MESSAGE,
+  STEALTH_SYNC_FLAG_KEY,
+} from "../_shared/stealth-flag.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -208,6 +217,36 @@ Deno.serve(async (req: Request) => {
       // -- vault is per-user, no orgs concept).
       orBody = { external_user_id: user.id };
     } else if (endpoint === "or-link-mint-token") {
+      // SERVER SIDE KILL SWITCH. This is the mint that has to refuse, because
+      // the token it returns is what lets the connect widget authenticate and
+      // receive the credentials key. Reading the flag only in the browser made
+      // it a convention: anything not running our JavaScript ignored it.
+      //
+      // Read fresh on every mint and never cached. Flipping the row is meant to
+      // take effect immediately, and a mint happens when a person presses a
+      // button, so one primary key read is not worth trading that property for.
+      //
+      // Fails closed in every direction: see _shared/stealth-flag.ts. A missing
+      // row, a null, a non boolean and a failed read all refuse.
+      const stealthAllowed = await readStealthSyncEnabled(
+        async () =>
+          await serviceClient
+            .from("app_flags")
+            .select("enabled")
+            .eq("key", STEALTH_SYNC_FLAG_KEY)
+            .maybeSingle(),
+      );
+      if (!stealthAllowed) {
+        // 503 plus a stable code, so the client can tell "switched off for now"
+        // from "you are not allowed" and render the right thing. Returns before
+        // any request leaves this function: no token, no partial success.
+        return jsonResponse(
+          { error: STEALTH_SYNC_DISABLED_ERROR, message: STEALTH_SYNC_DISABLED_MESSAGE },
+          503,
+          cors,
+        );
+      }
+
       // Mint widget session token. app_user_id = user.id (mirrors the
       // subaccount external_user_id used at provision). TTL can be
       // overridden by the caller; cap is enforced on OR side.
