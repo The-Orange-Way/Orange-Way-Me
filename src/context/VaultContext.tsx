@@ -59,6 +59,7 @@ import {
   planOrKeyMaterial,
   type OrKeyMaterialRow,
 } from "@/lib/or/or-key-material";
+import { computeOrPinForPasswordChange } from "@/lib/or/or-password-change-pin";
 import {
   ensureUserKeypair,
   rewrapUserKeypair,
@@ -1236,45 +1237,20 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // the salt still matches the rows already sealed, which produces a well
     // formed key that opens nothing and looks exactly like success.
     //
-    // Everything needed is local. The old password is in hand and has just
-    // been verified, the old salt is row.kdf_salt, and the MEK bytes are held
-    // in the ref, so the legacy value is reproduced with no network call.
-    // Planning against the CURRENT salt with saltMatchesExistingRows: true is
-    // honest here and only here, because newSalt does not exist yet.
-    const orPlan = planOrKeyMaterial(row, row.kdf_salt, { saltMatchesExistingRows: true });
-    let orPinColumns: Record<string, unknown> | null = null;
-
-    if (orPlan.mode === "derive-and-pin") {
-      const vaultMek = await importMekFromRaw(mekBytesRef.current);
-      const orMekBytes = await deriveOrMekBytes(currentPassword, user.id, orPlan.saltContext);
-      try {
-        orPinColumns = {
-          enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(orMekBytes, vaultMek),
-          // The OLD salt. These subkeys were established against it and must
-          // not move when kdf_salt does.
-          or_subkey_salt: orPlan.saltContext,
-          or_key_epoch: orPlan.epoch,
-        };
-      } finally {
-        // Our own copy, wrapped and no longer needed.
-        orMekBytes.fill(0);
-      }
-      // A throw above leaves nothing written and the password unchanged, which
-      // the customer can retry. That is the better failure: rotating without
-      // the pin would make the material unreproducible permanently.
-    } else if (orPlan.mode === "refuse") {
-      // Rotate anyway and write no OR column. In both refusal cases the
-      // material is already unreproducible and the namespace is already
-      // disabled, so the rotation makes nothing worse, while blocking a
-      // password change over an unrelated namespace generation would be a real
-      // harm for no gain. Reason only: no salt, ciphertext or key material.
-      console.warn(
-        "[vault] Orange Rails material not pinned during password change:",
-        orPlan.reason,
-      );
-    }
-    // "unwrap" needs nothing. The row is already pinned and the pin does not
-    // move with the password or the salt, which is the whole point of it.
+    // The helper reads the old salt off the row and takes no salt argument, so
+    // the ordering this used to depend on, plan before mint, is no longer
+    // something an edit to this function can reverse. Everything it needs is
+    // local: the old password is in hand and has just been verified above, the
+    // old salt is on the row, and the MEK bytes are in the ref. A throw from it
+    // leaves nothing written and the password unchanged, which the customer can
+    // retry, and that is the better failure: rotating without the pin would make
+    // the material unreproducible permanently.
+    const orPinColumns = await computeOrPinForPasswordChange(
+      row,
+      currentPassword,
+      user.id,
+      mekBytesRef.current,
+    );
 
     // Opportunistic upgrade: every password change lands the vault on the
     // current best KDF. Fresh salt, current wrapper. kdf_iterations is not
