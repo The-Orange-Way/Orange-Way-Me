@@ -684,20 +684,36 @@ export function ConnectionsPage() {
     // user has no way to detect.
     setStealthProgress(null);
     setStealthScanId(conn.id);
-    // DL-1447: durable run record. Written once we are actually about to
-    // launch the widget (both key export and token mint succeeded), so this
-    // covers every real execution attempt including one whose popup is then
-    // blocked or whose channel setup throws below. runId stays null when the
-    // insert itself failed; finishStealthSyncRun no-ops on null rather than
-    // retrying the insert, so a logging failure never blocks the sync.
+    // DL-1447: durable run record. The insert STARTS here, before the key
+    // export and the token mint, because either of those can throw: a vault
+    // that locked while this page sat open, or a token mint that fails. While
+    // it was written after them, such an execution wrote no row at all, so
+    // this table under-reported failures in exactly the cases most likely to
+    // be a real customer problem. The user saw a failed sync and an error
+    // toast, and the table that exists so a sync is verifiable from our own
+    // database showed nothing.
+    //
+    // It is deliberately NOT awaited here. Awaiting it would put one more
+    // network round trip between the user's click and the popup opening, and
+    // the popup is the thing a browser blocks as that gap grows. So the insert
+    // runs alongside the key export, and is awaited at the launch point below,
+    // or in the catch on the paths that never reach it.
+    //
+    // startStealthSyncRun never rejects: it catches its own errors and returns
+    // null. So this promise cannot become an unhandled rejection while it sits
+    // unawaited. runId stays null when the insert itself failed, and
+    // finishStealthSyncRun no-ops on null rather than retrying the insert, so
+    // a logging failure never blocks the sync and we never lose the fact that
+    // the original write failed.
     let runId: string | null = null;
+    const runIdPromise = startStealthSyncRun(user.id, conn.id);
     try {
       // Read the key immediately before use, like handleAddConnection does, so
       // a vault that locked while this page sat open fails here rather than
       // part-way through a scan.
       const credKeyB64 = await exportOrCredsKey();
       const widgetToken = await mintWidgetToken(user.id);
-      runId = await startStealthSyncRun(user.id, conn.id);
+      runId = await runIdPromise;
 
       const { channel } = await startStealthSync({
         connectionId: conn.id,
@@ -834,7 +850,14 @@ export function ConnectionsPage() {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
       toast.error(humanizeError(new Error(msg)));
-      void finishStealthSyncRun(runId, { status: "error", errorCode: "launch_failed" });
+      // The started row may still be in flight: this catch is reachable from
+      // the key export and the token mint, both of which run before runId is
+      // assigned. Resolve the insert before finishing it, or this execution
+      // records nothing at all and a real failure stays invisible in the
+      // table. Awaiting here costs nothing the user can feel: the sync has
+      // already failed and the toast is already up.
+      const startedRunId = runId ?? (await runIdPromise);
+      void finishStealthSyncRun(startedRunId, { status: "error", errorCode: "launch_failed" });
     }
   }
 
