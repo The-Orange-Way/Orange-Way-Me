@@ -26,7 +26,7 @@ export const PROXY_ERROR_BODY_KEYS = ["error", "error_code", "code", "reason"] a
  * Cap on any retained string. An upstream error string is a sentence. Anything
  * longer is a payload wearing an error's name.
  */
-const MAX_RETAINED_STRING = 200;
+export const MAX_RETAINED_STRING = 200;
 
 /**
  * Only short scalars survive. An object or an array under an allowed key is
@@ -36,6 +36,22 @@ function retainScalar(value: unknown): string | number | boolean | null {
   if (typeof value === "string") return value.slice(0, MAX_RETAINED_STRING);
   if (typeof value === "number" || typeof value === "boolean") return value;
   return null;
+}
+
+/**
+ * Read the message for a CallProxyError out of a proxy response body.
+ *
+ * DELIBERATELY DEFECTIVE IN THIS COMMIT (OWM-T0452). This is the rule that
+ * lives inline at the two callProxy throw sites today, lifted here verbatim so
+ * the tests that arrive with it can be watched failing before anything is
+ * changed. It joins whatever sits under `error` through String() and caps
+ * nothing, which is why an array of strings rides out in the message while the
+ * body drops it. Fixed in the next commit.
+ */
+export function proxyErrorMessageFromBody(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  if (!("error" in body)) return null;
+  return String((body as { error: unknown }).error);
 }
 
 /**
