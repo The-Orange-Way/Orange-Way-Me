@@ -1237,11 +1237,6 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // the salt still matches the rows already sealed, which produces a well
     // formed key that opens nothing and looks exactly like success.
     //
-    // Everything needed is local. The old password is in hand and has just
-    // been verified, the old salt is row.kdf_salt, and the MEK bytes are held
-    // in the ref, so the legacy value is reproduced with no network call.
-    // Planning against the CURRENT salt with saltMatchesExistingRows: true is
-    // honest here and only here, because newSalt does not exist yet.
     // The helper reads the old salt off the row and takes no salt argument, so
     // the ordering this used to depend on, plan before mint, is no longer
     // something an edit to this function can reverse. Everything it needs is
