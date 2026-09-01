@@ -23,7 +23,12 @@
  * primitives, all of which run under Node in the existing test environment.
  */
 
-import { deriveOrMekBytes, importMekFromRaw, randomBytesB64, wrapOrMekWithVaultMek } from "@/lib/vault";
+import {
+  deriveOrMekBytes,
+  importMekFromRaw,
+  randomBytesB64,
+  wrapOrMekWithVaultMek,
+} from "@/lib/vault";
 
 import { planOrKeyMaterial, type OrKeyMaterialRow } from "./or-key-material";
 
