@@ -64,6 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import { planSyncRoute } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -940,12 +941,20 @@ export function ConnectionsPage() {
     const subaccount = requireSubaccount();
     if (!subaccount) return;
 
+    // WHERE this press goes is decided by planSyncRoute, from the connection
+    // alone. It used to be decided inline here, and the private branch ANDed
+    // in the kill switch, so switching the private wallet feature OFF did not
+    // refuse a private connection: it fell through to the or-sync branch below
+    // and exported two vault keys for a request or-sync answers with a 400
+    // (OWM-T0530, OWM-T0528, OWM-T0533).
+    const route = planSyncRoute(conn);
+
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The old or-sync path below is for
+    // vault OPK key, and imports. The or-sync path below is for
     // Bitcoin sources (Blink/Strike/etc.) only.
-    if (conn.provider_type === "quiltt") {
+    if (route === "bank") {
       setBankSyncConnId(conn.id);
       return;
     }
@@ -954,7 +963,7 @@ export function ConnectionsPage() {
     // by or-sync: they live in the stealth store, and or-sync selects from the
     // `connections` table, which does not contain this row. Routing them below
     // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the quiltt branch above: a provider whose sync lives
+    // date. Same shape as the bank branch above: a provider whose sync lives
     // somewhere else gets sent there.
     //
     // Do NOT read the branch below as a safe fallthrough. This comment used to
@@ -965,13 +974,17 @@ export function ConnectionsPage() {
     // endpoint". It is a rejection, not an empty success, and it is raised
     // before or-sync ever selects anything.
     //
-    // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
-    // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
-    // environment in .github/workflows/deploy.yml), and public.app_flags can
-    // override it at runtime with no redeploy. isStealthSyncEnabled() returns
-    // the effective value. A build that lands here with the switch off gives
-    // the customer the 400 above rather than a graceful skip.
-    if (isStealthSyncEnabled() && conn.is_stealth) {
+    // DL-1047 / DL-1378 / OWM-T0530: the kill switch is deliberately NOT
+    // consulted in this condition. It is read at the press inside
+    // handleStealthSync, which awaits refreshRuntimeFlags and refuses ABOVE
+    // the credentials key export. An off switch has to refuse a private
+    // connection; it must never redirect one onto the branch below, which is
+    // the only branch in this handler that exports vault keys.
+    //
+    // Routing on is_stealth alone also matches planSyncAll, which has always
+    // held private connections back from or-sync unconditionally. This path
+    // was the one that disagreed.
+    if (route === "private") {
       await handleStealthSync(conn);
       return;
     }
