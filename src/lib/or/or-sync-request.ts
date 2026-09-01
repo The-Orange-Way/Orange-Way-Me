@@ -106,6 +106,14 @@ export async function requestOrSync(
     }
   }
 
+  // Nothing to sync is a zero answer, not a request. Falling through here
+  // would take both keys out of the vault to ask or-sync about no connections,
+  // and then leave the caller to interpret the reply to a question we had no
+  // reason to ask.
+  if (connections.length === 0) {
+    return { synced: 0, connections: [] };
+  }
+
   const credentials_key = await handover.exportCredentialsKey();
   const transactions_key = await handover.exportTransactionsKey();
 
