@@ -155,5 +155,16 @@ describe("openOrConnect is gated on the stealth kill switch", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(shim.open).toHaveBeenCalledTimes(1);
     expect(shim.openedUrls[0]).toContain("cred_key=");
+
+    // Settle the session so the widget clears its own poll and hang guard.
+    // Without this the file ends with timers still scheduled.
+    const win = (globalThis as { window: EventTarget }).window;
+    win.dispatchEvent(
+      Object.assign(new Event("message"), {
+        data: { type: "or-link-cancel" },
+        origin: "https://connect.orangerails.com",
+      }) as unknown as Event,
+    );
+    await new Promise((r) => setTimeout(r, 0));
   });
 });
