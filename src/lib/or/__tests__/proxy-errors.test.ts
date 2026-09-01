@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { CallProxyError, isSubaccountNotFound, narrowProxyErrorBody } from "../proxy-errors";
+import {
+  CallProxyError,
+  MAX_RETAINED_STRING,
+  isSubaccountNotFound,
+  narrowProxyErrorBody,
+  proxyErrorMessageFromBody,
+} from "../proxy-errors";
 
 /**
  * A response shape the sync endpoints really return: an error string sitting
@@ -72,6 +78,56 @@ describe("CallProxyError", () => {
     body.transactions = [{ id: "row-1" }];
     expect(err.body).toEqual({ error: "sync failed" });
   });
+
+  it("caps the message, so no throw site can attach an unbounded upstream string", () => {
+    // The cap belongs in the constructor for the same reason the body
+    // narrowing does: a throw site can be added without remembering the rule,
+    // a constructor cannot be bypassed.
+    const err = new CallProxyError("z".repeat(5000), 502, null);
+    expect(err.message).toHaveLength(MAX_RETAINED_STRING);
+  });
+
+  it("does not carry a list under error into the message while the body drops it", () => {
+    // The exact asymmetry this ticket exists to close: narrowProxyErrorBody
+    // returns null for a list, and String(["aaa","bbb"]) is "aaa,bbb".
+    const body = { error: ["aaa", "bbb"] };
+    const err = new CallProxyError(
+      proxyErrorMessageFromBody(body) ?? "or-sync failed",
+      502,
+      body,
+    );
+    expect(err.message).not.toContain("aaa,bbb");
+    expect(err.body).toBeNull();
+  });
+});
+
+describe("proxyErrorMessageFromBody", () => {
+  it("keeps a short error string, which is what callers branch on", () => {
+    // registerOpk's rotation guard scans this message for confirm_rotation.
+    expect(proxyErrorMessageFromBody({ error: "confirm_rotation required" })).toBe(
+      "confirm_rotation required",
+    );
+  });
+
+  it("refuses a list under error rather than joining it", () => {
+    expect(proxyErrorMessageFromBody({ error: ["aaa", "bbb"] })).toBeNull();
+  });
+
+  it("refuses an object under error rather than building [object Object]", () => {
+    expect(proxyErrorMessageFromBody({ error: { detail: "x" } })).toBeNull();
+  });
+
+  it("caps a long error string with the same constant that caps a retained body string", () => {
+    expect(proxyErrorMessageFromBody({ error: "z".repeat(5000) })).toHaveLength(
+      MAX_RETAINED_STRING,
+    );
+  });
+
+  it("returns null when there is no error key to read, so the caller falls through", () => {
+    expect(proxyErrorMessageFromBody({ transactions: [{ id: "row-1" }] })).toBeNull();
+    expect(proxyErrorMessageFromBody(null)).toBeNull();
+    expect(proxyErrorMessageFromBody("a non-JSON error page")).toBeNull();
+  });
 });
 
 describe("isSubaccountNotFound", () => {
@@ -81,6 +137,15 @@ describe("isSubaccountNotFound", () => {
 
   it("matches regardless of casing, since the wording is OR's to change", () => {
     expect(isSubaccountNotFound(new CallProxyError("subaccount not found", 404, null))).toBe(true);
+  });
+
+  it("still matches when the upstream string was long enough to be capped", () => {
+    // The predicate is the thing a careless message change breaks: truncate
+    // from the front, or replace the message with a generic string, and the
+    // re-provision path silently stops firing. This test is green before and
+    // after the OWM-T0452 fix on purpose -- it is the guard, not the defect.
+    const long = "Subaccount not found: " + "x".repeat(5000);
+    expect(isSubaccountNotFound(new CallProxyError(long, 404, null))).toBe(true);
   });
 
   // The recovery this predicate guards clears the cached subaccount and
