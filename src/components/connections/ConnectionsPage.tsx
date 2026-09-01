@@ -1270,10 +1270,27 @@ export function ConnectionsPage() {
     //
     // Stealth envelopes are sealed with the CREDENTIALS subkey
     // (orangerails-creds-v1), not the transactions subkey
-    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
-    // flow hands OR `credKeyB64` in the /connect fragment as
-    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
-    // it was handed. So every stealth envelope that exists was sealed under
+    // (orangerails-txns-v1).
+    //
+    // The chain, one hop per sentence, because `cred_key` and
+    // `or_stealth_key_b64` are two different things and an earlier version of
+    // this comment ran them together. ADD flow: we put the credentials subkey
+    // in the /connect URL fragment under the parameter `cred_key`
+    // (buildConnectUrl, src/lib/or/widget.ts); Orange Rails reads `cred_key`
+    // and hands that same value to its inline stealth step as
+    // `or_stealth_key_b64`. SYNC flow: we send the credentials subkey
+    // ourselves over postMessage, under the field name `or_stealth_key_b64`
+    // (buildStealthSyncInit, src/lib/stealth/sync.ts). Either way the widget
+    // seals with whatever it was handed, which is the credentials subkey.
+    // `or_stealth_key_b64` is a message field name and never a fragment
+    // parameter, so grepping this repo for it in a URL correctly finds
+    // nothing.
+    //
+    // Whether the credentials-namespace key should be the stealth sealing key
+    // at all is OWM-T0464. This comment describes what the code does today,
+    // not what it should do.
+    //
+    // So every stealth envelope that exists was sealed under
     // creds, while this loop was opening them with txns. An envelope only
     // opens with the key it was sealed under, so every row failed, the
     // import received an empty list, and the run summary reported zero rows
