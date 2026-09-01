@@ -942,11 +942,12 @@ export function ConnectionsPage() {
     if (!subaccount) return;
 
     // WHERE this press goes is decided by planSyncRoute, from the connection
-    // alone. It used to be decided inline here, and the private branch ANDed
-    // in the kill switch, so switching the private wallet feature OFF did not
-    // refuse a private connection: it fell through to the or-sync branch below
-    // and exported two vault keys for a request or-sync answers with a 400
-    // (OWM-T0530, OWM-T0528, OWM-T0533).
+    // alone, inside dispatchSync. It used to be decided inline here, and the
+    // private branch ANDed in the kill switch, so switching the private wallet
+    // feature OFF did not refuse a private connection: it fell through to the
+    // or-sync branch and exported two vault keys for a request or-sync answers
+    // with a 400 (OWM-T0530, OWM-T0528, OWM-T0533).
+    //
     // OWM-T0544: the routing RULE was tested and the CALL to it was not.
     // Deleting the private arm here left every test in the repository passing
     // and restored OWM-T0530 in full, because nothing renders this component
@@ -959,17 +960,17 @@ export function ConnectionsPage() {
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
+    // vault OPK key, and imports. The or-sync handler is for Bitcoin sources
+    // (Blink/Strike/etc.) only.
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, which does not contain this row. Routing them below
-    // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the bank branch above: a provider whose sync lives
+    // `connections` table, which does not contain this row. Routing them to
+    // or-sync would ask a function that cannot see this row whether this row is
+    // up to date. Same shape as the bank handler: a provider whose sync lives
     // somewhere else gets sent there.
     //
-    // Do NOT read the branch below as a safe fallthrough. This comment used to
+    // Do NOT read or-sync as a safe destination for them. This comment used to
     // say or-sync "matches nothing and honestly returns { synced: 0 }". That
     // was never measured and it is wrong. Observed on production 2026-08-18,
     // signed in, with the network recorded: one request, or-sync via the
