@@ -96,9 +96,24 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 }
 
 /**
- * Step 2: build the popup URL with the Quiltt session bundle embedded in
- * the fragment (so it never reaches OR's server logs), plus the ZKA keys
- * cred_key + txn_key. ZKA keys travel ONLY in the URL fragment.
+ * Step 2: build the popup URL with the provider session bundle embedded in
+ * the fragment, plus the ZKA keys cred_key and txn_key. Those keys travel
+ * ONLY in the fragment and never in the query string.
+ *
+ * WHAT THE FRAGMENT BUYS, AND WHAT IT DOES NOT. A fragment is not sent with
+ * the request, so these values stay out of Orange Rails' request logs, their
+ * proxy logs and their referrer headers. That is why they are placed there
+ * and it is the half this comment used to state on its own.
+ *
+ * It is not client-side secrecy. The URL below is opened as a real
+ * navigation, so the fragment is part of that browsing context's URL: it is
+ * in the address bar, it is kept in the history entry, and anything able to
+ * read the tab's URL can read it. Both halves are stated because a reader
+ * judging this delivery needs both, and the server-only sentence has already
+ * been read as a general safety claim it does not support.
+ *
+ * How the keys are delivered is a cross-app contract change and is not this
+ * function's business: it is tracked on OWM-T0464.
  */
 export function buildBankPopupUrl(args: {
   quickConnect: BankConnectQuickConnectResponse;
