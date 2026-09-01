@@ -36,6 +36,15 @@ vi.stubEnv("VITE_SUPABASE_URL", "https://ow.local");
 vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "pub-key");
 vi.stubEnv("VITE_OR_CONNECT_URL", "https://connect.orangerails.com/connect");
 
+// OWM-T0478. openOrConnect now refuses while the stealth kill switch is off.
+// The real module reads app_flags at boot and reports false until it does, so
+// every case in this file would refuse if we used it. Drive the flag from
+// here instead: true for the existing cases, false for the gate case.
+const stealth = vi.hoisted(() => ({ enabled: true }));
+vi.mock("@/lib/stealth/runtimeFlags", () => ({
+  isStealthSyncEnabled: () => stealth.enabled,
+}));
+
 const ORG_ID = "user-uuid-1234";
 const CRED_KEY = "Y3JlZF9rZXlfYjY0X29wYXF1ZQ==";
 const TXN_KEY = "dHhuX2tleV9iNjRfb3BhcXVl";
@@ -119,6 +128,7 @@ describe("openOrConnect", () => {
   let shim: ReturnType<typeof installWindowShim>;
 
   beforeEach(() => {
+    stealth.enabled = true;
     shim = installWindowShim();
     fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -131,6 +141,23 @@ describe("openOrConnect", () => {
   afterEach(() => {
     shim.restore();
     vi.restoreAllMocks();
+  });
+
+  // OWM-T0478. The stealth kill switch closes the ADD door as well as the
+  // sync door. This is the case that goes red if that check is removed, which
+  // is why the check lives in this module and not only in ConnectionsPage.
+  it("refuses to open the source catalogue when the stealth kill switch is off", async () => {
+    stealth.enabled = false;
+    const { openOrConnect } = await import("../widget");
+
+    await expect(
+      openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY }),
+    ).rejects.toThrow(/temporarily unavailable/i);
+
+    // The refusal lands BEFORE the mint and before any navigation, so no
+    // widget token exists and neither vault key was ever put into a URL.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(shim.openedUrls).toHaveLength(0);
   });
 
   it("mints a widget token via ow-or-proxy with the org_id and resolves on or-link-success", async () => {
@@ -338,6 +365,7 @@ describe("or-link-success contract, through the consumer (DL-1114)", () => {
   let shim: ReturnType<typeof installWindowShim>;
 
   beforeEach(() => {
+    stealth.enabled = true;
     shim = installWindowShim();
     fetchSpy = vi
       .spyOn(globalThis, "fetch")
