@@ -9,13 +9,21 @@
  * directly, and the handler itself reads no flag, so that second entry was
  * never covered.
  *
- * THE FAILURE THIS CLOSES, concretely. A scan starts while the switch is on
- * and fails, which is the ordinary case the retry button exists for. The
- * switch is then turned off at runtime, which takes effect with no redeploy
- * and no reload. The toast is still on the customer's screen. They press Try
- * again, the widget opens, and the key crosses to the provider origin with
- * the switch off. It is narrow, and it is precisely the case a no-redeploy
- * kill switch exists for: someone already mid-session.
+ * THE HOLE THIS CLOSES, concretely. The scan handler itself consulted no flag,
+ * so every entry other than that one routed branch reached the widget with no
+ * check: the "Try again" action on the failure toast today, and whatever gets
+ * wired to the handler tomorrow. The gate runs in the handler and again in the
+ * launcher, above the call that carries the credentials key, so a refusal is
+ * above the point the key would cross to the provider origin whatever the
+ * entry.
+ *
+ * WHAT THE SWITCH REACHES, so nobody reads more into it than is there. The
+ * flag is read from public.app_flags once at application start and cached for
+ * the life of the page (runtimeFlags.ts), so turning it off changes what a NEW
+ * page load sees and not what an already-open tab sees. No redeploy: true. No
+ * reload: not true. That is why the retry scenario above is stated as a hole
+ * in the code rather than as an incident that can happen today, and bounding
+ * the staleness is OWM-T0504.
  *
  * WHY A PURE FUNCTION AND NOT AN INLINE CONDITION. The same reason the add
  * door has one. The gate can be tested with no browser, no popup and no live
