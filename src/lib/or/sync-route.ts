@@ -14,10 +14,17 @@
  *
  * THE RULE, and it is the one `planSyncAll` in ./sync-all.ts already applies
  * to the bulk path: a private connection is NEVER sent to `or-sync`, in any
- * state of the switch. The switch decides whether a private connection is
- * scanned or refused. It does not decide whether the connection is private.
+ * state of anything. Whether it is private is a property of the row.
  *
- * Pure and exported so the decision can be tested. The original was four
+ * THE SWITCH IS DELIBERATELY NOT AN INPUT HERE. It decides scan or refuse, and
+ * that decision belongs at the door, in `handleStealthSync`, which reads the
+ * flag at the press with a forced refresh and refuses there. Consulting the
+ * switch again in this function would give one state two refusal sentences,
+ * and this copy would be the staler of the two, because routing reads the
+ * cached answer while the door forces a read. Routing answers exactly one
+ * question: is this connection private.
+ *
+ * Pure and exported so the decision can be tested. The original was a stack of
  * inline conditions in a click handler with no test, which is exactly how a
  * condition that looks right at a glance survives a review.
  */
@@ -32,43 +39,25 @@ export interface SyncRouteCandidate {
 export type SyncRoute =
   /** Bank (Quiltt): the OPK sealed-box path, handled by the bank dialog. */
   | { kind: "bank" }
-  /** Private wallet, switch on: scanned by the widget in this browser. */
-  | { kind: "private-scan" }
-  /** Private wallet, switch off: refused here, with nothing sent. */
-  | { kind: "private-refused" }
+  /**
+   * Private wallet. Goes to the widget scan entry, which is the gated door:
+   * it re-reads the kill switch at the press and refuses there if it is off.
+   * Never `or-sync`, in any state.
+   */
+  | { kind: "private" }
   /** Ordinary Bitcoin source: the only kind `or-sync` can act on. */
   | { kind: "or-sync" };
 
-/**
- * The sentence a customer sees when a private wallet is refused. It is
- * exported so the wording lives beside the rule that produces it, and so a
- * test can pin the refusal without reaching into the component.
- *
- * It matches the voice `privateSkipMessage` already uses for the same state on
- * the bulk path. "Nothing was sent" is not decoration: the whole point of the
- * fix is that no key material leaves the browser on this press, and saying so
- * is the only way a customer or a support conversation can tell this refusal
- * apart from a request that failed after it went out.
- */
-export const PRIVATE_SYNC_DISABLED_MESSAGE =
-  "This private connection can't be synced here yet. Nothing was sent.";
-
-export function planSyncRoute(
-  conn: SyncRouteCandidate,
-  opts: { stealthSyncEnabled: boolean },
-): SyncRoute {
-  // Bank connections are routed on provider alone. They are never private and
-  // never touch the private-wallet switch, so this is settled first and the
-  // rest of the function does not have to carry the case.
+export function planSyncRoute(conn: SyncRouteCandidate): SyncRoute {
+  // Bank connections are routed on provider alone. Settled first so the rest
+  // of the function does not have to carry the case.
   if (conn.provider_type === "quiltt") return { kind: "bank" };
 
   // `=== true`, not a truthiness check, and deliberately identical to
   // planSyncAll: an absent field is an older response shape and must route to
   // the ordinary path. A missing field silently reclassifying a connection is
   // the bug next door.
-  if (conn.is_stealth === true) {
-    return opts.stealthSyncEnabled ? { kind: "private-scan" } : { kind: "private-refused" };
-  }
+  if (conn.is_stealth === true) return { kind: "private" };
 
   return { kind: "or-sync" };
 }
