@@ -142,7 +142,7 @@ describe("requestOrSync", () => {
     // asking, and it would still have exported two keys to do it.
     const h = spyHandover();
     const res = await requestOrSync("sub-1", [], h);
-    expect(res).toBeUndefined();
+    expect(res).toEqual({ synced: 0, connections: [] });
     expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
   });
 
