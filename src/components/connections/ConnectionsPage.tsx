@@ -546,11 +546,21 @@ export function ConnectionsPage() {
    * provider's side. We do not drive that handshake from here; our part ends
    * when the list posts the completed connection back to us.
    *
-   * The two vault keys travel in the URL fragment, which is never sent to a
-   * server. They lock the stored credential and the per-wallet metadata, so
-   * the connect provider holds ciphertext and we hold the only keys that open
-   * it. Read immediately before the call so a vault that locked while this
-   * page sat open fails here rather than part-way through.
+   * The two vault keys travel in the URL fragment. They lock the stored
+   * credential and the per-wallet metadata, so the connect provider holds
+   * ciphertext and we hold the only keys that open it. Read immediately
+   * before the call so a vault that locked while this page sat open fails
+   * here rather than part-way through.
+   *
+   * What the fragment buys us, and what it does not, because the half
+   * answer that used to be here reassured readers about a question it never
+   * asked. A fragment is not sent to a server, so these keys stay out of the
+   * connect provider's request logs: that threat is answered. It is NOT
+   * client-side privacy. The fragment is part of the URL of a real
+   * navigation (widget.ts opens the popup with window.open), so it lands in
+   * that browsing context's history entry, is visible in its address bar,
+   * and is readable by anything that can see the tab's URL. Do not read
+   * "never sent to a server" as "nobody else can see it".
    */
   async function handleAddConnection() {
     if (!user) {
@@ -1270,10 +1280,26 @@ export function ConnectionsPage() {
     //
     // Stealth envelopes are sealed with the CREDENTIALS subkey
     // (orangerails-creds-v1), not the transactions subkey
-    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
-    // flow hands OR `credKeyB64` in the /connect fragment as
-    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
-    // it was handed. So every stealth envelope that exists was sealed under
+    // (orangerails-txns-v1). The reason is that both paths into the widget
+    // hand it `credKeyB64`, under two different field names, and the widget
+    // seals with whatever it was handed:
+    //
+    //   ADD, by navigation. src/lib/or/widget.ts buildConnectUrl puts
+    //   `credKeyB64` in the /connect URL fragment under the field name
+    //   `cred_key`. Orange Rails reads `cred_key` out of that fragment and
+    //   passes the same value into its own inline stealth init under the
+    //   field name `or_stealth_key_b64`. Two names, one key. On this path
+    //   `or_stealth_key_b64` is THEIR name for it, not ours, which is why
+    //   tracing that string through our connect code finds nothing.
+    //
+    //   SYNC, by postMessage. src/lib/stealth/sync.ts buildStealthSyncInit
+    //   really does put `credKeyB64` under `or_stealth_key_b64`, from here.
+    //   That one is ours, and it is the defect OWM-T0414 covers: the field
+    //   named for the stealth key is carrying the credentials key.
+    //
+    // Whether the credentials key should be the sealing key at all is
+    // OWM-T0464. This describes what the code does today, not what it
+    // should do. So every stealth envelope that exists was sealed under
     // creds, while this loop was opening them with txns. An envelope only
     // opens with the key it was sealed under, so every row failed, the
     // import received an empty list, and the run summary reported zero rows
