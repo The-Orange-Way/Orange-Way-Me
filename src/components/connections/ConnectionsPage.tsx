@@ -689,12 +689,17 @@ export function ConnectionsPage() {
     //
     // handleSync checks the flag before it sends a private row this way, and
     // that was the only check. The failure toast raised further down carries a
-    // "Try again" action that calls this function directly, so a scan that
-    // failed while the switch was on could be restarted after the switch was
-    // turned off: the flag is a runtime row and takes effect with no redeploy
-    // and no reload, while the toast is still on screen. Taking effect for
-    // someone already mid-session is the whole point of a switch like this,
-    // and this was the one path where it did not.
+    // "Try again" action that calls this function directly, and this function
+    // read no flag at all, so that second entry reached the widget unchecked.
+    // The launcher in sync.ts refuses too, so the rule now holds for every
+    // entry that exists and every one somebody adds later.
+    //
+    // WHAT THE SWITCH ACTUALLY REACHES, stated because an earlier version of
+    // this comment claimed more than the code does. runtimeFlags.ts reads
+    // public.app_flags once at application start and caches the answer for the
+    // life of the page, so turning the flag off changes what a NEW page load
+    // sees and not what an already-open tab sees. No redeploy: true. No
+    // reload: not true. Bounding that staleness is OWM-T0504.
     //
     // Checked before the key export and before the run record is opened, so a
     // refused press exports no vault key, opens no row, and says why.
