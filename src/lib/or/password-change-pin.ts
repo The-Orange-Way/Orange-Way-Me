@@ -22,7 +22,12 @@
  * bytes are zeroed the moment they are wrapped.
  */
 
-import { deriveOrMekBytes, importMekFromRaw, randomBytesB64, wrapOrMekWithVaultMek } from "@/lib/vault";
+import {
+  deriveOrMekBytes,
+  importMekFromRaw,
+  randomBytesB64,
+  wrapOrMekWithVaultMek,
+} from "@/lib/vault";
 
 import { planOrKeyMaterial } from "./or-key-material";
 import type { OrKeyMaterialRow } from "./or-key-material";
@@ -53,7 +58,10 @@ export interface OrPinForPasswordChange {
    * pinned and must not be overwritten, and the stored state is unusable.
    */
   columns: OrPinColumns | null;
-  /** Non-null only when the stored state cannot be used. Reason only: never a salt, ciphertext or key material. */
+  /**
+   * Non-null only when the stored state cannot be used. Reason only: never a
+   * salt, a ciphertext or key material.
+   */
   refusalReason: string | null;
 }
 
@@ -62,7 +70,10 @@ export interface PlanOrPinForPasswordChangeParams {
   /** The password being replaced. Already verified by the caller. */
   currentPassword: string;
   userId: string;
-  /** Raw vault MEK bytes. Unchanged by a password change, which is what makes the pin survive one. */
+  /**
+   * Raw vault MEK bytes. Unchanged by a password change, which is what makes
+   * the pin survive one.
+   */
   vaultMekBytes: Uint8Array;
 }
 
