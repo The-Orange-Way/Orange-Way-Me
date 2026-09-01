@@ -28,7 +28,7 @@
  *   URL fragment so the widget can encrypt the credential under our
  *   key, and to or-sync for in-memory transaction decryption.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -60,7 +60,12 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import {
+  openOrConnect,
+  mintWidgetToken,
+  SOURCE_CATALOGUE_DISABLED_MESSAGE,
+  type OrLinkSourceWallet,
+} from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
@@ -73,7 +78,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, subscribeStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
@@ -529,6 +534,24 @@ export function ConnectionsPage() {
 
   // ─── Add-connection: open the searchable source list ─────────────────
 
+  // The stealth kill switch, read reactively so this re-renders when the
+  // boot read of the flag lands. The third argument is the server snapshot
+  // and is false for the same fail-closed reason as everything else here.
+  //
+  // Why the whole button and not just the private-wallet entries: the
+  // catalogue is hosted by the connect provider, so we cannot filter what is
+  // inside it. The door is the only thing on our side of the line. While the
+  // flag is off the door is shut for every entry behind it, which is wider
+  // than the private-wallet slugs and is the price of being able to enforce
+  // it at all. Narrowing it needs a filter the provider honours, which is a
+  // change to the contract between the two apps and not something this page
+  // can assert on its own.
+  const catalogueOpenAllowed = useSyncExternalStore(
+    subscribeStealthSyncEnabled,
+    isStealthSyncEnabled,
+    () => false,
+  );
+
   /**
    * Open the connect provider's searchable source list.
    *
@@ -565,6 +588,14 @@ export function ConnectionsPage() {
   async function handleAddConnection() {
     if (!user) {
       toast.error("Please sign in first.");
+      return;
+    }
+    // Backstop, not the gate. openOrConnect refuses on the same flag, so the
+    // feature is safe without this; what this adds is the right sentence for
+    // the user if a render is stale or something else calls in, instead of
+    // the generic "we couldn't open the connect window" from the catch.
+    if (!isStealthSyncEnabled()) {
+      toast.error(SOURCE_CATALOGUE_DISABLED_MESSAGE);
       return;
     }
     setOpening(true);
@@ -1621,7 +1652,7 @@ export function ConnectionsPage() {
             >
               + Connect a bank
             </Button>
-            {OR_CONNECT_ENABLED && (
+            {OR_CONNECT_ENABLED && catalogueOpenAllowed && (
               <Button
                 onClick={() => void handleAddConnection()}
                 disabled={opening || securing || !opkRegistered}
