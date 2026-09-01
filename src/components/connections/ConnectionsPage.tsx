@@ -711,6 +711,34 @@ export function ConnectionsPage() {
       toast.error("Please sign in first.");
       return;
     }
+    // The sync door of the kill switch, READ AT THE PRESS rather than taken
+    // from the copy cached when the page loaded (OWM-T0504). A tab opened
+    // while the switch was on used to keep that answer for as long as it
+    // stayed open, so the one customer the switch failed to reach was the
+    // customer already in the app.
+    //
+    // It is here rather than only on the routed entry in handleSync because
+    // this function has a second caller: the "Try again" action on the failure
+    // toast calls it directly. One placement covers both, and it is above the
+    // credentials key export below, which is the thing that must not happen
+    // while the switch is off.
+    //
+    // Only one direction is forced, and that is deliberate. This read exists
+    // to CLOSE the door: an off flag refuses here, one round trip after the
+    // press. A flag turned back ON while a tab is open is left to the
+    // background refresh in runtimeFlags, because a customer waiting for a
+    // feature to come back is a delay, while a customer handing a key to the
+    // provider origin after the switch was thrown is an incident.
+    //
+    // Fails closed. refreshRuntimeFlags never throws and leaves the gate false
+    // on any read that errors, so a flag we cannot read refuses the scan.
+    await refreshRuntimeFlags();
+    if (!isStealthSyncEnabled()) {
+      toast.error(
+        "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",
+      );
+      return;
+    }
     setSyncingId(conn.id);
     // Clear any line left over from the previous scan before this one starts.
     // Showing the last run's "97%" while a fresh scan is at zero is a lie the
