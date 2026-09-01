@@ -257,24 +257,19 @@ jobs:
                        --jq '[.[] | select(.head.ref == "dev" or (.head.ref | startswith("release/prod-")))] | .[0].number // ""')
 
           if [ -n "${EXISTING}" ]; then
-            EXISTING_TITLE=$(gh api "repos/${GH_REPO}/pulls/${EXISTING}" --jq '.title')
             echo "Reusing open promotion pull request ${EXISTING}. Not opening a duplicate."
 
-            gh pr edit "${EXISTING}" --body-file pr-body.md
+            # Do not touch the body or the title here. Both were generated
+            # from AHEAD/BEHIND/DEV_SHA above, which describe the CURRENT dev
+            # head, not the commit this pull request is actually pinned to.
+            # Rewriting either on every scheduled run made the pull request
+            # lie about its own contents to the one person who has to read it
+            # before approving a production release. A pinned promotion's
+            # body and title are fixed at open time; only the label is kept
+            # in sync on reuse.
             gh pr edit "${EXISTING}" --add-label 'owner:release'
 
-            # Only retitle a title this workflow itself generated. A title a
-            # human wrote is left alone; the counts live in the body either way.
-            case "${EXISTING_TITLE}" in
-              "promote: dev to prod ("*)
-                gh pr edit "${EXISTING}" --title "promote: dev to prod (${AHEAD} commits)"
-                ;;
-              *)
-                echo "Left the existing human-written title unchanged."
-                ;;
-            esac
-
-            echo "Updated: ${GITHUB_SERVER_URL}/${GH_REPO}/pull/${EXISTING}"
+            echo "Left title and body unchanged (pinned at open time): ${GITHUB_SERVER_URL}/${GH_REPO}/pull/${EXISTING}"
             exit 0
           fi
 
