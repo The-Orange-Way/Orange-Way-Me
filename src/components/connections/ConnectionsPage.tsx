@@ -91,7 +91,11 @@ import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./B
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
 import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
-import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
+import {
+  buildProxyErrorMessage,
+  CallProxyError,
+  isSubaccountNotFound,
+} from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
@@ -178,16 +182,20 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
         }
       }
     }
-    const message =
-      (body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : null) ||
-      res.error.message ||
-      `${endpoint} failed`;
+    // The message is built here, in the module that also narrows the body, so
+    // the two rules about the same untrusted response cannot disagree. The
+    // old form was String(body.error), which turns an array of strings into
+    // "one,two" and has no length limit, while the body rule drops that exact
+    // shape. Fallback order is unchanged: upstream string, then supabase-js's
+    // own message, then the endpoint name.
+    const message = buildProxyErrorMessage(body, res.error.message || `${endpoint} failed`);
     throw new CallProxyError(message, status, body);
   }
   if (res.data && typeof res.data === "object" && "error" in res.data && res.data.error) {
-    throw new CallProxyError(String((res.data as { error: unknown }).error), 200, res.data);
+    // A 200 carrying an error field. Same rule as the non-2xx path above: an
+    // `error` that is not a string is not repeated into the message, it stays
+    // on the narrowed body where callers branch on it.
+    throw new CallProxyError(buildProxyErrorMessage(res.data, `${endpoint} failed`), 200, res.data);
   }
   return res.data;
 }
