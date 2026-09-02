@@ -64,7 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { planSyncRoute } from "@/lib/or/sync-route";
+import { dispatchSyncPress } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -947,17 +947,12 @@ export function ConnectionsPage() {
     // refuse a private connection: it fell through to the or-sync branch below
     // and exported two vault keys for a request or-sync answers with a 400
     // (OWM-T0530, OWM-T0528, OWM-T0533).
-    const route = planSyncRoute(conn);
-
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
-    // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
-    // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
-    if (route === "bank") {
-      setBankSyncConnId(conn.id);
-      return;
-    }
+    // Bitcoin-source or-sync path. The bank arm below opens the
+    // BankSyncDialog, which fetches OPK-sealed rows via or-transactions-list,
+    // unseals with the vault OPK key, and imports. The or-sync arm is for
+    // Bitcoin sources (Blink/Strike/etc.) only, and it is the only arm that
+    // exports vault keys.
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
@@ -984,11 +979,30 @@ export function ConnectionsPage() {
     // Routing on is_stealth alone also matches planSyncAll, which has always
     // held private connections back from or-sync unconditionally. This path
     // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
-    }
+    // OWM-T0544. The three arms are handed to dispatchSyncPress rather than
+    // written as if/return branches here. planSyncRoute was tested and the
+    // CALL to it was not: deleting the private branch from this handler failed
+    // nothing in the whole repository, so the rule was defended in a module
+    // the defect never lived in. SyncPressActions requires all three arms, so
+    // removing the private one is now a type error that `bunx tsc --noEmit`
+    // fails on in the Lint + build job, and the dispatch itself is covered by
+    // src/lib/or/__tests__/sync-press.test.ts.
+    await dispatchSyncPress(conn, {
+      bank: () => setBankSyncConnId(conn.id),
+      private: () => handleStealthSync(conn),
+      orSync: () => syncViaOrSync(conn, subaccount),
+    });
+  }
 
+  /**
+   * The or-sync request for one ordinary Bitcoin source.
+   *
+   * This is the only path in this component that exports the credentials key
+   * and the transactions key, and it is now reachable only through the or-sync
+   * arm above. It used to be the FALLTHROUGH of handleSync, which is why a
+   * deleted branch could hand it a private connection.
+   */
+  async function syncViaOrSync(conn: ConnectionRow, subaccount: string) {
     setSyncingId(conn.id);
     try {
       const credentials_key = await exportOrCredsKey();
