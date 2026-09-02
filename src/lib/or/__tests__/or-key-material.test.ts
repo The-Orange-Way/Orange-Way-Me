@@ -41,6 +41,41 @@ const planWithoutTypes = planOrKeyMaterial as unknown as (
 ) => OrKeyMaterialPlan;
 
 describe("planOrKeyMaterial", () => {
+  /**
+   * A lookup that could not be read hands back nothing, and nothing is not an
+   * account with nothing stored. Read as the second, a nullish row falls
+   * through to derive-and-pin, which mints a key over material that may
+   * already exist and orphans every row sealed under it. Read as the first, it
+   * refuses and the namespace disables itself for the session.
+   */
+  it("refuses a null row rather than reading it as an account with nothing stored", () => {
+    expect(planOrKeyMaterial(null, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  it("refuses an undefined row the same way", () => {
+    expect(planOrKeyMaterial(undefined, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  it("refuses a nullish row whatever the caller claims about the salt, and says why in its own words", () => {
+    for (const options of [UNCHANGED, ROTATED]) {
+      const plan = planOrKeyMaterial(null, "current-salt", options);
+      expect(plan.mode).toBe("refuse");
+      if (plan.mode !== "refuse") throw new Error("unreachable");
+      // Distinct from the half-written-row refusal on purpose: a reader has to
+      // be able to tell "I could not read it" from "it is partly stored".
+      expect(plan.reason).toContain("could not be read");
+      expect(plan.reason).not.toContain("partly stored");
+    }
+  });
+
+  it("still derives for a genuinely empty row, so the nullish guard has not closed the first-pin path", () => {
+    expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED)).toEqual({
+      mode: "derive-and-pin",
+      saltContext: "current-salt",
+      epoch: CURRENT_OR_KEY_EPOCH,
+    });
+  });
+
   it("derives and pins when nothing is stored yet", () => {
     expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED)).toEqual({
       mode: "derive-and-pin",
