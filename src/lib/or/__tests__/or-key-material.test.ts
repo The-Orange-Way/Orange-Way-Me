@@ -307,7 +307,11 @@ describe("planOrKeyMaterial", () => {
 
   it("words the unreadable-row refusal apart from the partly-stored one", () => {
     const unreadable = planWithAnyRow(null, "current-salt", UNCHANGED);
-    const partlyStored = planOrKeyMaterial({ ...EMPTY, or_key_epoch: 1 }, "current-salt", UNCHANGED);
+    const partlyStored = planOrKeyMaterial(
+      { ...EMPTY, or_key_epoch: 1 },
+      "current-salt",
+      UNCHANGED,
+    );
     if (unreadable.mode !== "refuse" || partlyStored.mode !== "refuse") {
       throw new Error("expected both to refuse");
     }
