@@ -64,6 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
+import { planSyncRoute } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -73,7 +74,8 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, refreshRuntimeFlags } from "@/lib/stealth/runtimeFlags";
+import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
@@ -546,15 +548,47 @@ export function ConnectionsPage() {
    * provider's side. We do not drive that handshake from here; our part ends
    * when the list posts the completed connection back to us.
    *
-   * The two vault keys travel in the URL fragment, which is never sent to a
-   * server. They lock the stored credential and the per-wallet metadata, so
-   * the connect provider holds ciphertext and we hold the only keys that open
-   * it. Read immediately before the call so a vault that locked while this
-   * page sat open fails here rather than part-way through.
+   * The two vault keys travel in the URL fragment. They lock the stored
+   * credential and the per-wallet metadata, so the connect provider holds
+   * ciphertext and we hold the only keys that open it. Read immediately
+   * before the call so a vault that locked while this page sat open fails
+   * here rather than part-way through.
+   *
+   * What the fragment buys us, and what it does not, because the half
+   * answer that used to be here reassured readers about a question it never
+   * asked. A fragment is not sent to a server, so these keys stay out of the
+   * connect provider's request logs: that threat is answered. It is NOT
+   * client-side privacy. The fragment is part of the URL of a real
+   * navigation (widget.ts opens the popup with window.open), so it lands in
+   * that browsing context's history entry, is visible in its address bar,
+   * and is readable by anything that can see the tab's URL. Do not read
+   * "never sent to a server" as "nobody else can see it".
    */
   async function handleAddConnection() {
     if (!user) {
       toast.error("Please sign in first.");
+      return;
+    }
+    // The add door of the kill switch. Same flag the sync gate below reads, so
+    // one answer turns the whole feature on or off rather than half of it.
+    //
+    // This is above exportOrCredsKey on purpose. The catalogue we open is the
+    // provider's, not ours, and its private-wallet entries seal an envelope
+    // with whatever key we hand over, so refusing after the export would still
+    // put the key in a popup. planCatalogueAdd names no slug here because this
+    // button names none: it opens the whole list, which can reach a gated
+    // entry, and that is why an unnamed add is refused while the flag is off.
+    //
+    // The flag is READ HERE, at the press, not taken from the copy cached when
+    // the page loaded (OWM-T0504). A tab opened before operations turned the
+    // switch off used to keep the old answer for as long as it stayed open, so
+    // the door this gate protects stood open for exactly the customer already
+    // in the app. One round trip, and it fails closed: a read that errors
+    // leaves the gate false and this press is refused.
+    await refreshRuntimeFlags();
+    const addGate = planCatalogueAdd({ stealthSyncEnabled: isStealthSyncEnabled() });
+    if (!addGate.allowed) {
+      toast.error(addGate.message);
       return;
     }
     setOpening(true);
@@ -678,26 +712,70 @@ export function ConnectionsPage() {
       toast.error("Please sign in first.");
       return;
     }
+    // The sync door of the kill switch, READ AT THE PRESS rather than taken
+    // from the copy cached when the page loaded (OWM-T0504). A tab opened
+    // while the switch was on used to keep that answer for as long as it
+    // stayed open, so the one customer the switch failed to reach was the
+    // customer already in the app.
+    //
+    // It is here rather than only on the routed entry in handleSync because
+    // this function has a second caller: the "Try again" action on the failure
+    // toast calls it directly. One placement covers both, and it is above the
+    // credentials key export below, which is the thing that must not happen
+    // while the switch is off.
+    //
+    // Only one direction is forced, and that is deliberate. This read exists
+    // to CLOSE the door: an off flag refuses here, one round trip after the
+    // press. A flag turned back ON while a tab is open is left to the
+    // background refresh in runtimeFlags, because a customer waiting for a
+    // feature to come back is a delay, while a customer handing a key to the
+    // provider origin after the switch was thrown is an incident.
+    //
+    // Fails closed. refreshRuntimeFlags never throws and leaves the gate false
+    // on any read that errors, so a flag we cannot read refuses the scan.
+    await refreshRuntimeFlags();
+    if (!isStealthSyncEnabled()) {
+      toast.error(
+        "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",
+      );
+      return;
+    }
     setSyncingId(conn.id);
     // Clear any line left over from the previous scan before this one starts.
     // Showing the last run's "97%" while a fresh scan is at zero is a lie the
     // user has no way to detect.
     setStealthProgress(null);
     setStealthScanId(conn.id);
-    // DL-1447: durable run record. Written once we are actually about to
-    // launch the widget (both key export and token mint succeeded), so this
-    // covers every real execution attempt including one whose popup is then
-    // blocked or whose channel setup throws below. runId stays null when the
-    // insert itself failed; finishStealthSyncRun no-ops on null rather than
-    // retrying the insert, so a logging failure never blocks the sync.
+    // DL-1447: durable run record. The insert STARTS here, before the key
+    // export and the token mint, because either of those can throw: a vault
+    // that locked while this page sat open, or a token mint that fails. While
+    // it was written after them, such an execution wrote no row at all, so
+    // this table under-reported failures in exactly the cases most likely to
+    // be a real customer problem. The user saw a failed sync and an error
+    // toast, and the table that exists so a sync is verifiable from our own
+    // database showed nothing.
+    //
+    // It is deliberately NOT awaited here. Awaiting it would put one more
+    // network round trip between the user's click and the popup opening, and
+    // the popup is the thing a browser blocks as that gap grows. So the insert
+    // runs alongside the key export, and is awaited at the launch point below,
+    // or in the catch on the paths that never reach it.
+    //
+    // startStealthSyncRun never rejects: it catches its own errors and returns
+    // null. So this promise cannot become an unhandled rejection while it sits
+    // unawaited. runId stays null when the insert itself failed, and
+    // finishStealthSyncRun no-ops on null rather than retrying the insert, so
+    // a logging failure never blocks the sync and we never lose the fact that
+    // the original write failed.
     let runId: string | null = null;
+    const runIdPromise = startStealthSyncRun(user.id, conn.id);
     try {
       // Read the key immediately before use, like handleAddConnection does, so
       // a vault that locked while this page sat open fails here rather than
       // part-way through a scan.
       const credKeyB64 = await exportOrCredsKey();
       const widgetToken = await mintWidgetToken(user.id);
-      runId = await startStealthSyncRun(user.id, conn.id);
+      runId = await runIdPromise;
 
       const { channel } = await startStealthSync({
         connectionId: conn.id,
@@ -834,7 +912,14 @@ export function ConnectionsPage() {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
       toast.error(humanizeError(new Error(msg)));
-      void finishStealthSyncRun(runId, { status: "error", errorCode: "launch_failed" });
+      // The started row may still be in flight: this catch is reachable from
+      // the key export and the token mint, both of which run before runId is
+      // assigned. Resolve the insert before finishing it, or this execution
+      // records nothing at all and a real failure stays invisible in the
+      // table. Awaiting here costs nothing the user can feel: the sync has
+      // already failed and the toast is already up.
+      const startedRunId = runId ?? (await runIdPromise);
+      void finishStealthSyncRun(startedRunId, { status: "error", errorCode: "launch_failed" });
     }
   }
 
@@ -856,12 +941,20 @@ export function ConnectionsPage() {
     const subaccount = requireSubaccount();
     if (!subaccount) return;
 
+    // WHERE this press goes is decided by planSyncRoute, from the connection
+    // alone. It used to be decided inline here, and the private branch ANDed
+    // in the kill switch, so switching the private wallet feature OFF did not
+    // refuse a private connection: it fell through to the or-sync branch below
+    // and exported two vault keys for a request or-sync answers with a 400
+    // (OWM-T0530, OWM-T0528, OWM-T0533).
+    const route = planSyncRoute(conn);
+
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The old or-sync path below is for
+    // vault OPK key, and imports. The or-sync path below is for
     // Bitcoin sources (Blink/Strike/etc.) only.
-    if (conn.provider_type === "quiltt") {
+    if (route === "bank") {
       setBankSyncConnId(conn.id);
       return;
     }
@@ -870,7 +963,7 @@ export function ConnectionsPage() {
     // by or-sync: they live in the stealth store, and or-sync selects from the
     // `connections` table, which does not contain this row. Routing them below
     // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the quiltt branch above: a provider whose sync lives
+    // date. Same shape as the bank branch above: a provider whose sync lives
     // somewhere else gets sent there.
     //
     // Do NOT read the branch below as a safe fallthrough. This comment used to
@@ -881,13 +974,17 @@ export function ConnectionsPage() {
     // endpoint". It is a rejection, not an empty success, and it is raised
     // before or-sync ever selects anything.
     //
-    // DL-1047 / DL-1378: the stealth-sync entry is this app's own kill switch.
-    // The build-time default comes from VITE_STEALTH_SYNC_ENABLED (set per
-    // environment in .github/workflows/deploy.yml), and public.app_flags can
-    // override it at runtime with no redeploy. isStealthSyncEnabled() returns
-    // the effective value. A build that lands here with the switch off gives
-    // the customer the 400 above rather than a graceful skip.
-    if (isStealthSyncEnabled() && conn.is_stealth) {
+    // DL-1047 / DL-1378 / OWM-T0530: the kill switch is deliberately NOT
+    // consulted in this condition. It is read at the press inside
+    // handleStealthSync, which awaits refreshRuntimeFlags and refuses ABOVE
+    // the credentials key export. An off switch has to refuse a private
+    // connection; it must never redirect one onto the branch below, which is
+    // the only branch in this handler that exports vault keys.
+    //
+    // Routing on is_stealth alone also matches planSyncAll, which has always
+    // held private connections back from or-sync unconditionally. This path
+    // was the one that disagreed.
+    if (route === "private") {
       await handleStealthSync(conn);
       return;
     }
@@ -1247,10 +1344,26 @@ export function ConnectionsPage() {
     //
     // Stealth envelopes are sealed with the CREDENTIALS subkey
     // (orangerails-creds-v1), not the transactions subkey
-    // (orangerails-txns-v1). The reason is in buildStealthSyncInit: the add
-    // flow hands OR `credKeyB64` in the /connect fragment as
-    // `or_stealth_key_b64`, and OR's inline stealth step seals with whatever
-    // it was handed. So every stealth envelope that exists was sealed under
+    // (orangerails-txns-v1). The reason is that both paths into the widget
+    // hand it `credKeyB64`, under two different field names, and the widget
+    // seals with whatever it was handed:
+    //
+    //   ADD, by navigation. src/lib/or/widget.ts buildConnectUrl puts
+    //   `credKeyB64` in the /connect URL fragment under the field name
+    //   `cred_key`. Orange Rails reads `cred_key` out of that fragment and
+    //   passes the same value into its own inline stealth init under the
+    //   field name `or_stealth_key_b64`. Two names, one key. On this path
+    //   `or_stealth_key_b64` is THEIR name for it, not ours, which is why
+    //   tracing that string through our connect code finds nothing.
+    //
+    //   SYNC, by postMessage. src/lib/stealth/sync.ts buildStealthSyncInit
+    //   really does put `credKeyB64` under `or_stealth_key_b64`, from here.
+    //   That one is ours, and it is the defect OWM-T0414 covers: the field
+    //   named for the stealth key is carrying the credentials key.
+    //
+    // Whether the credentials key should be the sealing key at all is
+    // OWM-T0464. This describes what the code does today, not what it
+    // should do. So every stealth envelope that exists was sealed under
     // creds, while this loop was opening them with txns. An envelope only
     // opens with the key it was sealed under, so every row failed, the
     // import received an empty list, and the run summary reported zero rows

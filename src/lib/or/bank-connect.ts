@@ -97,8 +97,16 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 
 /**
  * Step 2: build the popup URL with the Quiltt session bundle embedded in
- * the fragment (so it never reaches OR's server logs), plus the ZKA keys
- * cred_key + txn_key. ZKA keys travel ONLY in the URL fragment.
+ * the fragment, plus the ZKA keys cred_key + txn_key. All of these travel
+ * ONLY in the URL fragment, never in the query string.
+ *
+ * That answers exactly one threat, and it is worth saying which one so the
+ * next reader does not take it for more. A fragment is not sent with the
+ * request, so none of this reaches the connect provider's server logs. It
+ * is NOT client-side privacy: the fragment is part of the URL of a real
+ * navigation, so it persists in the popup's history entry, is visible in
+ * its address bar, and is readable by anything with access to that tab's
+ * URL. "It never reaches their logs" is true. "Nobody can see it" is not.
  */
 export function buildBankPopupUrl(args: {
   quickConnect: BankConnectQuickConnectResponse;
