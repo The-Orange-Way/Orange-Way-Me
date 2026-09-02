@@ -165,15 +165,38 @@ export interface PlanOrKeyMaterialOptions {
  * Guessing here is how a data-loss bug hides itself for months; refusing is
  * visible on the first attempt.
  *
- * @param row       what `vault_metadata` holds for this user
+ * @param row       what `vault_metadata` holds for this user, or nullish if
+ *                  the lookup could not be read at all, which refuses
  * @param kdfSalt   the salt in force right now, used only when pinning
  * @param options   see `PlanOrKeyMaterialOptions`; required, no default
  */
 export function planOrKeyMaterial(
-  row: OrKeyMaterialRow,
+  row: OrKeyMaterialRow | null | undefined,
   kdfSalt: string,
   options: PlanOrKeyMaterialOptions,
 ): OrKeyMaterialPlan {
+  // A row that could not be read is NOT an empty row, and that difference is
+  // the whole job of this module. Read as absent, a nullish row falls through
+  // every check below and lands on derive-and-pin: a fresh key minted and
+  // pinned as authoritative over material that may already exist, success on
+  // screen, and every row sealed under the old material quietly stopping
+  // opening. So it refuses, in its own words, before anything is read off it.
+  //
+  // Refusing explicitly rather than reading the columns through optional
+  // chains is deliberate. An optional chain turns an unreadable row into an
+  // empty one, which is precisely the fall through above. The type says the
+  // argument is a row, so typed code cannot reach this; the callers it exists
+  // for are the ones that lost their types at a boundary. The cost is not
+  // symmetric either: a wrong refusal disables one namespace for one session,
+  // a wrong derivation permanently orphans everything already synced.
+  if (row === null || row === undefined) {
+    return {
+      mode: "refuse",
+      reason:
+        "The stored Orange Rails key material could not be read, so whether anything is already pinned is unknown. Deriving now could produce a key that opens none of the rows already sealed.",
+    };
+  }
+
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
