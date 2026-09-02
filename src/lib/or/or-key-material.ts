@@ -174,6 +174,25 @@ export function planOrKeyMaterial(
   kdfSalt: string,
   options: PlanOrKeyMaterialOptions,
 ): OrKeyMaterialPlan {
+  // A nullish row is a FAILED READ, and it is not the same fact as an account
+  // with nothing stored. Both arrive here looking empty, and only one of them
+  // may be derived against: deriving for an account whose row simply could not
+  // be read would pin fresh material over whatever is actually stored, which is
+  // the silent destruction the rest of this file exists to prevent.
+  //
+  // Note there is deliberately no optional chaining below this guard. If the
+  // guard is ever removed, the reads that follow throw, which is a bad answer
+  // but a loud one. Reading a nullish row through a chain would instead make it
+  // look like an empty row and fall through to derive-and-pin, which is the
+  // quiet catastrophic one. Keep the failure mode the loud way round.
+  if (row === null || row === undefined) {
+    return {
+      mode: "refuse",
+      reason:
+        "The stored Orange Rails key material could not be read, so whether anything is pinned is unknown. This is a failed read, not an account with nothing stored.",
+    };
+  }
+
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
