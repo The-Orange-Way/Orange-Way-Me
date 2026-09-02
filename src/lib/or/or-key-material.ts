@@ -117,16 +117,23 @@ export type OrKeyMaterialPlan =
  * treating a transported number as absent would send a pinned row down
  * derive-and-pin, which destroys history silently. This is a cheap contract
  * that does not depend on a column type this module cannot see.
+ *
+ * Both shapes require a SAFE integer, and the string shape must be a plain
+ * integer spelling. A bare `Number()` coercion reads "1e0" and "0x1" as 1, so
+ * it turned spellings that are not a generation into one, which is the
+ * guessing this module exists to refuse. A magnitude beyond exact integer
+ * representation is likewise refused in both shapes, rather than accepted as a
+ * number and rejected as its own string spelling. This is the rule the
+ * bookkeeping twin uses, so the two products answer the same way for the same
+ * stored value.
  */
 function readEpoch(value: number | string | null | undefined): number | null {
   if (typeof value === "number") {
-    return Number.isInteger(value) ? value : null;
+    return Number.isSafeInteger(value) ? value : null;
   }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return null;
-    const parsed = Number(trimmed);
-    return Number.isInteger(parsed) ? parsed : null;
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isSafeInteger(parsed) ? parsed : null;
   }
   return null;
 }
@@ -165,7 +172,8 @@ export interface PlanOrKeyMaterialOptions {
  * Guessing here is how a data-loss bug hides itself for months; refusing is
  * visible on the first attempt.
  *
- * @param row       what `vault_metadata` holds for this user
+ * @param row       what `vault_metadata` holds for this user. A missing row is
+ *                  an unreadable state, not an empty one, and refuses.
  * @param kdfSalt   the salt in force right now, used only when pinning
  * @param options   see `PlanOrKeyMaterialOptions`; required, no default
  */
@@ -174,6 +182,28 @@ export function planOrKeyMaterial(
   kdfSalt: string,
   options: PlanOrKeyMaterialOptions,
 ): OrKeyMaterialPlan {
+  // The row itself has to be a row. This module's contract is that it answers
+  // derive, unwrap or refuse, so the caller can disable the Orange Rails
+  // namespace and say why. Without this guard a nullish row threw a TypeError
+  // on the three reads below, which turns a diagnosable answer back into a
+  // crash: the same argument this file already makes about its own options
+  // parameter.
+  //
+  // The reads below are deliberately NOT optional-chained. Chaining them would
+  // make a missing row look identical to a row whose three columns are
+  // genuinely null, and those two states mean opposite things: a row of nulls
+  // is a fresh account with nothing to lose, a missing row is a lookup that
+  // never completed. That equivalence is what let the bookkeeping twin fall
+  // through to derive-and-pin on a failed read. Guarding first and reading
+  // directly keeps this file failing closed even if the guard is deleted.
+  if (row === null || typeof row !== "object") {
+    return {
+      mode: "refuse",
+      reason:
+        "Orange Rails key material could not be read: no vault metadata row was available, so whether anything is pinned is unknown. This is a failed read, not an account with nothing stored, and deriving here could produce a key that opens none of the rows already synced.",
+    };
+  }
+
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
