@@ -320,9 +320,18 @@ function scrubEventLoose(event: unknown): unknown {
   // reached by any of the walks below, so until this ran they were the only
   // free-form strings on an event that left unscrubbed.
   if (typeof e.message === "string") e.message = capString(scrubString(e.message), 4000);
-  const logentry = e.logentry as { message?: string } | undefined;
+  const logentry = e.logentry as { message?: string; params?: unknown[] } | undefined;
   if (logentry && typeof logentry.message === "string") {
     logentry.message = capString(scrubString(logentry.message), 4000);
+  }
+  // params is a free-form string array used for parameterised messages
+  // (Sentry event protocol: logentry = {message, params, formatted}).
+  // Nothing in this app calls captureMessage with params today, so this
+  // is closing a latent gap the same way message was, not a live leak.
+  if (logentry && Array.isArray(logentry.params)) {
+    logentry.params = logentry.params.map((p) =>
+      typeof p === "string" ? capString(scrubString(p), 4000) : p,
+    );
   }
 
   const req = e.request as Record<string, unknown> | undefined;
@@ -346,7 +355,8 @@ function scrubEventLoose(event: unknown): unknown {
   if (breadcrumbs) {
     e.breadcrumbs = breadcrumbs.map((bc) => ({
       ...bc,
-      message: typeof bc.message === "string" ? scrubString(bc.message) : bc.message,
+      message:
+        typeof bc.message === "string" ? capString(scrubString(bc.message), 4000) : bc.message,
       data: bc.data ? scrubValue(bc.data) : bc.data,
     }));
   }
