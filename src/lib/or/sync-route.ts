@@ -64,3 +64,61 @@ export function planSyncRoute(conn: SyncRouteCandidate): SyncRoute {
   if (conn.is_stealth === true) return "private";
   return "or-sync";
 }
+
+/**
+ * The two vault keys an or-sync request carries, and the only supported way to
+ * read them for a sync.
+ *
+ * WHY THIS EXISTS RATHER THAN A BARE PAIR OF EXPORT CALLS (OWM-T0544).
+ * planSyncRoute above is the rule, and the rule was tested while the ONE call
+ * to it was not. Deleting the `if (route === "private")` arm from
+ * ConnectionsPage.handleSync restores OWM-T0530 exactly: a private connection
+ * falls into the branch below it, which exports the credentials key and the
+ * transactions key and posts both to or-sync. Every test in the repo passes
+ * while it does. A guard whose call site nothing checks is a guard that
+ * survives exactly as long as nobody edits the file.
+ *
+ * So the rule moves to where the keys actually leave. This function asks
+ * planSyncRoute itself and refuses anything that is not an ordinary or-sync
+ * connection BEFORE either export runs. Delete the arm in handleSync and a
+ * private press now throws here and is caught by the handler's existing catch;
+ * it does not export a key. The caller is no longer the last line of defence.
+ *
+ * It takes the exporters as arguments rather than importing them so the rule
+ * can be proven without a vault, a browser or a DOM. That is not a testing
+ * convenience: it is the reason this guard is testable at all in a repo whose
+ * test runner is node with no DOM.
+ *
+ * The kill switch is deliberately NOT an input, for the same reason it is not
+ * an input to planSyncRoute. A private connection must be refused here in
+ * every state of the switch. Whether a private scan may proceed is decided
+ * inside handleStealthSync, on the private path, above its own key export.
+ */
+export interface OrSyncKeyExporters {
+  exportOrCredsKey: () => Promise<string>;
+  exportOrTxnsKey: () => Promise<string>;
+}
+
+export interface OrSyncKeys {
+  credentials_key: string;
+  transactions_key: string;
+}
+
+export async function exportOrSyncKeysFor(
+  conn: SyncRouteCandidate,
+  exporters: OrSyncKeyExporters,
+): Promise<OrSyncKeys> {
+  const route = planSyncRoute(conn);
+  if (route !== "or-sync") {
+    // Named in the message so a failure says which rule refused and why,
+    // rather than surfacing as a generic sync error nobody can place.
+    throw new Error(
+      `Refusing to export vault keys: this connection routes to "${route}", and or-sync is the only sync path that may receive them.`,
+    );
+  }
+  // Sequential, not Promise.all. Both come from the same vault and a locked
+  // vault must fail on the first one, before the second is attempted.
+  const credentials_key = await exporters.exportOrCredsKey();
+  const transactions_key = await exporters.exportOrTxnsKey();
+  return { credentials_key, transactions_key };
+}
