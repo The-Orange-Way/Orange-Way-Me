@@ -64,3 +64,71 @@ export function planSyncRoute(conn: SyncRouteCandidate): SyncRoute {
   if (conn.is_stealth === true) return "private";
   return "or-sync";
 }
+
+/**
+ * What a Sync press DOES once the route is known: one arm per route, all three
+ * required.
+ *
+ * OWM-T0544, and this is the point of the interface rather than an
+ * optional-callback bag. The routing rule above was tested and the CALL to it
+ * was not: deleting the four lines in ConnectionsPage.handleSync that sent a
+ * private connection to the private path failed nothing anywhere in the repo,
+ * because every test here exercises planSyncRoute directly and none of them
+ * goes through the click handler. A rule defended only in a module the defect
+ * never lived in is not defended.
+ *
+ * Making the arms a required object moves that from untested to uncompilable.
+ * A call site missing the private arm is a type error, so it fails
+ * `bunx tsc --noEmit` in the Lint + build job, which is the only check in this
+ * repository that reads ConnectionsPage.tsx at all.
+ *
+ * The honest limit: this counts the arms, it does not judge them. Wiring the
+ * private arm to the or-sync work would still typecheck. What it removes is
+ * the failure that actually happened, which was an arm going missing.
+ */
+export interface SyncPressActions {
+  /** Bank (Quiltt) connection. Opens the BankSyncDialog. Exports no or-sync key. */
+  bank: () => void | Promise<void>;
+  /**
+   * Private (stealth) connection. Hands the press to handleStealthSync, which
+   * owns the kill switch and refuses ABOVE any key export when it is off.
+   */
+  private: () => void | Promise<void>;
+  /**
+   * Ordinary Bitcoin source. THE ONLY ARM THAT EXPORTS VAULT KEYS. Nothing
+   * that is not routed "or-sync" may reach it.
+   */
+  orSync: () => void | Promise<void>;
+}
+
+/**
+ * Route the press, then run exactly one arm and wait for it.
+ *
+ * Takes the connection and the arms, and NOTHING ELSE. No kill switch
+ * parameter, for the same reason planSyncRoute has none: a switch that selects
+ * between paths can move a private connection onto the key-exporting path,
+ * which is the defect this pair of functions exists to make unwriteable. The
+ * switch decides refuse-or-scan once the press has arrived at the private arm.
+ *
+ * Returns the route it took, so a caller or a test can assert the decision and
+ * the effect separately rather than inferring one from the other.
+ */
+export async function dispatchSyncPress(
+  conn: SyncRouteCandidate,
+  actions: SyncPressActions,
+): Promise<SyncRoute> {
+  const route = planSyncRoute(conn);
+
+  if (route === "bank") {
+    await actions.bank();
+    return route;
+  }
+
+  if (route === "private") {
+    await actions.private();
+    return route;
+  }
+
+  await actions.orSync();
+  return route;
+}
