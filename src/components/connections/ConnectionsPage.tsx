@@ -64,7 +64,7 @@ import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/o
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { planSyncRoute } from "@/lib/or/sync-route";
+import { exportOrSyncKeysFor, planSyncRoute } from "@/lib/or/sync-route";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -991,8 +991,15 @@ export function ConnectionsPage() {
 
     setSyncingId(conn.id);
     try {
-      const credentials_key = await exportOrCredsKey();
-      const transactions_key = await exportOrTxnsKey();
+      // OWM-T0544. The routing rule travels with the keys rather than sitting
+      // beside them: exportOrSyncKeysFor asks planSyncRoute itself and refuses
+      // anything that is not an ordinary or-sync connection, above both
+      // exports. Deleting the private arm above no longer exports a key, it
+      // throws into the catch at the bottom of this handler.
+      const { credentials_key, transactions_key } = await exportOrSyncKeysFor(conn, {
+        exportOrCredsKey,
+        exportOrTxnsKey,
+      });
       const res = (await callProxy("or-sync", {
         subaccount_id: subaccount,
         connection_ids: [conn.id],
