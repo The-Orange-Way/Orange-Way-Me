@@ -47,6 +47,15 @@
  */
 export const CURRENT_OR_KEY_EPOCH = 1;
 
+/**
+ * The refuse reason for the one case with a customer fix: nothing pinned yet
+ * and the vault salt just rotated. Exported as a single value, not retyped,
+ * so friendly-error.test.ts drives the real producer instead of asserting
+ * against its own private copy of the sentence (T0396).
+ */
+export const OR_UNPINNED_SALT_ROTATED_REASON =
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
+
 /** The stored state, as read from `vault_metadata`. */
 export interface OrKeyMaterialRow {
   /** Orange Rails MEK sealed under the vault MEK. Null until established. */
@@ -235,8 +244,7 @@ export function planOrKeyMaterial(
     // say so.
     return {
       mode: "refuse",
-      reason:
-        "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.",
+      reason: OR_UNPINNED_SALT_ROTATED_REASON,
     };
   }
 
