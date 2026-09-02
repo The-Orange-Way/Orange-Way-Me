@@ -54,6 +54,47 @@ export type SyncRoute =
  * bank provider and is_stealth is a shape we have never seen, and inventing a
  * new answer for it here would be a behaviour change smuggled into a fix.
  */
+/**
+ * Assert, at COMPILE time, that every route except the ordinary one has
+ * already been handled and returned before this point.
+ *
+ * WHY THIS EXISTS, and it is a different hole from the one this file's header
+ * describes (OWM-T0544). The routing RULE above is defended: delete the
+ * private line in `planSyncRoute` and three tests go red. The CALL to it was
+ * not defended at all. The click handler read the route into a variable and
+ * then chose with a chain of `if`s, and deleting the four lines
+ *
+ *     if (route === "private") { await handleStealthSync(conn); return; }
+ *
+ * left every test in the repository green, raised no type error and no lint
+ * error, and restored the original defect in full: the two key exports below
+ * it then ran for a private connection. A guard whose call site nothing checks
+ * survives exactly as long as nobody edits the file.
+ *
+ * No unit test can watch that call site, because it is inside a component and
+ * nothing in this repository renders one. So the check is handed to the
+ * compiler instead, which is stronger here in the one way that counts: it
+ * cannot be left un-run, and it cannot be deleted separately from the code it
+ * defends. `tsc --noEmit` is a required check on this repository.
+ *
+ * The parameter type is the entire mechanism. At the call site `route` is
+ * `SyncRoute` narrowed by the branches that returned above it, so it is
+ * assignable here only when every other member has been dealt with. Delete a
+ * branch and the argument is still `"private" | "or-sync"`, which does not
+ * fit. Add a fourth route later and every caller fails the same way, which is
+ * exactly where you want to be told.
+ *
+ * THE HONEST LIMIT, so nobody reads more into this than it gives. It pins that
+ * each route is handled before the ordinary path is reached. It does NOT stop
+ * someone moving a key export up above the routing altogether. Nothing short
+ * of driving the real component catches that, and it is tracked separately.
+ */
+export function assertOrdinaryRoute(route: Extract<SyncRoute, "or-sync">): void {
+  // Deliberately does nothing at runtime. Everything this function is for
+  // happened in the type checker before the code was built.
+  void route;
+}
+
 export function planSyncRoute(conn: SyncRouteCandidate): SyncRoute {
   if (conn.provider_type === "quiltt") return "bank";
   // `=== true`, not a truthiness check. An absent field is an older response
