@@ -446,7 +446,7 @@ async function pinOrKeyMaterial(params: {
   // branch that reports: a retried-and-succeeded write above never reaches
   // here, so this fires only on a real, durable failure (DEV-0185). The
   // payload is deliberately tiny and carries no key material, no vault
-  // secret and no user identifier — just which kind of failure it was and
+  // secret and no user identifier, just which kind of failure it was and
   // how many attempts were made. captureMessage no-ops when Sentry has no
   // DSN configured (see src/lib/observability/sentry.ts).
   captureMessage("vault.or_pin_write_exhausted", {
@@ -482,7 +482,11 @@ function classifyPinWriteFailure(
     const message = (e as { message?: unknown }).message;
     if (typeof message === "string") {
       const m = message.toLowerCase();
-      if (m.includes("permission denied") || m.includes("row-level security") || m.includes(" rls ")) {
+      if (
+        m.includes("permission denied") ||
+        m.includes("row-level security") ||
+        m.includes(" rls ")
+      ) {
         return "permission_denied";
       }
       if (m.includes("violates") || m.includes("constraint")) {
