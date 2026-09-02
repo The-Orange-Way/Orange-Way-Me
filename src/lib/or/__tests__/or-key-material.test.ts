@@ -277,6 +277,75 @@ describe("planOrKeyMaterial", () => {
     const halfPinned: OrKeyMaterialRow = { ...PINNED, or_subkey_salt: null };
     expect(planOrKeyMaterial(halfPinned, "brand-new-salt", ROTATED).mode).toBe("refuse");
   });
+
+  /**
+   * A row that could not be read is not an account with nothing stored.
+   *
+   * The three column reads are not optional-chained, so before the guard a
+   * nullish row threw a TypeError. That fails closed, which is why this was
+   * never the silent data loss the bookkeeping twin had, but it is still a
+   * crash where the contract promises an answer: a caller handed an exception
+   * cannot disable the Orange Rails namespace and tell the customer why.
+   *
+   * Typed callers cannot produce this shape, which is the point of the cast.
+   * The callers a guard exists for are the ones that lost their types at a
+   * boundary, and a Supabase row is exactly such a boundary.
+   */
+  const planWithAnyRow = planOrKeyMaterial as unknown as (
+    row: OrKeyMaterialRow | null | undefined,
+    kdfSalt: string,
+    options: PlanOrKeyMaterialOptions,
+  ) => OrKeyMaterialPlan;
+
+  it("refuses a null row instead of throwing", () => {
+    expect(planWithAnyRow(null, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  it("refuses an undefined row instead of throwing", () => {
+    expect(planWithAnyRow(undefined, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  it("words the unreadable-row refusal apart from the partly-stored one", () => {
+    const unreadable = planWithAnyRow(null, "current-salt", UNCHANGED);
+    const partlyStored = planOrKeyMaterial({ ...EMPTY, or_key_epoch: 1 }, "current-salt", UNCHANGED);
+    if (unreadable.mode !== "refuse" || partlyStored.mode !== "refuse") {
+      throw new Error("expected both to refuse");
+    }
+    expect(unreadable.reason).toMatch(/could not be read/i);
+    expect(unreadable.reason).not.toMatch(/partly stored/i);
+    expect(partlyStored.reason).toMatch(/partly stored/i);
+    expect(partlyStored.reason).not.toMatch(/could not be read/i);
+  });
+
+  /**
+   * The guard must not close the legitimate fresh-account path. A row that
+   * genuinely holds three nulls is an account with nothing pinned yet, and it
+   * still derives.
+   */
+  it("still derives for a row whose three columns are genuinely null", () => {
+    expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED).mode).toBe("derive-and-pin");
+  });
+
+  /**
+   * Generation-reader parity with the bookkeeping twin. Both shapes require a
+   * safe integer and a string must be a plain integer spelling, so the same
+   * stored value gets the same answer in both products. Each of these reads as
+   * absent rather than being coerced into a generation, which shows up as the
+   * half-stored refusal naming the generation as the missing part.
+   */
+  it("does not accept a magnitude beyond exact integer representation as a generation", () => {
+    const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: 2 ** 53 }, "s", UNCHANGED);
+    if (plan.mode !== "refuse") throw new Error("expected refuse");
+    expect(plan.reason).toContain("its generation");
+  });
+
+  it("does not accept an exponent, hex or decimal spelling as a generation", () => {
+    for (const spelling of ["1e0", "0x1", "1.0", " "]) {
+      const plan = planOrKeyMaterial({ ...PINNED, or_key_epoch: spelling }, "s", UNCHANGED);
+      if (plan.mode !== "refuse") throw new Error(`expected refuse for ${spelling}`);
+      expect(plan.reason).toContain("its generation");
+    }
+  });
 });
 
 describe("OrNamespaceDisabledError", () => {
