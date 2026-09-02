@@ -13,12 +13,14 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { exportOrSyncKeysFor, type OrSyncKeyExporters } from "../sync-route";
+import { exportOrSyncKeysFor } from "../sync-route";
 
-function spyExporters(): OrSyncKeyExporters & {
-  exportOrCredsKey: ReturnType<typeof vi.fn>;
-  exportOrTxnsKey: ReturnType<typeof vi.fn>;
-} {
+/**
+ * Inferred, not annotated. The object has to satisfy OrSyncKeyExporters or the
+ * calls below would not compile, so an explicit annotation would only pin us
+ * to whatever shape vi.fn's Mock type happens to have this minor version.
+ */
+function spyExporters() {
   return {
     exportOrCredsKey: vi.fn(async () => "creds-key-b64"),
     exportOrTxnsKey: vi.fn(async () => "txns-key-b64"),
