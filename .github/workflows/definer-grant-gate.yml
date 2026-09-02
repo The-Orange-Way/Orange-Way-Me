@@ -1,27 +1,43 @@
 name: Definer grant gate
 
 # Refuses an EXECUTE grant to anon or to PUBLIC on any SECURITY DEFINER
-# function in the public schema. The whole check, including why it reads a live
-# database rather than the migration files, is documented in
-# scripts/check-definer-grants.sh.
+# function in the public schema. The live-database jobs, including why they
+# read a live database rather than the migration files, are documented in
+# scripts/check-definer-grants.sh. The pull-request job is a complement, not
+# a replacement, documented in scripts/check-definer-grant-migrations.sh.
 #
-# TWO JOBS, TWO ENVIRONMENTS, TWO RESULTS. Dev and production are separate jobs
-# so each reports its own pass, violation or cannot check outcome, and so each
-# binds to its own GitHub Environment: the dev run never has the production
-# credential in scope and the production run never has dev's. A job is the unit
-# an Environment binds to, which is why this is two jobs rather than two steps.
+# THREE JOBS.
 #
-# This is NOT a pull request check. A pull request cannot move a live database,
-# so a red here would be somebody else's drift blocking an unrelated merge. It
-# runs where the database can actually have changed: a push to dev, and once a
-# day for grants that arrive with no commit behind them at all.
+# definer-grants-dev and definer-grants-prod read a LIVE database and bind to
+# their own GitHub Environment (dev, prod), so the dev run never has the
+# production credential in scope and the production run never has dev's.
+# They run on the push that can actually change that database, on the daily
+# schedule (for grants that arrive with no commit behind them at all, because
+# CREATE OR REPLACE resets EXECUTE to PUBLIC even after a clean revoke), and
+# on demand. A push to dev cannot change production, so it only triggers the
+# dev job; a push to prod only triggers the prod job. Schedule and manual
+# dispatch run both, because neither is scoped to one push.
 #
-# The production job does not run on push, because a push to dev cannot change
-# the production database. It runs on the daily schedule and on demand.
+# definer-grants-pr-scan is a pull request check. It cannot see the live
+# database and it does not try to; it scans the migration files the PR
+# changes for a GRANT ... EXECUTE ... TO anon or PUBLIC and fails the PR
+# unless the function is on the same allowlist the live jobs use. This is the
+# one moment a human is still looking before the grant ever reaches a
+# database, which the live jobs cannot cover: they only ever report on a
+# grant that is already live.
+#
+# The two live-database jobs below are gated with a positive list of their
+# three intended triggers (push to their own branch, schedule, dispatch),
+# not by excluding pull_request by name, so adding a future trigger cannot
+# silently switch them on again.
 
 on:
   push:
+    branches: [dev, prod]
+  pull_request:
     branches: [dev]
+    paths:
+      - 'supabase/migrations/**'
   schedule:
     - cron: '20 13 * * *'
   workflow_dispatch:
@@ -38,6 +54,7 @@ jobs:
   definer-grants-dev:
     name: SECURITY DEFINER EXECUTE grants (live dev database)
     runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     environment: dev
     steps:
       - uses: actions/checkout@v6
@@ -54,7 +71,10 @@ jobs:
   definer-grants-prod:
     name: SECURITY DEFINER EXECUTE grants (live production database)
     runs-on: ubuntu-latest
-    if: github.event_name != 'push'
+    # A push to dev cannot move the production database, so a push event only
+    # runs this job when the push landed on prod. Schedule and manual dispatch
+    # are not scoped to a branch push, so they always run it.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/prod') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     environment: prod
     steps:
       - uses: actions/checkout@v6
@@ -64,3 +84,20 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           OW_DEFINER_PROJECT_REF: ${{ github.event.inputs.project_ref || 'tmqjusxxjjcsdgyiqbcg' }}
         run: bash scripts/check-definer-grants.sh
+
+  definer-grants-pr-scan:
+    name: SECURITY DEFINER EXECUTE grants (changed migrations)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a new anon or PUBLIC EXECUTE grant in a changed migration
+        run: |
+          bash scripts/check-definer-grant-migrations.sh \
+            "origin/${{ github.event.pull_request.base.ref }}" \
+            "${{ github.event.pull_request.head.sha }}"
