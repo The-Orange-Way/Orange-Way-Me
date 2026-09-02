@@ -277,6 +277,75 @@ describe("planOrKeyMaterial", () => {
     const halfPinned: OrKeyMaterialRow = { ...PINNED, or_subkey_salt: null };
     expect(planOrKeyMaterial(halfPinned, "brand-new-salt", ROTATED).mode).toBe("refuse");
   });
+
+  /**
+   * A row that could not be read at all.
+   *
+   * The row parameter is not optional in the type, so this shape can only
+   * arrive from a caller that lost its types at a boundary: an untyped
+   * consumer, or a lookup that yields `Row | null` and was not narrowed. That
+   * is the same class of caller the missing-options guard above exists for,
+   * and the same reason it cannot be left to the compiler.
+   *
+   * This module's contract is that it answers derive, unwrap or refuse. A
+   * TypeError is none of those, and it lands on a caller whose whole job at
+   * that moment is to disable the Orange Rails namespace and explain why.
+   */
+  const planWithUnreadableRow = planOrKeyMaterial as unknown as (
+    row: OrKeyMaterialRow | null | undefined,
+    kdfSalt: string,
+    options: PlanOrKeyMaterialOptions,
+  ) => OrKeyMaterialPlan;
+
+  it("refuses a null row rather than throwing", () => {
+    expect(planWithUnreadableRow(null, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  it("refuses an undefined row rather than throwing", () => {
+    expect(planWithUnreadableRow(undefined, "current-salt", UNCHANGED).mode).toBe("refuse");
+  });
+
+  /**
+   * The two refusals must be tellable apart in a log. "Nothing could be read"
+   * and "something was written but only part of it" call for different
+   * responses, and a shared wording would hide which one happened.
+   */
+  it("words the unreadable-row refusal apart from the partly-stored refusal", () => {
+    const unreadable = planWithUnreadableRow(null, "current-salt", UNCHANGED);
+    const partlyStored = planOrKeyMaterial(
+      { enc_or_mek_ciphertext: "sealed-blob", or_subkey_salt: null, or_key_epoch: null },
+      "current-salt",
+      UNCHANGED,
+    );
+    if (unreadable.mode !== "refuse") throw new Error("expected refuse");
+    if (partlyStored.mode !== "refuse") throw new Error("expected refuse");
+
+    expect(unreadable.reason).toMatch(/could not be read/i);
+    expect(unreadable.reason).not.toMatch(/partly stored/i);
+    expect(partlyStored.reason).toMatch(/partly stored/i);
+    expect(partlyStored.reason).not.toMatch(/could not be read/i);
+  });
+
+  /**
+   * The guard must not close the door it is standing next to. An account with
+   * all three columns null is a genuine fresh account, not a failed read, and
+   * it still has to derive or nobody can ever establish material in the first
+   * place. A guard written one step too wide would break exactly this and
+   * leave every other test in this file green.
+   */
+  it("still derives for a genuinely empty row, so the fresh-account path stays open", () => {
+    expect(
+      planOrKeyMaterial(
+        { enc_or_mek_ciphertext: null, or_subkey_salt: null, or_key_epoch: null },
+        "current-salt",
+        UNCHANGED,
+      ),
+    ).toEqual({
+      mode: "derive-and-pin",
+      saltContext: "current-salt",
+      epoch: CURRENT_OR_KEY_EPOCH,
+    });
+  });
 });
 
 describe("OrNamespaceDisabledError", () => {
