@@ -1,0 +1,159 @@
+name: Migration drift check
+
+# Merging a migration PR ships the FILES and redeploys the APP. Nothing in
+# .github/** runs the DDL. So a migration can be merged and never applied,
+# with every check green. This workflow is the thing that compares the two.
+#
+# It is deliberately NOT a step inside deploy-supabase-functions.yml. It has
+# to run whether or not that deploy succeeded, and a drift failure must never
+# be confusable with a deploy failure.
+
+on:
+  push:
+    branches: [dev, prod]
+  workflow_dispatch:
+  schedule:
+    # Daily at 13:17 UTC (09:17 EDT). A scheduled run always fires on the
+    # default branch, so the branch to compare is chosen explicitly below
+    # rather than taken from github.ref_name, which would silently compare
+    # dev's files against dev's database and never look at prod at all.
+    - cron: '17 13 * * *'
+
+# Read access to the checkout is the whole requirement. The comparison
+# authenticates to Supabase with the environment scoped access token and
+# writes no GitHub state of its own.
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-drift-${{ github.event_name == 'schedule' && 'prod' || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Compare migration files against the database ledger
+    runs-on: ubuntu-latest
+    # Binds to the GitHub Environment named for the branch being compared.
+    # Each environment defines its OWN SUPABASE_ACCESS_TOKEN, so a dev run
+    # never has the prod credential in scope (DL-1082). A scheduled run
+    # targets prod, because prod is the environment where an unapplied
+    # migration actually costs something.
+    environment: ${{ github.event_name == 'schedule' && 'prod' || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'prod' || github.ref_name }}
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      - name: Pick the branch and project ref to compare
+        id: target
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            BRANCH=prod
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          if [ "$BRANCH" = "prod" ]; then
+            echo "ref=tmqjusxxjjcsdgyiqbcg" >> "$GITHUB_OUTPUT"
+          elif [ "$BRANCH" = "dev" ]; then
+            echo "ref=bogmoovbjpvcvdqrmjgt" >> "$GITHUB_OUTPUT"
+          else
+            echo "No project is mapped for branch $BRANCH"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          REF: ${{ steps.target.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          # An empty ref means no project is mapped for this branch. Whether
+          # that is acceptable depends on HOW the run started: a manual run off
+          # a feature branch legitimately has no target, but a push to dev or
+          # prod with no mapping means the comparison did not happen while the
+          # job goes green. That case must go RED.
+          if [ -z "${REF:-}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "No project ref for $BRANCH: nothing was compared (manual run off dev/prod)." >&2
+              exit 0
+            fi
+            echo "No project ref for $BRANCH on a ${{ github.event_name }} event: the comparison did not happen. Failing loudly." >&2
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "SUPABASE_ACCESS_TOKEN is not set for the $BRANCH environment: cannot read the database ledger." >&2
+            exit 1
+          fi
+
+          # LOCAL: the version prefix of every migration file on this branch.
+          if ! ls supabase/migrations/*.sql >/dev/null 2>&1; then
+            echo "No migration files under supabase/migrations. Refusing to report 'no drift' out of an empty checkout." >&2
+            exit 1
+          fi
+          basename -a supabase/migrations/*.sql \
+            | sed -nE 's/^([0-9]{14}).*/\1/p' \
+            | sort -u > local.txt
+          if [ ! -s local.txt ]; then
+            echo "Parsed zero versions out of the migration filenames. The naming convention changed and this check can no longer tell drift from silence." >&2
+            exit 1
+          fi
+
+          # REMOTE: what the database ledger says is applied.
+          # This is also the open question this check answers on its first real
+          # run: whether the CLI is satisfied by the access token alone or wants
+          # a database password. If it wants one, this fails and says so.
+          if ! supabase migration list --project-ref "$REF" > list.txt 2> list.err; then
+            echo "supabase migration list FAILED against $REF. If the error below asks for a database password, the access token alone is not sufficient and the shape of this check has to be revisited." >&2
+            cat list.err >&2
+            exit 1
+          fi
+          echo "--- supabase migration list --project-ref $REF ---"
+          cat list.txt
+          echo "--- end ---"
+
+          # Find the REMOTE column by its header rather than by a fixed index,
+          # so a leading pipe or a reordered table does not silently shift which
+          # column is read. If the header is not found, remote.txt stays empty
+          # and the guard below fails the run.
+          awk -F'|' '
+            BEGIN { ri = 0 }
+            {
+              for (i = 1; i <= NF; i++) { f = $i; gsub(/^[ \t]+|[ \t]+$/, "", f); c[i] = f }
+              if (ri == 0) { for (i = 1; i <= NF; i++) if (toupper(c[i]) == "REMOTE") ri = i; next }
+              if (ri > 0 && c[ri] ~ /^[0-9]{14}$/) print c[ri]
+            }' list.txt | sort -u > remote.txt
+
+          if [ ! -s remote.txt ]; then
+            echo "Parsed zero applied versions out of the CLI output above. Either the ledger is genuinely empty or the output format changed. Both go RED on purpose: an unparseable table read as 'no drift' is exactly the silent success this check exists to catch." >&2
+            exit 1
+          fi
+
+          echo "branch=$BRANCH project=$REF local=$(wc -l < local.txt) remote=$(wc -l < remote.txt)"
+
+          UNAPPLIED="$(comm -23 local.txt remote.txt)"
+          UNTRACKED="$(comm -13 local.txt remote.txt)"
+
+          STATUS=0
+          if [ -n "$UNAPPLIED" ]; then
+            echo "DRIFT: migration files on $BRANCH that the database has NOT applied:" >&2
+            echo "$UNAPPLIED" >&2
+            STATUS=1
+          fi
+          if [ -n "$UNTRACKED" ]; then
+            echo "DRIFT: versions the database reports applied with no matching file on $BRANCH:" >&2
+            echo "$UNTRACKED" >&2
+            STATUS=1
+          fi
+          if [ "$STATUS" -eq 0 ]; then
+            echo "No drift: every migration file on $BRANCH is recorded in the database, and the database records nothing extra."
+          fi
+          exit "$STATUS"
