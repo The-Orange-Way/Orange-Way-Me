@@ -62,9 +62,9 @@ describe("requestOrSync", () => {
     // THE DEFECT, OWM-T0530. This is the assertion the whole module exists
     // for: not that the private handler ran instead, but that nothing left.
     const h = spyHandover();
-    await expect(requestOrSync("sub-1", [{ id: "c1", is_stealth: true }], h)).rejects.toBeInstanceOf(
-      OrSyncRouteRefusal,
-    );
+    await expect(
+      requestOrSync("sub-1", [{ id: "c1", is_stealth: true }], h),
+    ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
     expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
   });
 
