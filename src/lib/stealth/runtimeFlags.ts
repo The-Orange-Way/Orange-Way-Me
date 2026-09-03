@@ -84,8 +84,9 @@ let stopAutoRefresh: (() => void) | null = null;
  *
  * Synchronous on purpose: every existing call site reads it inline, and making
  * it async would have changed the shape of code that has nothing to do with
- * this. A caller that is about to OPEN A DOOR must await refreshRuntimeFlags()
- * first; a caller that is merely rendering may read the cached answer.
+ * this. A caller that is about to OPEN A DOOR must await
+ * refreshRuntimeFlagsForDoor() first; a caller that is merely rendering may
+ * read the cached answer.
  */
 export function isStealthSyncEnabled(): boolean {
   return stealthSyncEnabled;
@@ -191,8 +192,9 @@ export function refreshRuntimeFlagsForDoor(): Promise<void> {
  * RUNTIME_FLAG_MAX_AGE_MS. Safe to call as often as you like. Never throws.
  *
  * This is the boot call and the background tick. It is NOT the right call in
- * front of a gated door, because it can return a cached answer: use
- * refreshRuntimeFlags() there.
+ * front of a gated door: it can return a cached answer, and even when it does
+ * read it may hand back a query that started before the press. Use
+ * refreshRuntimeFlagsForDoor() there.
  */
 export async function loadRuntimeFlags(): Promise<void> {
   if (lastReadAtMs !== 0 && Date.now() - lastReadAtMs < RUNTIME_FLAG_MAX_AGE_MS) return;
