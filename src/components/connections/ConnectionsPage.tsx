@@ -954,10 +954,23 @@ export function ConnectionsPage() {
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
     // vault OPK key, and imports. The or-sync path below is for
     // Bitcoin sources (Blink/Strike/etc.) only.
-    if (route === "bank") {
-      setBankSyncConnId(conn.id);
-      return;
-    }
+    // A switch with a `never` default, not a chain of early-return ifs, and
+    // the reason is OWM-T0544. The routing rule in planSyncRoute is covered by
+    // tests; the CALL to it was covered by nothing. Deleting an arm below used
+    // to be a silent behaviour change with a fully green board. Under this
+    // shape a deleted case leaves `route` still carrying that member where the
+    // `never` assignment sits, so the assignment stops compiling and
+    // `bunx tsc --noEmit` refuses it in CI.
+    //
+    // What this does NOT do, said here so nobody reads more into it: it
+    // catches an arm that goes MISSING, not an arm rewired to the wrong
+    // handler, and it asserts nothing about what must never happen (a request
+    // carrying credentials_key for a private connection). That needs a test
+    // that exercises the dispatch.
+    switch (route) {
+      case "bank":
+        setBankSyncConnId(conn.id);
+        return;
 
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
