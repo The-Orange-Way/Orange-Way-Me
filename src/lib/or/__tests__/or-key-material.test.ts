@@ -321,7 +321,8 @@ describe("planOrKeyMaterial", () => {
    * rather than quietly decide the account has nothing stored.
    */
   it("refuses a one element array carrying a real row", () => {
-    const plan = planWithoutTypes([PINNED] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    const wrapped = [PINNED] as unknown as OrKeyMaterialRow;
+    const plan = planWithoutTypes(wrapped, "current-salt", UNCHANGED);
     expect(plan.mode).toBe("refuse");
   });
 
@@ -332,9 +333,8 @@ describe("planOrKeyMaterial", () => {
    */
   it("refuses a non-object row, so a primitive cannot reach derive-and-pin either", () => {
     for (const value of ["a-string", 0, 42, false, true]) {
-      expect(planWithoutTypes(value as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED).mode).toBe(
-        "refuse",
-      );
+      const row = value as unknown as OrKeyMaterialRow;
+      expect(planWithoutTypes(row, "current-salt", UNCHANGED).mode).toBe("refuse");
     }
   });
 
