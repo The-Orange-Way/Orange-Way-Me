@@ -75,7 +75,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled, refreshRuntimeFlags } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
 import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
@@ -613,7 +613,14 @@ export function ConnectionsPage() {
     // the door this gate protects stood open for exactly the customer already
     // in the app. One round trip, and it fails closed: a read that errors
     // leaves the gate false and this press is refused.
-    await refreshRuntimeFlags();
+    //
+    // refreshRuntimeFlagsForDoor, not the plain refresh (OWM-T0587). The plain
+    // one shares a read that is already running, so a press landing part way
+    // through the background tick used to be answered by a query issued before
+    // the press, and a flag turned off in between was invisible to this gate.
+    // The door version guarantees the answer comes from a read that started
+    // after this line was reached.
+    await refreshRuntimeFlagsForDoor();
     const addGate = planCatalogueAdd({ stealthSyncEnabled: isStealthSyncEnabled() });
     if (!addGate.allowed) {
       toast.error(addGate.message);
@@ -759,9 +766,16 @@ export function ConnectionsPage() {
     // feature to come back is a delay, while a customer handing a key to the
     // provider origin after the switch was thrown is an incident.
     //
-    // Fails closed. refreshRuntimeFlags never throws and leaves the gate false
-    // on any read that errors, so a flag we cannot read refuses the scan.
-    await refreshRuntimeFlags();
+    // Fails closed. The read never throws and leaves the gate false on any read
+    // that errors, so a flag we cannot read refuses the scan.
+    //
+    // refreshRuntimeFlagsForDoor, not the plain refresh (OWM-T0587). Joining a
+    // query that was already in flight when the customer pressed meant the
+    // answer could predate the press: the tick reads true, operations turn the
+    // switch off, the press joins the pre-flip query and the credentials key
+    // below crosses to the provider origin. The door version issues its own
+    // read, and doors pressed together still share one of them.
+    await refreshRuntimeFlagsForDoor();
     if (!isStealthSyncEnabled()) {
       toast.error(
         "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",

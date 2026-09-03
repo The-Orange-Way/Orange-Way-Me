@@ -40,11 +40,15 @@ import { supabase } from "@/integrations/supabase/client";
  *   - A BACKGROUNDED tab may have its timer throttled by the browser, so it is
  *     also re-read on visibilitychange: coming back to the tab re-reads before
  *     anything on it can be pressed.
- *   - AT A GATED DOOR the answer is not cached at all. Both doors await
- *     refreshRuntimeFlags() before they decide, so the answer that opens a door
- *     is one round trip old, whatever the tab was doing beforehand. That is the
- *     only moment where staleness could let a key cross to the provider origin,
- *     which is why it is the moment that gets the forced read.
+ *   - AT A GATED DOOR the answer is not cached at all, AND the read that
+ *     answers it is required to have STARTED AFTER the press. Both doors call
+ *     refreshRuntimeFlagsForDoor(), which never hands back a read that was
+ *     already running when the door asked. That distinction is OWM-T0587: the
+ *     plain refresh shares an in-flight read, so a press landing part way
+ *     through a background tick used to be answered by a query issued before
+ *     the press, and a flag flipped off in between was invisible to it. A door
+ *     is the only moment where staleness could let a key cross to the provider
+ *     origin, so a door pays for the strict read and nothing else does.
  *
  * Considered and rejected: a Supabase realtime subscription on the row. It
  * updates an open tab with no per-press cost, but it does not bound the answer
@@ -64,6 +68,13 @@ let stealthSyncEnabled = false;
 let lastReadAtMs = 0;
 /** A read in progress, so concurrent callers share one round trip. */
 let inFlight: Promise<void> | null = null;
+/**
+ * A fresh read queued behind an already-running one on behalf of a gated door,
+ * so several doors pressed inside one round trip share it (OWM-T0587).
+ */
+let queuedDoorRead: Promise<void> | null = null;
+/** Identifies the queued read above, so a late one cannot clear a newer slot. */
+let queuedDoorEpoch = 0;
 /** Set while the background refresh is installed, so installing twice is a no-op. */
 let stopAutoRefresh: (() => void) | null = null;
 
@@ -73,8 +84,9 @@ let stopAutoRefresh: (() => void) | null = null;
  *
  * Synchronous on purpose: every existing call site reads it inline, and making
  * it async would have changed the shape of code that has nothing to do with
- * this. A caller that is about to OPEN A DOOR must await refreshRuntimeFlags()
- * first; a caller that is merely rendering may read the cached answer.
+ * this. A caller that is about to OPEN A DOOR must await
+ * refreshRuntimeFlagsForDoor() first; a caller that is merely rendering may
+ * read the cached answer.
  */
 export function isStealthSyncEnabled(): boolean {
   return stealthSyncEnabled;
@@ -132,12 +144,57 @@ export function refreshRuntimeFlags(): Promise<void> {
 }
 
 /**
+ * Read the flag for a GATED DOOR: the answer is guaranteed to come from a query
+ * that STARTED AFTER this call (OWM-T0587). Never throws.
+ *
+ * refreshRuntimeFlags() above shares an in-flight read, which is right for a
+ * background tick and wrong for a door. The sequence that leaks: the 30 second
+ * tick issues its query, operations flip the row to false 50ms later, the
+ * customer presses Sync at 100ms and joins the pre-flip query. It resolves
+ * true, the gate opens, and the credentials key crosses to the provider origin.
+ * Only the ON to OFF direction leaks, because a read that started before an OFF
+ * to ON flip resolves false, which refuses.
+ *
+ * So a door that finds a read already running does not join it, it chains a
+ * fresh read behind it. Doors pressed while that same predecessor is running
+ * share the one chained read, so N concurrent presses cost one extra query and
+ * not N. A door that finds nothing running simply starts its own read, which
+ * already satisfies "started after the press", and pays for exactly one query.
+ *
+ * Fails closed like every other path here: the chained read is an ordinary
+ * refresh, so an error, a throw or a missing row all leave the gate false.
+ */
+export function refreshRuntimeFlagsForDoor(): Promise<void> {
+  const pending = inFlight;
+  if (!pending) return refreshRuntimeFlags();
+  if (queuedDoorRead) return queuedDoorRead;
+
+  const epoch = ++queuedDoorEpoch;
+  const chained = pending
+    // readRuntimeFlags catches its own errors, so this is belt and braces: a
+    // predecessor that somehow rejects must not stop a door getting its read.
+    .catch(() => undefined)
+    .then(() => {
+      // Released HERE rather than in a finally, because from this line onward
+      // the chained read has STARTED and so can no longer answer a later press.
+      // Leaving it in place until the read finished would hand the next door an
+      // answer from a query that began before it asked, which is the whole bug.
+      if (queuedDoorEpoch === epoch) queuedDoorRead = null;
+      return refreshRuntimeFlags();
+    });
+
+  queuedDoorRead = chained;
+  return chained;
+}
+
+/**
  * Read the runtime flag if the cached answer is older than
  * RUNTIME_FLAG_MAX_AGE_MS. Safe to call as often as you like. Never throws.
  *
  * This is the boot call and the background tick. It is NOT the right call in
- * front of a gated door, because it can return a cached answer: use
- * refreshRuntimeFlags() there.
+ * front of a gated door: it can return a cached answer, and even when it does
+ * read it may hand back a query that started before the press. Use
+ * refreshRuntimeFlagsForDoor() there.
  */
 export async function loadRuntimeFlags(): Promise<void> {
   if (lastReadAtMs !== 0 && Date.now() - lastReadAtMs < RUNTIME_FLAG_MAX_AGE_MS) return;
