@@ -101,7 +101,7 @@ describe("dispatchSync", () => {
     });
 
     expect(order).toEqual([]);
-    release!();
+    release();
     await pending;
 
     expect(order).toEqual(["handler finished", "dispatch resolved"]);
