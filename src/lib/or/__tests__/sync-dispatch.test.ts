@@ -72,8 +72,19 @@ describe("dispatchSync", () => {
   it("waits for an async handler to finish before it resolves", async () => {
     // The caller's loading state and its finally block depend on this. A
     // fire-and-forget dispatch would make a slow or failed sync look instant.
+    //
+    // `release` is declared as a callable placeholder and never as null. A
+    // `let release: (() => void) | null = null` that is only ever assigned
+    // inside a callback stays narrowed to `null` in this scope, because
+    // TypeScript does not carry an assignment made in a nested function back
+    // out to the enclosing flow. `release!()` is then a call on `never` and
+    // fails the typecheck. The throwing placeholder keeps the type callable
+    // and, unlike a non-null assertion, fails loudly and by name if the
+    // handler never ran at all.
     const order: string[] = [];
-    let release: (() => void) | null = null;
+    let release: () => void = () => {
+      throw new Error("dispatchSync never called the or-sync handler");
+    };
     const h = handlers();
     h.orSync.mockImplementation(
       () =>
