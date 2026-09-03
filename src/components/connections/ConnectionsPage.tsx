@@ -382,6 +382,15 @@ export function ConnectionsPage() {
   // OR action that throws.
   useEffect(() => {
     if (!orNamespaceDisabledReason) return;
+    // Deliberately no else-branch clearing the banner here. The reason is
+    // nulled from several places (VaultContext on unlock, subaccount change,
+    // and sign-out among them), and the OPK registration effect below also
+    // clears securingError itself, but only on runs where its own guard
+    // (subaccountId && isUnlocked) passes; it returns early otherwise and
+    // leaves securingError untouched. So the banner is not guaranteed to
+    // clear on every path that nulls the reason. If that leaves it stuck
+    // after the customer has fixed the problem, update this comment and the
+    // effects together.
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
   }, [orNamespaceDisabledReason]);
 
