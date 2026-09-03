@@ -15,6 +15,19 @@ import { AUTH_STATE_PATH } from "./tests/e2e/auth-state-path";
  * to validate the client/server schema contract. Deeper integration
  * tests land alongside the features they test.
  */
+// Specs that only work inside the `authenticated` project, because they need
+// the storage state auth.setup.ts produces. ONE list, referenced by both
+// sides: the unauthenticated projects ignore exactly this set, and the
+// authenticated project matches exactly this set. The same literal used to be
+// repeated in six places, so adding a spec and forgetting one testIgnore ran
+// it, unauthenticated, in that browser.
+const AUTHENTICATED_SPECS = /authenticated-routes\.spec\.ts|stealth-sync-run-record\.spec\.ts/;
+
+// The same set plus the setup spec, which is its own project and must never be
+// picked up by an unauthenticated one.
+const AUTHENTICATED_SPECS_AND_SETUP =
+  /authenticated-routes\.spec\.ts|stealth-sync-run-record\.spec\.ts|auth\.setup\.ts/;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30 * 1000,
@@ -51,27 +64,27 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: AUTHENTICATED_SPECS_AND_SETUP,
     },
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: AUTHENTICATED_SPECS_AND_SETUP,
     },
     {
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: AUTHENTICATED_SPECS_AND_SETUP,
     },
     {
       name: "mobile-chrome",
       use: { ...devices["Pixel 7"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: AUTHENTICATED_SPECS_AND_SETUP,
     },
     {
       name: "mobile-safari",
       use: { ...devices["iPhone 14"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: AUTHENTICATED_SPECS_AND_SETUP,
     },
     {
       // The setup project types the Supabase password, the vault
@@ -105,7 +118,7 @@ export default defineConfig({
       // leak. The harness's own page.screenshot() calls write to a
       // gitignored dir for human review and are unaffected.
       name: "authenticated",
-      testMatch: /authenticated-routes\.spec\.ts/,
+      testMatch: AUTHENTICATED_SPECS,
       use: {
         ...devices["Desktop Chrome"],
         storageState: AUTH_STATE_PATH,
