@@ -54,6 +54,10 @@ import {
   wrapOrMekWithVaultMek,
 } from "@/lib/vault";
 import {
+  readOrMaterialEvidence,
+  shouldRecordPreRecoverySalt,
+} from "@/lib/or/or-material-evidence";
+import {
   CURRENT_OR_KEY_EPOCH,
   OrNamespaceDisabledError,
   planOrKeyMaterial,
@@ -1385,6 +1389,39 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const hadNoOrMaterialBeforeRecovery =
       !data.enc_or_mek_ciphertext && !data.or_subkey_salt && data.or_key_epoch == null;
 
+    // OWM-T0631. The mark is destructive when it is wrong: planOrKeyMaterial
+    // refuses a marked row permanently, so marking an account that never had
+    // Orange Rails material disables a namespace for a hazard it was never
+    // exposed to. Write it only where there is positive evidence the account
+    // had material -- a subaccount id, or at least one sync event. Either
+    // alone is enough, both reads are RLS-scoped to this user, and neither
+    // returns key material.
+    //
+    // FAIL CLOSED MEANS MARK. Any error, timeout or unexpected shape resolves
+    // to "unknown" inside readOrMaterialEvidence, and "unknown" marks. An
+    // unnecessary mark preserves a salt this recovery was about to overwrite
+    // anyway; a skipped mark destroys the last surviving copy of the old salt
+    // and nothing later can reach it.
+    //
+    // This cannot be transactional with the UPDATE below and does not need to
+    // be: the only miss it admits is a subaccount provisioned between this
+    // read and that write, which is a far smaller window than the one it
+    // replaces.
+    const orMaterialEvidence = await readOrMaterialEvidence({
+      subaccountId: () =>
+        supabase
+          .from("user_profiles")
+          .select("or_subaccount_id")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+      syncEvents: () =>
+        supabase.from("sync_events").select("id").eq("user_id", user.id).limit(1),
+    });
+    const markPreRecoverySalt = shouldRecordPreRecoverySalt({
+      hadNoOrMaterialBeforeRecovery,
+      evidence: orMaterialEvidence,
+    });
+
     const mek = await importMekFromRaw(mekBytes);
     const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
     // Recovery always promotes the vault to the current best KDF.
@@ -1450,9 +1487,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       recovery_ciphertext: freshRecovery,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
-      // See hadNoOrMaterialBeforeRecovery above. Marks the row so the next
-      // unlock refuses instead of silently re-pinning under this salt.
-      ...(hadNoOrMaterialBeforeRecovery ? { or_subkey_salt: data.kdf_salt } : {}),
+      // See markPreRecoverySalt above. Marks the row so the next unlock
+      // refuses instead of silently re-pinning under this salt. Written only
+      // for a row that had no OR material AND has evidence it once did, or
+      // whose evidence could not be read.
+      ...(markPreRecoverySalt ? { or_subkey_salt: data.kdf_salt } : {}),
     };
     // Only include enc_private_key in the payload when we had one to
     // re-wrap. Leaving the key out of the UPDATE preserves the existing
