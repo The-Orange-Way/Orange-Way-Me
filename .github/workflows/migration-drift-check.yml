@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     # Binds to the GitHub Environment named for the branch being compared.
     # Each environment defines its OWN SUPABASE_ACCESS_TOKEN, so a dev run
-    # never has the prod credential in scope (DL-1082). A scheduled run
+    # never has the prod credential in scope. A scheduled run
     # targets prod, because prod is the environment where an unapplied
     # migration actually costs something.
     environment: ${{ github.event_name == 'schedule' && 'prod' || github.ref_name }}
