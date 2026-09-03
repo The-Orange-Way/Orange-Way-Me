@@ -300,6 +300,44 @@ describe("planOrKeyMaterial", () => {
   });
 
   /**
+   * The empty array is not an exotic input, it is the ordinary one.
+   * supabase-js returns `data` as an array for a plain `.select()` and as an
+   * object or null only under `.single()` or `.maybeSingle()`, so a missing
+   * row arrives here as `[]`. Under a `== null` guard it passed straight
+   * through, every column read as undefined, that is the all-absent shape,
+   * and the answer was derive-and-pin: a key minted and pinned as
+   * authoritative over rows it cannot open. Books pins the same shapes on
+   * OWB-T0138 against the same predicate.
+   */
+  it("refuses an empty array, which is what a missing row looks like from a plain select", () => {
+    const plan = planWithoutTypes([] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    expect(plan.mode).toBe("refuse");
+  });
+
+  /**
+   * A populated array is no safer than an empty one, which is why this is a
+   * separate assertion and not a variant of the one above. `[PINNED]` carries
+   * a complete row, and reading a column off the ARRAY still yields undefined,
+   * so the all-absent shape and the derive-and-pin answer are identical.
+   */
+  it("refuses a one-element array rather than reading columns off the array itself", () => {
+    const plan = planWithoutTypes(
+      [PINNED] as unknown as OrKeyMaterialRow,
+      "current-salt",
+      UNCHANGED,
+    );
+    expect(plan.mode).toBe("refuse");
+  });
+
+  it("refuses any non-object row, because those read as all-absent too", () => {
+    for (const row of ["a-string", 0, 42, false, true]) {
+      expect(
+        planWithoutTypes(row as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED).mode,
+      ).toBe("refuse");
+    }
+  });
+
+  /**
    * The two refusals send an operator to different places. "Could not be
    * read" means look at access and at the request; "partly stored" means
    * look at the columns. If either sentence drifts into the other's
