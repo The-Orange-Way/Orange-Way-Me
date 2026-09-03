@@ -237,4 +237,55 @@ describe("posthog scrubber", () => {
 
     expect(r).toBeNull();
   });
+
+  it("matches pin across an acronym boundary and a digit boundary (OWM-T0616)", () => {
+    const r = event({
+      userPIN: "1234",
+      PINHash: "abcd",
+      pin2: "1234",
+      // Controls: these must still survive, same as the plain-token test.
+      shipping_method: "post",
+      mapping_version: 3,
+      spinner_shown: true,
+    });
+
+    expect(r?.properties.userPIN).toBe("[redacted]");
+    expect(r?.properties.PINHash).toBe("[redacted]");
+    expect(r?.properties.pin2).toBe("[redacted]");
+
+    expect(r?.properties.shipping_method).toBe("post");
+    expect(r?.properties.mapping_version).toBe(3);
+    expect(r?.properties.spinner_shown).toBe(true);
+  });
+
+  it("records a drop with no event content or error text when scrubbing throws (OWM-T0616)", () => {
+    resetScrubberDroppedEventCount();
+    expect(getScrubberDroppedEventCount()).toBe(0);
+
+    const hostile: Record<string, unknown> = {};
+    Object.defineProperty(hostile, "boom", {
+      enumerable: true,
+      get() {
+        throw new Error("property access failed: super-secret-xpub-value");
+      },
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const r = scrubPostHogEvent({
+      uuid: "00000000-0000-0000-0000-000000000000",
+      event: "test",
+      properties: hostile,
+    } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
+
+    expect(r).toBeNull();
+    expect(getScrubberDroppedEventCount()).toBe(1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const warned = warnSpy.mock.calls[0]?.[0];
+    expect(warned).toBe("posthog-scrubber: dropped an event because scrubbing threw");
+    // The signal must never carry the caught error's text.
+    expect(String(warned)).not.toContain("super-secret-xpub-value");
+
+    warnSpy.mockRestore();
+  });
 });
