@@ -20,11 +20,23 @@ name: Definer grant gate
 #
 # definer-grants-pr-scan is a pull request check. It cannot see the live
 # database and it does not try to; it scans the migration files the PR
-# changes for a GRANT ... EXECUTE ... TO anon or PUBLIC and fails the PR
-# unless the function is on the same allowlist the live jobs use. This is the
-# one moment a human is still looking before the grant ever reaches a
-# database, which the live jobs cannot cover: they only ever report on a
-# grant that is already live.
+# changes and enforces TWO rules, both documented in
+# scripts/check-definer-grant-migrations.sh:
+#   1. no added GRANT ... EXECUTE ... TO anon or PUBLIC, unless the function
+#      is on the same allowlist the live jobs use;
+#   2. no added CREATE or CREATE OR REPLACE of one of the hardened SECURITY
+#      DEFINER functions unless the same file re-applies its REVOKE EXECUTE
+#      FROM PUBLIC and anon, because Postgres resets EXECUTE to PUBLIC on a
+#      replaced function with no GRANT line for rule 1 to find.
+# This is the one moment a human is still looking before the change ever
+# reaches a database, which the live jobs cannot cover: they only ever report
+# on a grant that is already live, on the push to that branch or on the next
+# daily run.
+#
+# The job self-tests both rules before it scans anything. A rule that has been
+# edited into always passing looks exactly like a clean pull request, so the
+# fixtures run first and the job fails if either rule stops going red on the
+# thing it exists for.
 #
 # The two live-database jobs below are gated with a positive list of their
 # three intended triggers (push to their own branch, schedule, dispatch),
@@ -86,7 +98,7 @@ jobs:
         run: bash scripts/check-definer-grants.sh
 
   definer-grants-pr-scan:
-    name: SECURITY DEFINER EXECUTE grants (changed migrations)
+    name: 'SECURITY DEFINER (changed migrations): no anon or PUBLIC EXECUTE grant, no replace without re-revoke'
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
@@ -96,7 +108,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Refuse a new anon or PUBLIC EXECUTE grant in a changed migration
+      - name: Self-test both migration scan rules
+        run: bash scripts/check-definer-grant-migrations.sh --self-test
+
+      - name: Refuse a new anon or PUBLIC EXECUTE grant, or a hardened definer function replaced without its revoke
         run: |
           bash scripts/check-definer-grant-migrations.sh \
             "origin/${{ github.event.pull_request.base.ref }}" \
