@@ -197,7 +197,17 @@ export function planOrKeyMaterial(
   // look at the columns. This one means the row never arrived, and the first
   // move is to look at access and at the request. Two failures that need
   // different first moves must not share a sentence.
-  if ((row as OrKeyMaterialRow | null | undefined) == null) {
+  //
+  // The test is a plain-object test rather than `== null`, because `== null`
+  // is exactly two values and the shapes that arrive at a lost-types boundary
+  // are not. supabase-js returns `data` as an ARRAY for a plain `.select()`,
+  // and as an object or null only when the caller adds `.single()` or
+  // `.maybeSingle()`. So the row that is genuinely MISSING arrives as `[]`,
+  // which `== null` waves through: every column then reads as undefined, that
+  // is the all-absent shape, and with the salt unchanged the answer would be
+  // derive-and-pin. Non-object primitives behave the same way.
+  const rowValue = row as unknown;
+  if (rowValue === null || typeof rowValue !== "object" || Array.isArray(rowValue)) {
     return {
       mode: "refuse",
       reason:
