@@ -997,9 +997,22 @@ export function ConnectionsPage() {
     // Routing on is_stealth alone also matches planSyncAll, which has always
     // held private connections back from or-sync unconditionally. This path
     // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
+      case "private":
+        await handleStealthSync(conn);
+        return;
+
+      case "or-sync":
+        // Falls out of the switch into the or-sync request below, which is the
+        // only branch in this handler that exports vault keys.
+        break;
+
+      default: {
+        // Unreachable while SyncRoute has three members and all three are
+        // handled above. Its job is to stop compiling the moment that stops
+        // being true, whether a member is added or an arm is deleted.
+        const unreachable: never = route;
+        throw new Error(`Unhandled sync route: ${String(unreachable)}`);
+      }
     }
 
     setSyncingId(conn.id);
