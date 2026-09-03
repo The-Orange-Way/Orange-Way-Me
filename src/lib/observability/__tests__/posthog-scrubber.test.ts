@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SCRUB_DEPTH, scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import {
+  MAX_SCRUB_DEPTH,
+  getScrubberDroppedEventCount,
+  resetScrubberDroppedEventCount,
+  scrubPostHogEvent,
+} from "@/lib/observability/posthog-scrubber";
 
 // Minimal stand-in for posthog-js's CaptureResult: the scrubber
 // only touches .properties so the rest of the shape can be ignored
