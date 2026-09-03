@@ -93,7 +93,7 @@ jobs:
   definer-grants-pr-scan:
     # The name states both rules, so a red run is self-explaining in the check
     # list without opening the job summary to find out which rule fired.
-    name: Changed migrations: no new anon/PUBLIC EXECUTE, hardened re-creates re-revoke
+    name: 'Changed migrations: no new anon/PUBLIC EXECUTE, hardened re-creates re-revoke'
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
