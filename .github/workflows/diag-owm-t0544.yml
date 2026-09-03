@@ -1,0 +1,134 @@
+name: DIAG OWM-T0544
+
+# TEMPORARY. Delete this file once the failing stage is named.
+#
+# It runs only on branches under diag/, so it cannot affect dev, prod, or any
+# open pull request. It duplicates the exact commands the combined
+# "Lint + build" job runs, one per job, so that a red check names a stage
+# instead of naming a whole pipeline.
+
+on:
+  push:
+    branches:
+      - 'diag/**'
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: DIAG 1 typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+
+  lint:
+    name: DIAG 2 lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+
+  build:
+    name: DIAG 3 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+  test:
+    name: DIAG 4 test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+
+  test-or:
+    name: DIAG 5 test src/lib/or only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx vitest run src/lib/or
+
+  lint-changed:
+    name: DIAG 6 lint the changed paths only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bunx eslint src/lib/or src/components/connections/ConnectionsPage.tsx
+
+  tsc-scope:
+    name: DIAG 7 tsc errors in the changed files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Fail only if a tsc error names a file this change touches
+        run: |
+          set -uo pipefail
+          bunx tsc --noEmit > tsc.log 2>&1 || true
+          echo "total tsc error lines: $(grep -c 'error TS' tsc.log || true)"
+          if grep -E 'or-sync-request|ConnectionsPage|sync-route|sync-all' tsc.log; then
+            echo "::error::tsc errors name a file this change touches (printed above)"
+            exit 1
+          fi
+          echo "no tsc error names a file this change touches"
+
+  tsc-code:
+    name: DIAG 8 tsc code
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        code:
+          - TS2345
+          - TS2322
+          - TS2554
+          - TS2339
+          - TS2304
+          - TS6133
+          - TS7006
+          - TS2741
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Fail if this compiler error code appears
+        run: |
+          set -uo pipefail
+          bunx tsc --noEmit > tsc.log 2>&1 || true
+          if grep -E "error ${{ matrix.code }}" tsc.log; then
+            echo "::error::tsc reported ${{ matrix.code }}"
+            exit 1
+          fi
+          echo "no ${{ matrix.code }}"
