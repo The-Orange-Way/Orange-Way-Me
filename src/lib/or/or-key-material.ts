@@ -174,6 +174,28 @@ export function planOrKeyMaterial(
   kdfSalt: string,
   options: PlanOrKeyMaterialOptions,
 ): OrKeyMaterialPlan {
+  // Read defensively for exactly the reason `options?.` is read defensively
+  // further down. The parameter is required in the type, so a nullish row is
+  // unreachable from typed code, and the callers this guard exists for are
+  // the ones that lost their types at a boundary. A row is nullish when the
+  // read that should have produced it did not: a denied row, an aborted
+  // request, a lookup that matched nothing. Without this guard every one of
+  // those becomes a TypeError on the first property access, which turns a
+  // diagnosable answer into a crash.
+  //
+  // Worded apart from the half-stored refusal below on purpose. That one
+  // means the row was READ and found incomplete, and the first move is to
+  // look at the columns. This one means the row never arrived, and the first
+  // move is to look at access and at the request. Two failures that need
+  // different first moves must not share a sentence.
+  if ((row as OrKeyMaterialRow | null | undefined) == null) {
+    return {
+      mode: "refuse",
+      reason:
+        "Orange Rails key material could not be read for this account, so what is stored is unknown and deriving now could produce a key that opens nothing.",
+    };
+  }
+
   const hasCiphertext =
     typeof row.enc_or_mek_ciphertext === "string" && row.enc_or_mek_ciphertext.length > 0;
   const hasSalt = typeof row.or_subkey_salt === "string" && row.or_subkey_salt.length > 0;
