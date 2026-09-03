@@ -99,9 +99,18 @@ jobs:
             echo "No migration files under supabase/migrations. Refusing to report 'no drift' out of an empty checkout." >&2
             exit 1
           fi
-          basename -a supabase/migrations/*.sql \
-            | sed -nE 's/^([0-9]{14}).*/\1/p' \
-            | sort -u > local.txt
+          basename -a supabase/migrations/*.sql | sort -u > local_files.txt
+          sed -nE 's/^([0-9]{14}).*/\1/p' local_files.txt | sort -u > local.txt
+          # A filename that does not begin with a 14-digit version is dropped by
+          # the parse above and never reaches the comparison at all. The guard
+          # below only fires when EVERY name is dropped, so a single misnamed
+          # file would be invisible in exactly the way an unreadable ledger cell
+          # is. Collect the names here and report them at the END of the run.
+          # Deliberately not an early exit: this runs before the CLI call, and
+          # the first real run of this workflow is what settles whether the
+          # access token alone can read the ledger. A filename must not be what
+          # stops us finding that out.
+          grep -vE '^[0-9]{14}' local_files.txt > local_bad.txt || true
           if [ ! -s local.txt ]; then
             echo "Parsed zero versions out of the migration filenames. The naming convention changed and this check can no longer tell drift from silence." >&2
             exit 1
@@ -124,20 +133,43 @@ jobs:
           # so a leading pipe or a reordered table does not silently shift which
           # column is read. If the header is not found, remote.txt stays empty
           # and the guard below fails the run.
+          rm -f remote_bad.txt
           awk -F'|' '
             BEGIN { ri = 0 }
             {
               for (i = 1; i <= NF; i++) { f = $i; gsub(/^[ \t]+|[ \t]+$/, "", f); c[i] = f }
               if (ri == 0) { for (i = 1; i <= NF; i++) if (toupper(c[i]) == "REMOTE") ri = i; next }
-              if (ri > 0 && c[ri] ~ /^[0-9]{14}$/) print c[ri]
+              if (ri > NF) next
+              v = c[ri]
+              # A blank REMOTE cell is the CLI stating that this version is not
+              # applied. That is real data, and the comparison below reports it.
+              if (v == "") next
+              # Table border rows are decoration, never data.
+              if (v ~ /^[-+= ]+$/) next
+              if (v ~ /^[0-9]{14}$/) { print v; next }
+              # Anything else is a REMOTE value we could not read. Do NOT drop
+              # it. A ledger entry that is not a 14-digit version is the
+              # fingerprint of a hand-written schema_migrations row, which is
+              # the exact fault this check exists to surface.
+              print v > "remote_bad.txt"
             }' list.txt | sort -u > remote.txt
+
+          # Reported before the comparison, not alongside it. A ledger read that
+          # is only partly parsed would show genuinely applied versions as
+          # unapplied, so drift output computed over it is misleading rather
+          # than merely incomplete. Separate message from both drift directions.
+          if [ -s remote_bad.txt ]; then
+            echo "UNREADABLE LEDGER VALUES: the CLI reported REMOTE entries that are not 14-digit versions. A hand-written schema_migrations row is the usual cause. Nothing is compared while these are unread. Offending values:" >&2
+            sort -u remote_bad.txt >&2
+            exit 1
+          fi
 
           if [ ! -s remote.txt ]; then
             echo "Parsed zero applied versions out of the CLI output above. Either the ledger is genuinely empty or the output format changed. Both go RED on purpose: an unparseable table read as 'no drift' is exactly the silent success this check exists to catch." >&2
             exit 1
           fi
 
-          echo "branch=$BRANCH project=$REF local=$(wc -l < local.txt) remote=$(wc -l < remote.txt)"
+          echo "branch=$BRANCH project=$REF local=$(wc -l < local.txt) remote=$(wc -l < remote.txt) local_unparsed=$(wc -l < local_bad.txt)"
 
           UNAPPLIED="$(comm -23 local.txt remote.txt)"
           UNTRACKED="$(comm -13 local.txt remote.txt)"
@@ -151,6 +183,11 @@ jobs:
           if [ -n "$UNTRACKED" ]; then
             echo "DRIFT: versions the database reports applied with no matching file on $BRANCH:" >&2
             echo "$UNTRACKED" >&2
+            STATUS=1
+          fi
+          if [ -s local_bad.txt ]; then
+            echo "NOT COMPARED: migration files on $BRANCH whose name does not begin with a 14-digit version. These were excluded from every count above, so the comparison is incomplete until they are renamed:" >&2
+            cat local_bad.txt >&2
             STATUS=1
           fi
           if [ "$STATUS" -eq 0 ]; then
