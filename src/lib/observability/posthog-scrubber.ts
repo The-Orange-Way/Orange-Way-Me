@@ -91,13 +91,23 @@ const SCRUB_VALUE_KEY_HINTS = [
 const SCRUB_VALUE_KEY_EXACT = new Set(["pin"]);
 
 /**
- * Split a property key into lowercase word tokens, on both separator
- * characters and camelCase boundaries, so "userPin", "user_pin" and
- * "pin-hash" all yield a bare "pin" token.
+ * Split a property key into lowercase word tokens, on separator
+ * characters, camelCase boundaries, acronym boundaries and digit
+ * boundaries, so "userPin", "user_pin", "pin-hash", "userPIN",
+ * "PINHash" and "pin2" all yield a bare "pin" token.
+ *
+ * Order matters. The acronym-boundary rule (an uppercase run followed
+ * by a capitalised word, e.g. "PINHash") has to run BEFORE the plain
+ * camelCase rule, or the camelCase rule's own insertion would already
+ * have broken the run apart in a way the acronym rule no longer
+ * recognises.
  */
 function keyTokens(key: string): string[] {
   return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean)
     .map((t) => t.toLowerCase());
@@ -249,6 +259,26 @@ function scrubProperties(
 
 import type { CaptureResult } from "posthog-js";
 
+// Counts events dropped by the fail-closed catch path below, since page
+// load. Carries no event content and no caught error text by design: a
+// caught Error's message can embed the property value that caused it,
+// and this counter (plus the console warning next to it) exists so a
+// scrubbing bug is visible without ever repeating the payload it is
+// meant to suppress.
+let scrubberDroppedEventCount = 0;
+
+/** Read the current fail-closed drop count. Exported for tests and for
+ * anyone wiring it into a health metric later; it is not itself sent
+ * anywhere today. */
+export function getScrubberDroppedEventCount(): number {
+  return scrubberDroppedEventCount;
+}
+
+/** Test-only: reset the counter between cases. */
+export function resetScrubberDroppedEventCount(): void {
+  scrubberDroppedEventCount = 0;
+}
+
 /**
  * Exported as the `before_send` argument to `posthog.init`. PostHog
  * types this as `(event: CaptureResult | null) => CaptureResult | null`.
@@ -280,6 +310,15 @@ export function scrubPostHogEvent(event: CaptureResult | null): CaptureResult | 
     // cleaned and which were not, so the event is dropped rather than sent.
     // Letting the throw propagate, or returning the original event, would
     // ship exactly the payload this scrubber exists to stop.
+    //
+    // Signal only: no event content, no caught error text. A thrown
+    // Error's message can carry the property value that caused it, and
+    // console output is itself captured as a breadcrumb by the
+    // error-reporting path, so logging the error object would move the
+    // exact payload this file exists to suppress from one telemetry sink
+    // into another.
+    scrubberDroppedEventCount += 1;
+    console.warn("posthog-scrubber: dropped an event because scrubbing threw");
     return null;
   }
 }
