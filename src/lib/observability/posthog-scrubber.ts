@@ -52,7 +52,56 @@ const SCRUB_VALUE_KEY_HINTS = [
   "notes",
   "name",
   "token",
+  // Key-material names below. Each is a SUBSTRING hint, chosen per name
+  // because none has a plausible innocuous carrier as a property key.
+  //
+  // "password" above does NOT cover "passphrase": neither string contains
+  // the other, so the passphrase case was reaching analytics unredacted.
+  "passphrase",
+  // BIP39 raw entropy.
+  "entropy",
+  // BIP32 extended PRIVATE key. "xprv" is the real serialization prefix and
+  // "xpriv" is the common informal spelling. Neither contains the other, and
+  // the "xpub" hint above matches neither, so both are listed. Listing only
+  // the informal spelling would leave the actual on-the-wire prefix
+  // uncovered.
+  "xpriv",
+  "xprv",
+  // KDF salt. Has to stay a substring because it arrives as "kdf_salt" and
+  // "password_salt" as well as bare "salt". The only English words that
+  // contain it (asphalt, basalt) are not plausible analytics property keys.
+  "salt",
+  // AEAD nonce. A CSP nonce also matches this hint, and redacting one in
+  // analytics costs nothing. That same trade would NOT be acceptable in
+  // sentry.ts, which is used to debug CSP violations.
+  "nonce",
 ];
+
+/**
+ * Key names matched as WHOLE TOKENS, case-insensitively, rather than by
+ * substring. A name belongs here when the bare substring would match
+ * ordinary, harmless keys.
+ *
+ * "pin" is the case that forced this second mechanism to exist: it is a
+ * substring of shipping, mapping, typing, grouping, pinned and spinner, so
+ * as a substring hint it would blank a large set of unrelated analytics
+ * properties. Tokenising the key first keeps user_pin, userPin and pin_hash
+ * covered while leaving those alone.
+ */
+const SCRUB_VALUE_KEY_EXACT = new Set(["pin"]);
+
+/**
+ * Split a property key into lowercase word tokens, on both separator
+ * characters and camelCase boundaries, so "userPin", "user_pin" and
+ * "pin-hash" all yield a bare "pin" token.
+ */
+function keyTokens(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => t.toLowerCase());
+}
 
 // PostHog reserved auto-capture properties that carry quasi-identifiers.
 // These are matched by exact key (with the leading $) and replaced with
@@ -112,7 +161,8 @@ function scrubUrl(input: unknown): unknown {
 
 function shouldScrubKey(key: string): boolean {
   const k = key.toLowerCase();
-  return SCRUB_VALUE_KEY_HINTS.some((hint) => k.includes(hint));
+  if (SCRUB_VALUE_KEY_HINTS.some((hint) => k.includes(hint))) return true;
+  return keyTokens(key).some((t) => SCRUB_VALUE_KEY_EXACT.has(t));
 }
 
 // Max recursion depth into nested objects/arrays. PostHog event
@@ -202,22 +252,34 @@ import type { CaptureResult } from "posthog-js";
 /**
  * Exported as the `before_send` argument to `posthog.init`. PostHog
  * types this as `(event: CaptureResult | null) => CaptureResult | null`.
- * We always return the event (with scrubbed properties) rather than
- * dropping; dropping silently would hide a bug where a route renders
- * sensitive data in the URL.
+ * On the normal path we return the event with scrubbed properties rather
+ * than dropping it; dropping silently would hide a bug where a route
+ * renders sensitive data in the URL.
+ *
+ * The one case where we DO drop is a scrubbing failure. See the catch
+ * below: that path fails closed on purpose.
  */
 export function scrubPostHogEvent(event: CaptureResult | null): CaptureResult | null {
   if (!event) return event;
-  const properties = scrubProperties(event.properties as Record<string, unknown> | undefined) ?? {};
-  // Documented, reliable switch that tells PostHog's server-side enricher
-  // to skip GeoIP for this event. Nulling $ip alone can fall back to the
-  // connection's socket IP; this flag closes that gap. The socket IP still
-  // transiently reaches the collector on a direct browser connection by
-  // construction - a first-party proxy is the only way to stop that and is
-  // tracked separately.
-  properties.$geoip_disable = true;
-  return {
-    ...event,
-    properties,
-  };
+  try {
+    const properties =
+      scrubProperties(event.properties as Record<string, unknown> | undefined) ?? {};
+    // Documented, reliable switch that tells PostHog's server-side enricher
+    // to skip GeoIP for this event. Nulling $ip alone can fall back to the
+    // connection's socket IP; this flag closes that gap. The socket IP still
+    // transiently reaches the collector on a direct browser connection by
+    // construction - a first-party proxy is the only way to stop that and is
+    // tracked separately.
+    properties.$geoip_disable = true;
+    return {
+      ...event,
+      properties,
+    };
+  } catch {
+    // FAIL CLOSED. If scrubbing threw we cannot know which properties were
+    // cleaned and which were not, so the event is dropped rather than sent.
+    // Letting the throw propagate, or returning the original event, would
+    // ship exactly the payload this scrubber exists to stop.
+    return null;
+  }
 }
