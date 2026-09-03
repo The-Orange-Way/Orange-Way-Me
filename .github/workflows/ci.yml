@@ -384,3 +384,139 @@ jobs:
             exit 1
           fi
           echo "All $COUNT non-merge PR commit(s) carry a valid Seat: trailer."
+
+  secdef-acl-guard:
+    name: SECURITY DEFINER function ACL guard
+    runs-on: ubuntu-latest
+    # Why this job exists. Four SECURITY DEFINER functions in this schema had
+    # their EXECUTE grant revoked from PUBLIC and anon by two forward-revoke
+    # migrations (20260821000000 and 20260824230000). Postgres resets EXECUTE
+    # on a function to PUBLIC every time that function is replaced, and PUBLIC
+    # includes anon, so a later CREATE OR REPLACE quietly undoes the revoke.
+    # has_role is the sharpest case: it is SECURITY DEFINER, returns boolean
+    # and is reachable over PostgREST RPC, so an unauthenticated caller could
+    # ask whether an arbitrary user id holds an arbitrary role.
+    #
+    # Until those two files were stamped as applied, the only thing standing in
+    # the way was that they were unstamped: any replay or repair would have run
+    # them again. Stamped, the runner will never replay them, so nothing at all
+    # reasserts the revoke. 20260821000000's own header says "the proacl CI gate
+    # enforces the same invariant". Checked at dev HEAD before writing this: no
+    # such gate existed anywhere under .github. The sentence described a control
+    # that was never built. This is that control.
+    #
+    # Shape: pure text over the migration files in the checkout. No database
+    # access, no credentials, no network, and it fails BEFORE a reset can reach
+    # a deployed environment. A live ACL probe would need prod read, which most
+    # seats do not hold, and it could not run on a pull request at all.
+    #
+    # LIMITS, stated here rather than discovered later:
+    #  - Files at or below BASELINE_CUTOFF are exempt, because several of them
+    #    legitimately create these functions and predate the revokes. They are
+    #    counted and listed in the job summary, never silently skipped.
+    #  - A new migration deliberately given a version prefix at or below the
+    #    cutoff would be exempt. Backdating a migration breaks ordering for
+    #    other reasons and the duplicate-prefix guard above already fights it,
+    #    but this check does not catch it.
+    #  - The REVOKE must be on one line, in the canonical form the two
+    #    forward-revoke files use. A REVOKE split over several lines fails this
+    #    gate. That is deliberate: a security check that cannot parse a form
+    #    should fail closed, and the error message says exactly what to write.
+    env:
+      # Version prefix of the newest migration that predates this guard. Files
+      # at or below it may create these functions without re-revoking. Do NOT
+      # raise this to make a new migration pass. Add the REVOKE instead.
+      BASELINE_CUTOFF: '20260824230000'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Refuse a function replace that leaves EXECUTE open to anon
+        shell: bash
+        run: |
+          set -uo pipefail
+          MIG_DIR="supabase/migrations"
+
+          # Fail loudly rather than green when there is nothing to inspect.
+          # "examined 66 files, none offending" and "examined nothing because
+          # the path is wrong" must not produce the same result.
+          if [ ! -d "$MIG_DIR" ]; then
+            echo "::error::${MIG_DIR} does not exist -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          COUNT=$(ls "$MIG_DIR"/*.sql 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No .sql files found under ${MIG_DIR} -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          # The four functions the forward-revoke migrations hardened.
+          HARDENED="has_role advance_household_rotation_job expire_time_boxed_household_roles purge_expired_old_household_key_wraps"
+
+          FAILED=0
+          HITS=0
+          EXEMPT=0
+
+          for F in "$MIG_DIR"/*.sql; do
+            BASE=$(basename "$F")
+            VERSION=${BASE%%_*}
+
+            for FN in $HARDENED; do
+              if ! grep -Eiq "CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?FUNCTION[[:space:]]+(public\.)?${FN}[[:space:]]*\(" "$F"; then
+                continue
+              fi
+              HITS=$((HITS + 1))
+
+              # Every migration filename in this repo starts with a 14 digit
+              # version. One that does not cannot be compared against the
+              # cutoff, so it is enforced rather than exempted.
+              if printf '%s' "$VERSION" | grep -qE '^[0-9]{14}$' && ! [[ "$VERSION" > "$BASELINE_CUTOFF" ]]; then
+                EXEMPT=$((EXEMPT + 1))
+                echo "exempt (predates the guard) ${BASE}: public.${FN}"
+                continue
+              fi
+
+              if grep -Eiq "REVOKE[[:space:]]+EXECUTE[[:space:]]+ON[[:space:]]+FUNCTION[[:space:]]+(public\.)?${FN}[[:space:]]*\(.*FROM[[:space:]]+PUBLIC[[:space:]]*,[[:space:]]*anon" "$F"; then
+                echo "ok ${BASE}: public.${FN} is replaced and re-revoked in the same file"
+                continue
+              fi
+
+              FAILED=1
+              {
+                echo "### :rotating_light: \`${FN}\` replaced without re-revoking EXECUTE"
+                echo ""
+                echo "\`${BASE}\` contains a CREATE (OR REPLACE) FUNCTION for"
+                echo "\`public.${FN}\`, which is SECURITY DEFINER and was revoked from"
+                echo "PUBLIC and anon by an earlier migration."
+                echo ""
+                echo "Postgres resets EXECUTE on a replaced function to PUBLIC, and"
+                echo "PUBLIC includes anon, so this replace reopens it. Nothing"
+                echo "reasserts the revoke on its own: the two forward-revoke"
+                echo "migrations are stamped as applied and will not be replayed."
+                echo ""
+                echo "Add this line to the same file, inside the same transaction,"
+                echo "after the function body:"
+                echo ""
+                echo '```sql'
+                echo "REVOKE EXECUTE ON FUNCTION public.${FN}(<arg types>) FROM PUBLIC, anon;"
+                echo "GRANT  EXECUTE ON FUNCTION public.${FN}(<arg types>) TO authenticated, service_role;"
+                echo '```'
+                echo ""
+                echo "It must be on one line, which is the form this gate reads."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::${BASE} replaces public.${FN} without re-applying REVOKE EXECUTE ON FUNCTION public.${FN}(...) FROM PUBLIC, anon in the same file."
+            done
+          done
+
+          # A matcher that quietly stops matching is the failure this whole job
+          # exists to prevent, so it is not allowed to happen here either. Seven
+          # of these statements exist in this repo's history; zero means the
+          # pattern or the checkout is broken, not that the tree is clean.
+          if [ "$HITS" -eq 0 ]; then
+            echo "::error::Scanned ${COUNT} migration file(s) and matched no CREATE FUNCTION for any of the four hardened functions. Seven exist in this repo's history, so this is a broken check, not a clean tree."
+            exit 1
+          fi
+
+          echo "examined ${COUNT} migration file(s): ${HITS} statement(s) create or replace a hardened function, ${EXEMPT} exempt as predating the guard (cutoff ${BASELINE_CUTOFF})"
+          exit $FAILED
