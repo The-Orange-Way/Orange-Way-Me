@@ -138,38 +138,76 @@ while IFS= read -r FILE; do
   ADDED_LINES=$(git diff "${BASE_REF}...${HEAD_REF}" -- "$FILE" | grep -E '^\+[^+]' | sed 's/^\+//') || true
   [ -n "$ADDED_LINES" ] || continue
 
-  while IFS= read -r LINE; do
-    [ -n "$LINE" ] || continue
-    # Normalise: collapse whitespace, drop a schema qualifier, uppercase the
-    # keywords only (grep -io below does the case-insensitive match).
-    NORMALISED=$(printf '%s' "$LINE" | tr -s '[:space:]' ' ')
-    if printf '%s' "$NORMALISED" | grep -Eqio 'grant[[:space:]]+execute[[:space:]]+on[[:space:]]+function[[:space:]]+[a-z0-9_.\"]+\([^)]*\)[[:space:]]+to[[:space:]]+[a-z0-9_, ]+'; then
-      MATCH=$(printf '%s' "$NORMALISED" | grep -Eio 'grant[[:space:]]+execute[[:space:]]+on[[:space:]]+function[[:space:]]+[a-z0-9_.\"]+\([^)]*\)[[:space:]]+to[[:space:]]+[a-z0-9_, ]+' | head -n1)
-      SIG=$(printf '%s' "$MATCH" | grep -Eio '[a-z0-9_.\"]+\([^)]*\)' | head -n1 | sed 's/^public\.//i' | tr -s ' ')
-      GRANTEES=$(printf '%s' "$MATCH" | grep -Eio 'to[[:space:]]+[a-z0-9_, ]+' | sed -E 's/^to[[:space:]]+//i')
-      IFS=',' read -ra GRANTEE_LIST <<< "$GRANTEES"
-      for RAW in "${GRANTEE_LIST[@]}"; do
-        G=$(printf '%s' "$RAW" | tr -d '[:space:]')
-        [ -n "$G" ] || continue
-        G_LOWER=$(printf '%s' "$G" | tr '[:upper:]' '[:lower:]')
-        if [ "$G_LOWER" = "public" ]; then
-          GRANTEE_NORM="PUBLIC"
-        elif [ "$G_LOWER" = "anon" ]; then
-          GRANTEE_NORM="anon"
-        else
-          continue
-        fi
+  # Statement-oriented, not line-oriented. A GRANT wrapped across several lines
+  # never shows its keywords together on any single input line, so a
+  # line-at-a-time scan reports PASS on it and says nothing at all. Join the
+  # added lines, drop line comments, collapse whitespace, split on ';'.
+  BUFFER=$(printf '%s\n' "$ADDED_LINES" | sed 's/--.*$//' | tr '\n' ' ' | tr -s '[:space:]' ' ')
+
+  while IFS= read -r STMT; do
+    [ -n "$STMT" ] || continue
+    LOWER=$(printf '%s' "$STMT" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+execute' || continue
+    printf '%s' "$LOWER" | grep -Eq '[[:space:]]to[[:space:]]' || continue
+
+    # Everything after the LAST " to ", minus a trailing WITH GRANT OPTION.
+    GRANTEES=$(printf '%s' "$LOWER" | sed -E 's/.*[[:space:]]to[[:space:]]+//; s/[[:space:]]+with[[:space:]]+grant[[:space:]]+option.*//')
+
+    # Classify the target. BLANKET forms carry no signature, so no allowlist
+    # entry can ever cover them and they are always refused.
+    TARGETS=""
+    BLANKET=""
+    if printf '%s' "$LOWER" | grep -Eq 'alter[[:space:]]+default[[:space:]]+privileges'; then
+      BLANKET="ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS"
+    elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+all[[:space:]]+(functions|procedures|routines)[[:space:]]+in[[:space:]]+schema'; then
+      BLANKET="GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA"
+    elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(function|procedure|routine)[[:space:]]'; then
+      TARGETS=$(printf '%s' "$LOWER" \
+        | sed -E 's/.*[[:space:]]on[[:space:]]+(function|procedure|routine)[[:space:]]+//' \
+        | grep -Eo '[a-z0-9_."]+\([^)]*\)' || true)
+      if [ -z "$TARGETS" ]; then
+        BLANKET="GRANT EXECUTE ON FUNCTION (no signature written)"
+      fi
+    else
+      continue
+    fi
+
+    IFS=',' read -ra GRANTEE_LIST <<< "$GRANTEES"
+    for RAW in ${GRANTEE_LIST[@]+"${GRANTEE_LIST[@]}"}; do
+      G=$(printf '%s' "$RAW" | tr -d '[:space:]' | tr -d '"')
+      [ -n "$G" ] || continue
+      if [ "$G" = "public" ]; then
+        GRANTEE_NORM="PUBLIC"
+      elif [ "$G" = "anon" ]; then
+        GRANTEE_NORM="anon"
+      else
+        continue
+      fi
+
+      if [ -n "$BLANKET" ]; then
+        ROW="${BLANKET}"$'\t'"${GRANTEE_NORM}"
+        VIOLATIONS+=("${FILE}"$'\t'"${ROW}")
+        echo "REFUSED: ${FILE}: ${ROW}"
+        continue
+      fi
+
+      while IFS= read -r RAWSIG; do
+        [ -n "$RAWSIG" ] || continue
+        SIG=$(printf '%s' "$RAWSIG" | sed -E 's/^public\.//; s/"//g' | tr -s ' ')
+        SIG_STRIPPED=$(strip_param_names "$SIG")
         ROW="${SIG}"$'\t'"${GRANTEE_NORM}"
-        if printf '%s\n' "$ALLOWLIST" | grep -Fxq -- "$ROW"; then
+        ROW_STRIPPED="${SIG_STRIPPED}"$'\t'"${GRANTEE_NORM}"
+        if printf '%s\n' "$ALLOWLIST" | grep -Fxq -- "$ROW" \
+          || printf '%s\n' "$ALLOWLIST" | grep -Fxq -- "$ROW_STRIPPED"; then
           ALLOWED_HITS=$((ALLOWED_HITS + 1))
           echo "allowed: ${FILE}: ${ROW}"
         else
           VIOLATIONS+=("${FILE}"$'\t'"${ROW}")
           echo "REFUSED: ${FILE}: ${ROW}"
         fi
-      done
-    fi
-  done <<< "$ADDED_LINES"
+      done <<< "$TARGETS"
+    done
+  done <<< "$(printf '%s' "$BUFFER" | tr ';' '\n')"
 done <<< "$CHANGED_FILES"
 
 {
