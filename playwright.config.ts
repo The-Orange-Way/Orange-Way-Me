@@ -99,10 +99,26 @@ export default defineConfig({
       // The default config sets trace: "on-first-retry"; an
       // authenticated retry would otherwise embed the Supabase JWT,
       // the refresh token, and full DOM snapshots of the unlocked
-      // vault into the trace.zip. If the HTML report ever gets
-      // uploaded as a workflow artifact (currently not, but the
-      // config shouldn't trust that to stay true), those credentials
-      // leak. The harness's own page.screenshot() calls write to a
+      // vault into the trace.zip.
+      //
+      // The HTML report IS uploaded as a workflow artifact. This
+      // comment used to say it was "currently not", and that has been
+      // false since the upload step was added: the deploy workflow
+      // uploads playwright-report/ on failure with 7 day retention.
+      // It has been harmless so far only because the one project CI
+      // runs today is chromium, which never authenticates.
+      //
+      // Turning trace and screenshot off does NOT empty that report.
+      // Playwright writes error context, DOM snippets and stack
+      // traces into the report itself. So the moment an authenticated
+      // project is added to that job, a failing authenticated run
+      // ships a report built from an unlocked-vault session.
+      //
+      // Two things follow, and the second is the one that gets
+      // missed. Trace and screenshot stay "off" here. And whoever
+      // adds an authenticated project to CI owns keeping its output
+      // out of that upload, because these two settings do not cover
+      // it. The harness's own page.screenshot() calls write to a
       // gitignored dir for human review and are unaffected.
       name: "authenticated",
       testMatch: /authenticated-routes\.spec\.ts/,
