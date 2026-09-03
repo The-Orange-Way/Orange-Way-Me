@@ -1,0 +1,11 @@
+=== eslint --quiet --format unix ===
+The unix formatter is no longer part of core ESLint. Install it manually with `npm install -D eslint-formatter-unix`
+
+=== eslint --quiet (stylish) ===
+
+/home/runner/work/Orange-Way-Me/Orange-Way-Me/src/lib/or/__tests__/or-sync-request.test.ts
+  65:18  error  Replace `requestOrSync("sub-1",·[{·id:·"c1",·is_stealth:·true·}],·h)).rejects.toBeInstanceOf(⏎······OrSyncRouteRefusal,⏎····` with `⏎······requestOrSync("sub-1",·[{·id:·"c1",·is_stealth:·true·}],·h),⏎····).rejects.toBeInstanceOf(OrSyncRouteRefusal`  prettier/prettier
+
+✖ 1 problem (1 error, 0 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
