@@ -12,19 +12,24 @@ name: Definer grant gate
 # their own GitHub Environment (dev, prod), so the dev run never has the
 # production credential in scope and the production run never has dev's.
 # They run on the push that can actually change that database, on the daily
-# schedule (for grants that arrive with no commit behind them at all, because
-# CREATE OR REPLACE resets EXECUTE to PUBLIC even after a clean revoke), and
-# on demand. A push to dev cannot change production, so it only triggers the
-# dev job; a push to prod only triggers the prod job. Schedule and manual
-# dispatch run both, because neither is scoped to one push.
+# schedule (for grants that arrive with no commit behind them at all, from a
+# console click, a restore, or a hand-run statement), and on demand. A push to
+# dev cannot change production, so it only triggers the dev job; a push to
+# prod only triggers the prod job. Schedule and manual dispatch run both,
+# because neither is scoped to one push.
 #
 # definer-grants-pr-scan is a pull request check. It cannot see the live
 # database and it does not try to; it scans the migration files the PR
-# changes for a GRANT ... EXECUTE ... TO anon or PUBLIC and fails the PR
-# unless the function is on the same allowlist the live jobs use. This is the
-# one moment a human is still looking before the grant ever reaches a
-# database, which the live jobs cannot cover: they only ever report on a
-# grant that is already live.
+# changes and enforces TWO rules:
+#   1) no added GRANT ... EXECUTE ... TO anon or PUBLIC outside the policy
+#      table the live jobs share;
+#   2) a hardened function re-created by the PR must re-apply its
+#      REVOKE ... FROM PUBLIC, anon in the same file, because the two
+#      forward-revoke migrations that hardened those functions are stamped as
+#      applied and will never be replayed.
+# This is the one moment a human is still looking before the change ever
+# reaches a database, which the live jobs cannot cover: they only ever report
+# on a state that is already live.
 #
 # The two live-database jobs below are gated with a positive list of their
 # three intended triggers (push to their own branch, schedule, dispatch),
@@ -86,7 +91,9 @@ jobs:
         run: bash scripts/check-definer-grants.sh
 
   definer-grants-pr-scan:
-    name: SECURITY DEFINER EXECUTE grants (changed migrations)
+    # The name states both rules, so a red run is self-explaining in the check
+    # list without opening the job summary to find out which rule fired.
+    name: Changed migrations: no new anon/PUBLIC EXECUTE, hardened re-creates re-revoke
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
@@ -96,7 +103,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Refuse a new anon or PUBLIC EXECUTE grant in a changed migration
+      - name: Scan the changed migrations against both rules
         run: |
           bash scripts/check-definer-grant-migrations.sh \
             "origin/${{ github.event.pull_request.base.ref }}" \
