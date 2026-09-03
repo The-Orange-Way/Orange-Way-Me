@@ -287,3 +287,116 @@ describe("the switch reaches a tab that is already open", () => {
     expect(maybeSingle).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("a gated door is answered by a read that started AFTER the press", () => {
+  // OWM-T0587. The plain refresh hands a caller the read that is already
+  // running. For the background tick that is exactly right. For a door it means
+  // the answer that opens it can predate the press, and the flag flipped off in
+  // between is invisible. Only the ON to OFF direction leaks: a read that
+  // started before an OFF to ON flip resolves false, which refuses.
+
+  type Row = { data: { enabled: boolean }; error: null };
+
+  /**
+   * Wait a real macrotask. Used where the assertion is "the chained read has
+   * STARTED", which is a fact about ordering: counting microtasks would couple
+   * the test to the number of awaits inside the module and pass for the wrong
+   * reason the moment that changes.
+   */
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function pendingRead(): { resolve: (row: Row) => void; promise: Promise<Row> } {
+    let resolve: (row: Row) => void = () => {};
+    const promise = new Promise<Row>((r) => {
+      resolve = r;
+    });
+    return { resolve, promise };
+  }
+
+  it("refuses when the flag is flipped off after a background read was already issued", async () => {
+    // The leaking sequence, in order:
+    //   t0  the background tick issues its query; the row still says true
+    //   t1  operations set stealth_sync_enabled = false
+    //   t2  the customer presses Sync, and the door asks for the flag
+    //   t3  the PRE-FLIP query resolves true
+    // Answering the door with the t0 query opens the gate and the credentials
+    // key crosses to the provider origin. The door must get its own read.
+    const background = pendingRead();
+    maybeSingle.mockReturnValueOnce(background.promise);
+
+    const m = await freshModule();
+    const ticked = m.refreshRuntimeFlags(); // t0
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+
+    maybeSingle.mockResolvedValue(rowSays(false)); // t1, the row is off from here on
+    const door = m.refreshRuntimeFlagsForDoor(); // t2
+    background.resolve(rowSays(true)); // t3, the pre-flip answer arrives
+
+    await ticked;
+    await door;
+
+    expect(m.isStealthSyncEnabled()).toBe(false);
+    // Two queries: the tick's, and the door's own. Not one shared query.
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
+  });
+
+  it("costs exactly one query when nothing was already in flight", async () => {
+    // The common case. A door that starts its own read has already satisfied
+    // "started after the press", so it must not pay for a second one.
+    maybeSingle.mockResolvedValue(rowSays(true));
+    const m = await freshModule();
+
+    await m.refreshRuntimeFlagsForDoor();
+
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+    expect(m.isStealthSyncEnabled()).toBe(true);
+  });
+
+  it("two doors landing on one in-flight read share ONE chained read", async () => {
+    // N presses inside one round trip cost one extra query, not N. This is why
+    // the fix chains rather than deleting the dedupe outright.
+    const background = pendingRead();
+    maybeSingle.mockReturnValueOnce(background.promise);
+
+    const m = await freshModule();
+    const ticked = m.refreshRuntimeFlags();
+
+    maybeSingle.mockResolvedValue(rowSays(false));
+    const doorA = m.refreshRuntimeFlagsForDoor();
+    const doorB = m.refreshRuntimeFlagsForDoor();
+    background.resolve(rowSays(true));
+
+    await Promise.all([ticked, doorA, doorB]);
+
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
+    expect(m.isStealthSyncEnabled()).toBe(false);
+  });
+
+  it("a door pressed after the chained read has started chains again", async () => {
+    // The subtlety the queued slot has to get right. Once the chained read has
+    // begun it is itself a read that started before the NEXT press, so handing
+    // it to that press would restore the defect one layer down.
+    const background = pendingRead();
+    const chained = pendingRead();
+    maybeSingle.mockReturnValueOnce(background.promise).mockReturnValueOnce(chained.promise);
+
+    const m = await freshModule();
+    const ticked = m.refreshRuntimeFlags();
+    const doorA = m.refreshRuntimeFlagsForDoor();
+    background.resolve(rowSays(true));
+    await ticked;
+    await flush();
+
+    // doorA's read is now running: two queries issued, doorA not yet settled.
+    expect(maybeSingle).toHaveBeenCalledTimes(2);
+
+    maybeSingle.mockResolvedValue(rowSays(false));
+    const doorB = m.refreshRuntimeFlagsForDoor();
+    chained.resolve(rowSays(true));
+
+    await Promise.all([doorA, doorB]);
+
+    expect(maybeSingle).toHaveBeenCalledTimes(3);
+    expect(m.isStealthSyncEnabled()).toBe(false);
+  });
+});
