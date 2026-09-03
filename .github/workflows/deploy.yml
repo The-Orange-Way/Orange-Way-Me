@@ -462,3 +462,80 @@ jobs:
           name: playwright-report-${{ github.ref_name }}
           path: playwright-report/
           retention-days: 7
+
+  # Authenticated end-to-end suite (OWM-T0164).
+  #
+  # WHY THIS IS ITS OWN JOB AND NOT ANOTHER STEP ABOVE. The job above uploads
+  # playwright-report/ as a workflow artifact on any failure, with 7 day
+  # retention. Trace and screenshot are already off for both authenticated
+  # projects, but the HTML report is a different vector: Playwright still
+  # writes error context, DOM snippets and stack traces into it, and an
+  # authenticated run holds an unlocked vault. A failing authenticated run
+  # must not be able to publish that. This job has no artifact upload step at
+  # all, so the guarantee is structural. Do not add one, and do not move these
+  # steps back into build-and-deploy.
+  #
+  # WHY IT SKIPS RATHER THAN FAILS. auth.setup.ts needs three credentials.
+  # Measured 2026-09-03 (run 33800965113, presence probe only, no value ever
+  # printed): all three are absent from the repository scope and from the dev
+  # environment scope. So this job skips on every push today and will start
+  # running the day they are issued, with no further code change. A step that
+  # failed instead would redden the deploy pipeline for everybody.
+  #
+  # DEV ONLY. The fixture user is a non-production identity. auth.setup.ts
+  # already refuses a production origin, but this condition means the job
+  # never starts on a prod push rather than relying on that refusal.
+  e2e-authenticated:
+    name: E2E authenticated suite
+    needs: build-and-deploy
+    if: github.ref_name == 'dev'
+    runs-on: ubuntu-latest
+    # Declared so environment-scoped secrets are visible. A job that does not
+    # declare the environment cannot see them, and its failure looks exactly
+    # like the secret not existing.
+    environment: ${{ github.ref_name }}
+    steps:
+      - name: Are the E2E credentials in scope
+        id: creds
+        # GitHub evaluates `secrets.X != ''` itself and substitutes only the
+        # boolean literal, so this reports PRESENCE without the value ever
+        # reaching the log. Never echo the secret itself here.
+        run: |
+          if [ "${{ secrets.E2E_USER_EMAIL != '' }}" = "true" ] \
+             && [ "${{ secrets.E2E_USER_PASSWORD != '' }}" = "true" ] \
+             && [ "${{ secrets.E2E_VAULT_PASSWORD != '' }}" = "true" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Authenticated E2E suite skipped: one or more of E2E_USER_EMAIL, E2E_USER_PASSWORD, E2E_VAULT_PASSWORD is not set for this environment."
+          fi
+
+      - uses: actions/checkout@v6
+        if: steps.creds.outputs.present == 'true'
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.creds.outputs.present == 'true'
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+        if: steps.creds.outputs.present == 'true'
+
+      - name: Install Playwright (chromium)
+        if: steps.creds.outputs.present == 'true'
+        run: bunx playwright install --with-deps chromium
+
+      - name: Playwright authenticated suite
+        if: steps.creds.outputs.present == 'true'
+        env:
+          # dev only, per the job condition above. Hardcoded rather than read
+          # from the deploy job's output so this job states its own target.
+          PLAYWRIGHT_BASE_URL: https://orangeway.dev
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
+        # --reporter=list overrides the config's html reporter, so no
+        # playwright-report/ directory is produced in this job at all. That is
+        # the second half of the containment: nothing to publish even if an
+        # upload step is added here by mistake.
+        run: bunx playwright test --project=authenticated --reporter=list
