@@ -340,6 +340,30 @@ describe("a gated door is answered by a read that started AFTER the press", () =
     expect(maybeSingle).toHaveBeenCalledTimes(2);
   });
 
+  it("the PLAIN refresh, driven the same way, is answered by the pre-flip read", async () => {
+    // This is the defect itself, pinned as an executed assertion rather than
+    // described in a comment. Identical sequence to the test above, with the
+    // only difference being which function the press calls. The plain refresh
+    // joins the in-flight query, so the gate ends TRUE on the pre-flip answer
+    // and only one query is ever issued. Keep this test: it is the control that
+    // proves the test above is measuring the fix and not measuring nothing, and
+    // it goes red the day the door starts sharing reads again.
+    const background = pendingRead();
+    maybeSingle.mockReturnValueOnce(background.promise);
+
+    const m = await freshModule();
+    const ticked = m.refreshRuntimeFlags();
+
+    maybeSingle.mockResolvedValue(rowSays(false));
+    const press = m.refreshRuntimeFlags();
+    background.resolve(rowSays(true));
+
+    await Promise.all([ticked, press]);
+
+    expect(m.isStealthSyncEnabled()).toBe(true);
+    expect(maybeSingle).toHaveBeenCalledTimes(1);
+  });
+
   it("costs exactly one query when nothing was already in flight", async () => {
     // The common case. A door that starts its own read has already satisfied
     // "started after the press", so it must not pay for a second one.
