@@ -300,6 +300,57 @@ describe("planOrKeyMaterial", () => {
   });
 
   /**
+   * The array is the case this guard was widened for, and it is the likely
+   * wrong input rather than an exotic one. supabase-js returns `data` as an
+   * array for a plain .select(), and only as an object or null when the
+   * caller adds .single() or .maybeSingle(). The state where the row is
+   * genuinely MISSING is the one that comes back as `[]`, which is precisely
+   * the unreadable state this refusal exists for. Every column read off an
+   * array is undefined, which is the all-absent shape, so before the plain
+   * object check this input minted a key and pinned it as authoritative.
+   */
+  it("refuses an empty array, which is what a missing row from a plain select looks like", () => {
+    const plan = planWithoutTypes([] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    expect(plan.mode).toBe("refuse");
+  });
+
+  /**
+   * The other half of the same mistake: `[row]` is what a SUCCESSFUL plain
+   * .select() returns. The row is real and present, and reading columns off
+   * the wrapper still yields undefined three times, so this must refuse
+   * rather than quietly decide the account has nothing stored.
+   */
+  it("refuses a one element array carrying a real row", () => {
+    const plan = planWithoutTypes([PINNED] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    expect(plan.mode).toBe("refuse");
+  });
+
+  /**
+   * `typeof x !== "object"` is doing this work, and it is worth pinning: a
+   * primitive that arrives where a row was expected is a failed read wearing
+   * a different costume, and none of these can answer what is stored.
+   */
+  it("refuses a non-object row, so a primitive cannot reach derive-and-pin either", () => {
+    for (const value of ["a-string", 0, 42, false, true]) {
+      expect(planWithoutTypes(value as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED).mode).toBe(
+        "refuse",
+      );
+    }
+  });
+
+  /**
+   * A row that never arrived and a row that arrived empty must not share an
+   * answer. The array cases above all refuse; this asserts the guard did not
+   * take the fresh-account path down with them.
+   */
+  it("says the array was unreadable rather than partly stored", () => {
+    const plan = planWithoutTypes([] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    if (plan.mode !== "refuse") throw new Error("expected refuse");
+    expect(plan.reason).toMatch(/could not be read/i);
+    expect(plan.reason).not.toMatch(/partly stored/i);
+  });
+
+  /**
    * The two refusals send an operator to different places. "Could not be
    * read" means look at access and at the request; "partly stored" means
    * look at the columns. If either sentence drifts into the other's
