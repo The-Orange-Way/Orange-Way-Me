@@ -2084,9 +2084,19 @@ function ConnectionCard({
     cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlighted]);
 
+  // Which handler a Sync press on THIS card reaches, from the same pure
+  // function handleSync routes on. It exists so the authenticated Playwright
+  // suite can find a private connection without guessing at a user label, and
+  // so it cannot silently press Sync on an or-sync row while claiming to test
+  // the private path. One of "bank" | "private" | "or-sync": a routing word,
+  // never an address, a label or anything else the vault protects.
+  const syncRoute = planSyncRoute(conn);
+
   return (
     <div
       ref={cardRef}
+      data-testid="connection-card"
+      data-sync-route={syncRoute}
       className={`rounded-lg border transition-shadow ${
         highlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
       }`}
@@ -2187,7 +2197,13 @@ function ConnectionCard({
           </div>
         </button>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Button onClick={onSync} disabled={syncing} variant="outline" size="sm">
+          <Button
+            onClick={onSync}
+            disabled={syncing}
+            variant="outline"
+            size="sm"
+            data-testid="connection-sync"
+          >
             {syncing ? (
               <>
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
