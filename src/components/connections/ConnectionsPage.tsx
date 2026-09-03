@@ -1003,10 +1003,6 @@ export function ConnectionsPage() {
     // Routing on is_stealth alone also matches planSyncAll, which has always
     // held private connections back from or-sync unconditionally. This path
     // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
-    }
 
     setSyncingId(conn.id);
     try {
