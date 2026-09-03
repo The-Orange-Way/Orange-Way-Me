@@ -161,4 +161,75 @@ describe("posthog scrubber", () => {
   it("passes null events through unchanged", () => {
     expect(scrubPostHogEvent(null)).toBeNull();
   });
+
+  it("redacts the residual key-material names (OW-T0116)", () => {
+    const r = event({
+      passphrase: "correct horse battery staple",
+      wallet_passphrase: "correct horse battery staple",
+      entropy: "ff".repeat(16),
+      salt: "c2FsdA==",
+      kdf_salt: "c2FsdA==",
+      nonce: "AAAAAAAAAAAA",
+      xpriv: "xprv9s21ZrQH143K...",
+      xprv: "xprv9s21ZrQH143K...",
+      label: "safe context",
+    });
+
+    expect(r?.properties.passphrase).toBe("[redacted]");
+    expect(r?.properties.wallet_passphrase).toBe("[redacted]");
+    expect(r?.properties.entropy).toBe("[redacted]");
+    expect(r?.properties.salt).toBe("[redacted]");
+    expect(r?.properties.kdf_salt).toBe("[redacted]");
+    expect(r?.properties.nonce).toBe("[redacted]");
+    expect(r?.properties.xpriv).toBe("[redacted]");
+    expect(r?.properties.xprv).toBe("[redacted]");
+    // Control: an unrelated key in the same payload is untouched, so the
+    // assertions above cannot be satisfied by a scrubber that redacts
+    // everything.
+    expect(r?.properties.label).toBe("safe context");
+  });
+
+  it("matches pin as a whole token, not as a substring (OW-T0116)", () => {
+    const r = event({
+      pin: "1234",
+      user_pin: "1234",
+      userPin: "1234",
+      "pin-hash": "abcd",
+      // These three contain the literal substring "pin". They must survive:
+      // a bare "pin" hint would blank all of them.
+      shipping_method: "post",
+      mapping_version: 3,
+      spinner_shown: true,
+    });
+
+    expect(r?.properties.pin).toBe("[redacted]");
+    expect(r?.properties.user_pin).toBe("[redacted]");
+    expect(r?.properties.userPin).toBe("[redacted]");
+    expect(r?.properties["pin-hash"]).toBe("[redacted]");
+
+    expect(r?.properties.shipping_method).toBe("post");
+    expect(r?.properties.mapping_version).toBe(3);
+    expect(r?.properties.spinner_shown).toBe(true);
+  });
+
+  it("fails closed: drops the event if scrubbing throws (OW-T0116)", () => {
+    // A getter that throws is the cheapest way to make scrubProperties
+    // fail from outside the module. Before this change the throw escaped
+    // before_send and the unscrubbed event was what reached the network.
+    const hostile: Record<string, unknown> = {};
+    Object.defineProperty(hostile, "boom", {
+      enumerable: true,
+      get() {
+        throw new Error("property access failed");
+      },
+    });
+
+    const r = scrubPostHogEvent({
+      uuid: "00000000-0000-0000-0000-000000000000",
+      event: "test",
+      properties: hostile,
+    } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
+
+    expect(r).toBeNull();
+  });
 });
