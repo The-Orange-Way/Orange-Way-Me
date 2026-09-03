@@ -2,6 +2,36 @@ import { defineConfig, devices } from "@playwright/test";
 import { AUTH_STATE_PATH } from "./tests/e2e/auth-state-path";
 
 /**
+ * Which specs need a logged-in, vault-unlocked browser, and which specs the
+ * unauthenticated projects must therefore refuse to run.
+ *
+ * These two live together because they are one rule seen from two sides, and
+ * they used to be six separate copies of it: the same regex was pasted into
+ * the testIgnore of all five unauthenticated projects and again, in a narrower
+ * form, into the authenticated project's testMatch. Adding a spec to the
+ * authenticated suite meant remembering to edit six places, and forgetting one
+ * of the five does not fail loudly. It hands an authenticated spec to a browser
+ * with no session, which surfaces as an unexplained redirect to /auth rather
+ * than as the configuration mistake it is.
+ *
+ * Naming convention: a spec that needs a session is either the original
+ * authenticated-routes.spec.ts or is named <something>.authenticated.spec.ts.
+ * The suffix is what makes membership visible in a directory listing, so a
+ * reviewer can see which specs carry a session without opening the config.
+ */
+const AUTHENTICATED_SPECS = /authenticated-routes\.spec\.ts|\.authenticated\.spec\.ts/;
+
+/**
+ * The authenticated specs plus the setup spec that produces their storage
+ * state. auth.setup.ts is excluded from the unauthenticated projects for a
+ * different reason than the specs are: it is not a test, it is a producer, and
+ * running it under chromium would type the fixture credentials for no reason
+ * and race the real setup project's write to AUTH_STATE_PATH.
+ */
+const UNAUTHENTICATED_IGNORE =
+  /authenticated-routes\.spec\.ts|\.authenticated\.spec\.ts|auth\.setup\.ts/;
+
+/**
  * Playwright smoke tests.
  *
  * Default target: http://localhost:4173 (Vite preview server, so a
@@ -51,27 +81,27 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: UNAUTHENTICATED_IGNORE,
     },
     {
       name: "firefox",
       use: { ...devices["Desktop Firefox"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: UNAUTHENTICATED_IGNORE,
     },
     {
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: UNAUTHENTICATED_IGNORE,
     },
     {
       name: "mobile-chrome",
       use: { ...devices["Pixel 7"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: UNAUTHENTICATED_IGNORE,
     },
     {
       name: "mobile-safari",
       use: { ...devices["iPhone 14"] },
-      testIgnore: /authenticated-routes\.spec\.ts|auth\.setup\.ts/,
+      testIgnore: UNAUTHENTICATED_IGNORE,
     },
     {
       // The setup project types the Supabase password, the vault
@@ -95,17 +125,27 @@ export default defineConfig({
       // authenticated runs are tracked as a follow-up (nightly
       // matrix workflow).
       //
-      // Trace + on-failure screenshot are disabled here on purpose.
+      // Trace + on-failure screenshot are disabled here on purpose,
+      // and this is the control that matters most in this file.
       // The default config sets trace: "on-first-retry"; an
       // authenticated retry would otherwise embed the Supabase JWT,
       // the refresh token, and full DOM snapshots of the unlocked
-      // vault into the trace.zip. If the HTML report ever gets
-      // uploaded as a workflow artifact (currently not, but the
-      // config shouldn't trust that to stay true), those credentials
-      // leak. The harness's own page.screenshot() calls write to a
-      // gitignored dir for human review and are unaffected.
+      // vault into the trace.zip.
+      //
+      // The HTML report IS uploaded as a workflow artifact. See
+      // .github/workflows/deploy.yml, "Upload Playwright HTML report
+      // on failure": it uploads playwright-report/ with 7 day
+      // retention. This comment used to say the opposite, that the
+      // report was "currently not" uploaded. That was wrong, and it
+      // was harmless only because the one project CI ran never
+      // authenticated, so the report never held a session to leak.
+      // Now that the authenticated project runs in CI too, treat
+      // these two lines as the thing standing between an unlocked
+      // vault and a downloadable artifact. Do not turn them on to
+      // debug a failure; reproduce locally instead, where the report
+      // is not published.
       name: "authenticated",
-      testMatch: /authenticated-routes\.spec\.ts/,
+      testMatch: AUTHENTICATED_SPECS,
       use: {
         ...devices["Desktop Chrome"],
         storageState: AUTH_STATE_PATH,
