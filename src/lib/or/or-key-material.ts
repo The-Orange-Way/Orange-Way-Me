@@ -197,7 +197,24 @@ export function planOrKeyMaterial(
   // look at the columns. This one means the row never arrived, and the first
   // move is to look at access and at the request. Two failures that need
   // different first moves must not share a sentence.
-  if ((row as OrKeyMaterialRow | null | undefined) == null) {
+  // `== null` alone is not enough, and the gap it leaves is not exotic. It
+  // matches null and undefined and nothing else, so an array or a primitive
+  // walks past it into the column reads below, where every column is
+  // undefined. That is the all-absent shape, so with the salt stated unchanged
+  // the answer is derive-and-pin: a fresh key minted and pinned as
+  // authoritative over material that may already exist. An array is the LIKELY
+  // wrong shape here, because supabase-js hands back `data` as an array for a
+  // plain .select() and as an object or null only once the caller adds
+  // .single(), and the genuinely-missing-row case is exactly `[]`, which is
+  // the state this guard was written for in the first place.
+  //
+  // Read through `unknown` rather than testing `row` directly so TypeScript
+  // does not narrow the non-nullable parameter to `never` inside the branch.
+  // The parameter stays non-nullable on purpose: the compile error a typed
+  // caller gets is the protection that is actually working, and this runtime
+  // guard is only for the callers that lost their types at a boundary.
+  const rowValue = row as unknown;
+  if (rowValue === null || typeof rowValue !== "object" || Array.isArray(rowValue)) {
     return {
       mode: "refuse",
       reason:
