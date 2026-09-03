@@ -131,6 +131,20 @@ function readEpoch(value: number | string | null | undefined): number | null {
   return null;
 }
 
+/**
+ * The refuse reason for the one case with a concrete customer fix: nothing is
+ * pinned yet and the vault salt just rotated (recovery), so the key that
+ * opened previously-synced rows cannot be reproduced and a re-sync is the
+ * actual remedy.
+ *
+ * Exported so friendly-error.ts's match, and the test that guards it, both
+ * read this value instead of each holding their own copy of the sentence.
+ * Two copies is how the match silently breaks: reword one and nothing fails
+ * until a customer report.
+ */
+export const OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON =
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
+
 export interface PlanOrKeyMaterialOptions {
   /**
    * Whether `kdfSalt` is still the salt that already-sealed rows were sealed
@@ -257,8 +271,7 @@ export function planOrKeyMaterial(
     // say so.
     return {
       mode: "refuse",
-      reason:
-        "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.",
+      reason: OR_KEY_MATERIAL_UNPINNED_SALT_ROTATED_REASON,
     };
   }
 
