@@ -12,12 +12,31 @@
 # exactly that pattern, and fails the PR unless the function is on the same
 # allowlist the live gate uses.
 #
+# WHAT SHAPES THIS SCAN MATCHES
+# The scan is statement-oriented, not line-oriented: every line the pull
+# request ADDS to a migration is joined into one buffer, line comments are
+# dropped, and the buffer is split on ';'. So a statement wrapped across
+# several lines, which is normal formatting for a long argument list, is still
+# seen whole. These forms are all matched, in any case and any spacing:
+#   GRANT EXECUTE ON FUNCTION f(args) TO anon      also PROCEDURE and ROUTINE
+#   GRANT EXECUTE ON FUNCTION f(a), g(b) TO anon   comma list, each checked
+#   GRANT EXECUTE ON FUNCTION f TO anon            no signature written
+#   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA s TO anon
+#   ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon
+# The last three can never be allowlisted. The allowlist is per function
+# signature, and a blanket grant is not a signature, so it is always refused.
+#
 # WHAT THIS CANNOT CATCH, AND WHY THE LIVE CHECK STILL HAS TO RUN
-# CREATE FUNCTION defaults EXECUTE to PUBLIC, and CREATE OR REPLACE resets it
-# to PUBLIC even after a clean revoke, with no GRANT line anywhere in the
-# migration that changed it. A text scan of the diff cannot see that: there is
-# nothing to find. That drift only shows up by reading the live catalog, which
-# is what check-definer-grants.sh is for. Keep both.
+# 1. CREATE FUNCTION defaults EXECUTE to PUBLIC, and CREATE OR REPLACE resets
+#    it to PUBLIC even after a clean revoke, with no GRANT line anywhere in
+#    the migration that changed it. A text scan of the diff cannot see that:
+#    there is nothing to find.
+# 2. A grant built at run time, inside a DO block or by EXECUTE format(...),
+#    where the grantee is not literal text in the migration.
+# 3. A grant that already sits in a file this pull request does not touch.
+#    The scan reads ADDED lines only, on purpose.
+# Every one of those does show up in check-definer-grants.sh, which reads the
+# live catalog through aclexplode. Keep both.
 #
 # USAGE
 #   check-definer-grant-migrations.sh <base-ref> <head-ref>
@@ -39,6 +58,17 @@
 # and the two scripts are reviewed together whenever either changes.
 #   is_invite_code_valid(text)        called from the join page before sign in
 #   is_email_in_beta_allowlist(text)  called from the auth screen before sign in
+#
+# SIGNATURE FORM, and why an added grant is compared twice
+# check-definer-grants.sh derives its signature from oid::regprocedure, which
+# prints TYPES ONLY: is_invite_code_valid(text). A migration is normally
+# written with parameter NAMES, and production declares both of these
+# functions that way: is_invite_code_valid(p_code text). Comparing only the
+# literal migration text would refuse a legitimate re-grant written the
+# natural way, fail-closed but for a reason no reader could see. So each added
+# grant is checked against the allowlist twice, once as literally written and
+# once with argument modes and parameter names stripped, and a hit on either
+# is allowed.
 # PUBLIC is deliberately NOT allowlisted for either of them: PUBLIC is broader
 # than anon, and a migration that grants PUBLIC on either is a violation.
 
@@ -71,6 +101,35 @@ fi
 
 VIOLATIONS=()
 ALLOWED_HITS=0
+
+# Words that begin a TYPE rather than a parameter name. Used to decide whether
+# the first token of an argument is a name to drop or part of the type itself,
+# so "p_code text" reduces to "text" while "timestamp with time zone" does not.
+TYPE_WORDS='^(text|varchar|character|char|name|uuid|json|jsonb|xml|bytea|boolean|bool|smallint|int|int2|int4|int8|integer|bigint|numeric|decimal|real|float|float4|float8|double|money|date|time|timestamp|timestamptz|interval|inet|cidr|macaddr|citext|tsvector|oid|regclass|record|void|anyelement|anyarray|anynonarray|trigger)$'
+
+# is_invite_code_valid(p_code text) -> is_invite_code_valid(text)
+strip_param_names() {
+  local sig="$1" fname args arg tok rest out="" old_ifs
+  fname="${sig%%(*}"
+  args="${sig#*(}"
+  args="${args%)}"
+  old_ifs="$IFS"
+  IFS=','
+  read -ra ARG_PARTS <<< "$args"
+  IFS="$old_ifs"
+  for arg in ${ARG_PARTS[@]+"${ARG_PARTS[@]}"}; do
+    arg=$(printf '%s' "$arg" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^(in|out|inout|variadic)[[:space:]]+//')
+    [ -n "$arg" ] || continue
+    tok="${arg%% *}"
+    rest="${arg#* }"
+    if [ "$rest" != "$arg" ] && ! printf '%s' "$tok" | grep -Eq "$TYPE_WORDS"; then
+      arg="$rest"
+    fi
+    arg=$(printf '%s' "$arg" | tr -s ' ')
+    if [ -z "$out" ]; then out="$arg"; else out="${out},${arg}"; fi
+  done
+  printf '%s(%s)' "$fname" "$out"
+}
 
 while IFS= read -r FILE; do
   [ -n "$FILE" ] || continue
