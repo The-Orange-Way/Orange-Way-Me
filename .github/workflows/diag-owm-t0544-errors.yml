@@ -1,0 +1,56 @@
+name: DIAG OWM-T0544 errors only
+
+# TEMPORARY, diag/ branches only, deleted with the branch.
+# 159 of the 160 lint problems are pre-existing warnings that do not block.
+# --quiet drops every warning, so what lands in diag-out/lint-errors.txt is the
+# one error that actually fails the job.
+
+on:
+  push:
+    branches:
+      - 'diag/**'
+
+permissions:
+  contents: read
+
+jobs:
+  errors-only:
+    name: DIAG E1 the one lint error
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Errors only, two formats
+        run: |
+          set -uo pipefail
+          mkdir -p diag-out
+          {
+            echo "=== eslint --quiet --format unix ==="
+            bunx eslint . --quiet --format unix 2>&1 || true
+            echo
+            echo "=== eslint --quiet (stylish) ==="
+            bunx eslint . --quiet 2>&1 || true
+          } > diag-out/lint-errors.txt
+          wc -c diag-out/lint-errors.txt
+      - name: Commit the output back to this diagnostic branch
+        run: |
+          set -euo pipefail
+          git config user.name "orange-way-diag"
+          git config user.email "diag@users.noreply.github.com"
+          git add diag-out/lint-errors.txt
+          if git diff --cached --quiet; then
+            echo "no change to commit"
+            exit 0
+          fi
+          git commit -F - <<'MSG'
+          DIAG output: the lint errors only, for the OWM-T0544 branch
+
+          Seat: srdev-owm
+          MSG
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"
