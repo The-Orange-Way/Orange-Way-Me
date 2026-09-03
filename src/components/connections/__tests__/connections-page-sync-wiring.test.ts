@@ -49,20 +49,31 @@ const SOURCE = readFileSync(new URL("../ConnectionsPage.tsx", import.meta.url), 
  * Throws rather than returning empty if the handler is not found, so renaming
  * or removing it fails loudly instead of making every assertion below vacuous.
  */
+const CODE_ONLY = SOURCE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
 function handlerCode(name: string): string {
   const opening = `async function ${name}(`;
-  const start = SOURCE.indexOf(opening);
+  const start = CODE_ONLY.indexOf(opening);
   if (start === -1) {
     throw new Error(
       `ConnectionsPage.tsx no longer contains "${opening}". If it was renamed, ` +
         `update this test to the new name; do not delete the assertions.`,
     );
   }
-  const after = SOURCE.slice(start + 1);
-  const nextHandler = after.indexOf("\n  async function ");
-  const end = nextHandler === -1 ? SOURCE.length : start + 1 + nextHandler;
-  const body = SOURCE.slice(start, end);
-  return body.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const bodyStart = CODE_ONLY.indexOf("{", start);
+  if (bodyStart === -1) {
+    throw new Error(`Found ${opening} but no opening brace after it.`);
+  }
+  let depth = 0;
+  for (let i = bodyStart; i < CODE_ONLY.length; i += 1) {
+    const ch = CODE_ONLY[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return CODE_ONLY.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Braces in ${name} never balanced; the slice would run to EOF.`);
 }
 
 describe("ConnectionsPage handleSync wiring", () => {
