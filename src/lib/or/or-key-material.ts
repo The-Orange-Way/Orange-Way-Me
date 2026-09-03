@@ -156,6 +156,15 @@ export interface PlanOrKeyMaterialOptions {
 }
 
 /**
+ * The refuse reason for the one case with a customer fix: nothing pinned yet
+ * and the vault salt just rotated. Exported as a single value, not retyped,
+ * so friendly-error.test.ts drives the real producer instead of asserting
+ * against its own private copy of the sentence (OWM-T0396).
+ */
+export const OR_UNPINNED_SALT_ROTATED_REASON =
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
+
+/**
  * Decide, from what is stored, how to obtain the Orange Rails key material.
  *
  * The half-established cases are refusals rather than repairs on purpose. One
@@ -169,16 +178,6 @@ export interface PlanOrKeyMaterialOptions {
  * @param kdfSalt   the salt in force right now, used only when pinning
  * @param options   see `PlanOrKeyMaterialOptions`; required, no default
  */
-
-/**
- * The refuse reason for the one case with a customer fix: nothing pinned yet
- * and the vault salt just rotated. Exported as a single value, not retyped,
- * so friendly-error.test.ts drives the real producer instead of asserting
- * against its own private copy of the sentence (OWM-T0396).
- */
-export const OR_UNPINNED_SALT_ROTATED_REASON =
-  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
-
 export function planOrKeyMaterial(
   row: OrKeyMaterialRow,
   kdfSalt: string,
