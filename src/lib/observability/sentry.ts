@@ -330,6 +330,7 @@ function scrubEventLoose(event: unknown): unknown {
   // is closing a latent gap the same way message was, not a live leak.
   if (logentry && Array.isArray(logentry.params)) {
     logentry.params = logentry.params.map((p) =>
+      // Route non-string elements through scrubValue, not through untouched.
       typeof p === "string" ? capString(scrubString(p), 4000) : scrubValue(p),
     );
   }
