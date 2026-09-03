@@ -76,9 +76,10 @@ export async function dispatchSync(
     case "bank":
       await handlers.bank();
       return;
+    // SCRATCH MUTATION (OWM-T0590). The private arm is deleted, so a private
+    // route falls through to the or-sync handler exactly as it did when this
+    // was an `if` chain in the click handler. Never merge this.
     case "private":
-      await handlers.private();
-      return;
     case "or-sync":
       await handlers.orSync();
       return;
