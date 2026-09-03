@@ -451,12 +451,64 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Playwright smoke + marketing-form interaction
+        id: smoke
         env:
           PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
         run: bunx playwright test --project=chromium --reporter=list
 
+      # OWM-T0164. The authenticated suite needs three fixture credentials.
+      # This step reports whether they are configured for this environment
+      # WITHOUT emitting any of them: GitHub evaluates `secrets.X != ''` and
+      # substitutes the literal `true` or `false`, so the log can only ever
+      # contain a boolean. Do not "improve" this by echoing a secret into a
+      # variable to test it, which is the obvious refactor and a credential
+      # leak into a log with 90 day retention.
+      - name: Check E2E fixture credentials are configured
+        id: e2e_creds
+        run: |
+          echo "E2E_USER_EMAIL set:     ${{ secrets.E2E_USER_EMAIL != '' }}"
+          echo "E2E_USER_PASSWORD set:  ${{ secrets.E2E_USER_PASSWORD != '' }}"
+          echo "E2E_VAULT_PASSWORD set: ${{ secrets.E2E_VAULT_PASSWORD != '' }}"
+          echo "present=${{ secrets.E2E_USER_EMAIL != '' && secrets.E2E_USER_PASSWORD != '' && secrets.E2E_VAULT_PASSWORD != '' }}" >> "$GITHUB_OUTPUT"
+
+      # "I could not check" must never read as "I checked and it was fine".
+      # auth.setup.ts skips rather than throws when credentials are absent, and
+      # Playwright exits 0 when every test skips, so without this step a
+      # missing credential would show up as a green tick on a suite that never
+      # ran. The step above is what makes that state visible; this one is what
+      # makes it loud.
+      - name: Authenticated E2E suite did not run
+        if: steps.e2e_creds.outputs.present != 'true'
+        run: |
+          echo "::warning title=Authenticated E2E suite did not run::One or more of E2E_USER_EMAIL, E2E_USER_PASSWORD, E2E_VAULT_PASSWORD is not configured for the ${{ github.ref_name }} environment. The authenticated Playwright project was skipped. A green result on this run says nothing about any authenticated behaviour. See the previous step for which of the three is missing."
+
+      # Runs only when all three credentials are present, so the skip paths
+      # inside auth.setup.ts and the authenticated specs are unreachable here
+      # and a pass means the suite genuinely executed.
+      #
+      # --reporter=list is deliberate and is one of the two things keeping an
+      # authenticated session out of a downloadable artifact: it suppresses the
+      # html reporter the config would otherwise use in CI, so no
+      # playwright-report/ is written for this step at all. The other is the
+      # scoping on the upload step below. Do not remove either.
+      - name: Playwright authenticated suite
+        if: steps.e2e_creds.outputs.present == 'true'
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
+        run: bunx playwright test --project=authenticated --reporter=list
+
+      # Scoped to the UNAUTHENTICATED smoke step on purpose. A failure in the
+      # authenticated suite must not publish playwright-report/, because that
+      # report carries error context and DOM snippets from a logged-in,
+      # vault-unlocked session, and this artifact is downloadable for 7 days.
+      # `failure()` alone would have uploaded it. If you add another step that
+      # should publish a report, give it its own upload with its own scope
+      # rather than widening this condition back to a bare failure().
       - name: Upload Playwright HTML report on failure
-        if: failure()
+        if: failure() && steps.smoke.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report-${{ github.ref_name }}
