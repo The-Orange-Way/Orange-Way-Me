@@ -197,7 +197,23 @@ export function planOrKeyMaterial(
   // look at the columns. This one means the row never arrived, and the first
   // move is to look at access and at the request. Two failures that need
   // different first moves must not share a sentence.
-  if ((row as OrKeyMaterialRow | null | undefined) == null) {
+  //
+  // The check is "is this a plain object", not "is this nullish". `== null`
+  // caught exactly null and undefined, and an array is neither: every column
+  // read off an array is undefined, which is the all-absent shape, so an
+  // array used to reach derive-and-pin. An array is the likely wrong input
+  // rather than an exotic one, because supabase-js returns `data` as an array
+  // for a plain .select() and the MISSING-row case is the one that yields
+  // `[]`. Array.isArray is therefore load-bearing on its own: typeof [] is
+  // "object", so the typeof arm does not stop it.
+  //
+  // Read through a separate `unknown` so the narrowing does not fight the
+  // declared parameter type. The parameter stays non-nullable on purpose: the
+  // compile error a typed caller gets is the protection that is actually
+  // working, and this guard is only for callers that lost their types at a
+  // boundary.
+  const rowValue = row as unknown;
+  if (rowValue === null || typeof rowValue !== "object" || Array.isArray(rowValue)) {
     return {
       mode: "refuse",
       reason:
