@@ -65,6 +65,7 @@ import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
+import { requestOrSync } from "@/lib/or/or-sync-request";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -217,6 +218,24 @@ export function ConnectionsPage() {
     orNamespaceDisabledReason,
   } = useVault();
   const { accounts, updateAccount } = useAccounts();
+
+  /**
+   * The vault key handover for or-sync, built once and shared by both press
+   * paths. or-sync is the only path in this app that takes these two keys out
+   * of the vault, so there is one object that can do it and one function that
+   * accepts it, and that function checks the route before it uses either
+   * (OWM-T0544). callProxy is module scope and stable, so it is not a
+   * dependency here.
+   */
+  const orSyncKeys = useMemo(
+    () => ({
+      exportCredentialsKey: exportOrCredsKey,
+      exportTransactionsKey: exportOrTxnsKey,
+      callProxy,
+    }),
+    [exportOrCredsKey, exportOrTxnsKey],
+  );
+
   const {
     rows: connAccountMapRows,
     getActiveAccountIds,
@@ -1000,17 +1019,12 @@ export function ConnectionsPage() {
 
     setSyncingId(conn.id);
     try {
-      const credentials_key = await exportOrCredsKey();
-      const transactions_key = await exportOrTxnsKey();
-      const res = (await callProxy("or-sync", {
-        subaccount_id: subaccount,
-        connection_ids: [conn.id],
-        credentials_key,
-        transactions_key,
-      })) as {
-        synced: number;
-        connections: Array<{ connection_id: string; synced: number; error?: string }>;
-      };
+      // OWM-T0544. No key is exported here any more. requestOrSync asks
+      // planSyncRoute itself and refuses above its own export, so deleting the
+      // private arm above now stops a press rather than starting a key
+      // handover: it reaches this call and is refused, instead of exporting two
+      // vault keys for a request or-sync answers with a 400.
+      const res = await requestOrSync(subaccount, [conn], orSyncKeys);
 
       // DL-1051: a status toast must be driven by positive evidence that this
       // connection was actually processed. or-sync only returns an entry for a
@@ -1111,20 +1125,18 @@ export function ConnectionsPage() {
       let synced = 0;
       let returned: SyncAllResultEntry[] = [];
 
-      // Skip the round trip entirely when nothing is syncable, rather than
-      // asking or-sync about an empty list and interpreting its answer.
-      if (plan.syncableIds.length > 0) {
-        const credentials_key = await exportOrCredsKey();
-        const transactions_key = await exportOrTxnsKey();
-        const res = (await callProxy("or-sync", {
-          subaccount_id: subaccount,
-          connection_ids: plan.syncableIds,
-          credentials_key,
-          transactions_key,
-        })) as { synced: number; connections: SyncAllResultEntry[] };
-        synced = res.synced;
-        returned = res.connections;
-      }
+      // Skipping the round trip when nothing is syncable now lives inside
+      // requestOrSync, which answers an empty list with a zero and exports
+      // nothing, so that skip holds even if this call site is edited.
+      //
+      // Rows are passed rather than ids so requestOrSync can check each one
+      // itself. planSyncAll already holds private connections back and is
+      // tested; this is the net under it, at the point the keys leave rather
+      // than in the caller above it (OWM-T0544).
+      const syncable = connections.filter((c) => plan.syncableIds.includes(c.id));
+      const res = await requestOrSync(subaccount, syncable, orSyncKeys);
+      synced = res.synced;
+      returned = res.connections;
 
       const errs = returned.filter((c) => c.error);
       const report = reportSyncAll({
