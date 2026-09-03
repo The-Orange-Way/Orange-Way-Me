@@ -277,6 +277,62 @@ describe("planOrKeyMaterial", () => {
     const halfPinned: OrKeyMaterialRow = { ...PINNED, or_subkey_salt: null };
     expect(planOrKeyMaterial(halfPinned, "brand-new-salt", ROTATED).mode).toBe("refuse");
   });
+
+  /**
+   * A nullish row is what a failed READ looks like: a denied row, an aborted
+   * request, a lookup that matched nothing. It used to throw a TypeError on
+   * the first property access. A module whose whole contract is "derive,
+   * unwrap or refuse" must answer with one of the three, and a crash is not
+   * one of them.
+   */
+  it("refuses a null row instead of throwing", () => {
+    const plan = planWithoutTypes(null as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    expect(plan.mode).toBe("refuse");
+  });
+
+  it("refuses an undefined row instead of throwing", () => {
+    const plan = planWithoutTypes(
+      undefined as unknown as OrKeyMaterialRow,
+      "current-salt",
+      UNCHANGED,
+    );
+    expect(plan.mode).toBe("refuse");
+  });
+
+  /**
+   * The two refusals send an operator to different places. "Could not be
+   * read" means look at access and at the request; "partly stored" means
+   * look at the columns. If either sentence drifts into the other's
+   * language, the reason string stops being a diagnosis.
+   */
+  it("words the unreadable refusal apart from the half-stored one", () => {
+    const unread = planWithoutTypes(null as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    const halfStored = planOrKeyMaterial(
+      { ...PINNED, or_subkey_salt: null },
+      "current-salt",
+      UNCHANGED,
+    );
+    if (unread.mode !== "refuse") throw new Error("expected refuse");
+    if (halfStored.mode !== "refuse") throw new Error("expected refuse");
+
+    expect(unread.reason).toMatch(/could not be read/i);
+    expect(halfStored.reason).toMatch(/partly stored/i);
+    expect(unread.reason).not.toMatch(/partly stored/i);
+    expect(halfStored.reason).not.toMatch(/could not be read/i);
+  });
+
+  /**
+   * The guard must refuse a row that never arrived without refusing a row
+   * that arrived empty. Those are different facts and only the first is a
+   * failure: an empty row is every brand new account.
+   */
+  it("still derives for a genuinely empty row, so the fresh-account path stays open", () => {
+    expect(planOrKeyMaterial(EMPTY, "current-salt", UNCHANGED)).toEqual({
+      mode: "derive-and-pin",
+      saltContext: "current-salt",
+      epoch: CURRENT_OR_KEY_EPOCH,
+    });
+  });
 });
 
 describe("OrNamespaceDisabledError", () => {
