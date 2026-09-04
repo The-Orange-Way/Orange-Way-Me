@@ -115,11 +115,11 @@ export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
 }
 
 export interface GoalsSummary {
-  /** Sum of each measurable goal's progress, capped at that goal's own target. */
+  /** Distinct backing-account balances plus independent goals, each capped at target. */
   saved: number;
   /** Sum of the measurable goals' targets. */
   target: number;
-  /** 0..1. Cannot exceed 1, because every term of `saved` is capped at its own target. */
+  /** 0..1. Capped at 1: the deduped account pool can still exceed the sum of the targets it backs. */
   pct: number;
   /** How many active goals contributed to the figures above. */
   counted: number;
@@ -132,7 +132,7 @@ export interface GoalsSummary {
  *
  * This lives here rather than in the page because it has to agree with
  * computeProgress, and the two drifted apart while the header was written
- * inline in JSX where nothing could test it (DL-1603). Two ways they disagreed:
+ * inline in JSX where nothing could test it (DL-1603). Ways they disagreed:
  *
  * 1. The header measured goals the tiles refuse to measure. A goal with no
  *    linked accounts still carries a target, so summing it contributed a real
@@ -146,16 +146,22 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * 3. OWM-T0674 (Product ruling on OWM-T0210): two save_up/all_balance goals
+ *    linked to the SAME account each claimed that account's whole balance, so
+ *    the header double-counted real money the customer holds once. Sharing an
+ *    account across goals is supported and each goal's own math is unchanged;
+ *    only the header pools a shared account's balance once instead of once per
+ *    goal that links it. pay_down and save_up/specific_amount goals do not
+ *    have this failure mode: a pay_down goal's current is start-minus-debt,
+ *    not a plain account balance, and specific_amount is a manual allocation
+ *    with no account backing it, so both still add independently.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
-  let saved = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+  let independentSaved = 0;
+  const accountPool = new Map<string, number>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -163,11 +169,67 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    if (g.type === "save_up" && g.strategy !== "specific_amount") {
+      for (const accId of g.linked_account_ids) {
+        const acc = accounts.find((a) => a.id === accId);
+        if (!acc) continue;
+        // Every goal linking this account reports the same balance, so
+        // setting rather than adding is what makes it count once.
+        accountPool.set(accId, Math.max(0, Number(acc.balance) || 0));
+      }
+    } else {
+      independentSaved += Math.min(p.current, p.target);
+    }
   }
 
-  return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
+  const pooledSaved = [...accountPool.values()].reduce((sum, v) => sum + v, 0);
+  const saved = independentSaved + pooledSaved;
+
+  return { saved, target, pct: target > 0 ? Math.min(1, saved / target) : 0, counted, active };
+}
+
+/**
+ * For each active goal, the names of other active goals that link at least
+ * one of the same accounts. Empty array when a goal shares no account.
+ *
+ * Powers the "Shared with <goal>" disclosure line on GoalCard (OWM-T0674
+ * item 3): the line that makes a 41% header total and a 100% card coexist
+ * without reading as a bug.
+ */
+export function sharedGoalNames(goals: Goal[]): Map<string, string[]> {
+  const goalIdsByAccount = new Map<string, string[]>();
+  for (const g of goals) {
+    if (g.is_completed) continue;
+    for (const accId of g.linked_account_ids) {
+      const ids = goalIdsByAccount.get(accId) ?? [];
+      ids.push(g.id);
+      goalIdsByAccount.set(accId, ids);
+    }
+  }
+
+  const sharedIds = new Map<string, Set<string>>();
+  for (const ids of goalIdsByAccount.values()) {
+    if (ids.length < 2) continue;
+    for (const id of ids) {
+      const others = sharedIds.get(id) ?? new Set<string>();
+      for (const otherId of ids) {
+        if (otherId !== id) others.add(otherId);
+      }
+      sharedIds.set(id, others);
+    }
+  }
+
+  const nameById = new Map(goals.map((g) => [g.id, g.name]));
+  const result = new Map<string, string[]>();
+  for (const [id, others] of sharedIds) {
+    result.set(
+      id,
+      [...others].map((otherId) => nameById.get(otherId) ?? "another goal"),
+    );
+  }
+  return result;
 }
 
 /**
