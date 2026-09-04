@@ -156,6 +156,7 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
   let target = 0;
   let counted = 0;
   let active = 0;
+  const dedupedAccountIds = new Set<string>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -163,11 +164,86 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    const backing = accountBalanceBackedIds(g);
+    if (backing.length > 0) {
+      // save_up + all_balance: this goal's current IS a sum of these
+      // accounts' balances (computeCurrent above). Two such goals may
+      // legitimately share an account (Product ruling, OWM-T0210) and each
+      // goal's own math stays correct -- but the money in a shared account
+      // exists once, so the header must not add it in twice. Count each
+      // backing account's balance toward `saved` the first time we see it
+      // across this whole pass, and skip it for every later goal that also
+      // links it.
+      for (const id of backing) {
+        if (dedupedAccountIds.has(id)) continue;
+        dedupedAccountIds.add(id);
+        const acct = accounts.find((a) => a.id === id);
+        saved += Math.max(0, Number(acct?.balance) || 0);
+      }
+    } else {
+      // pay_down and save_up/specific_amount: `current` is not a raw
+      // account balance (it's paid-off-so-far, or a manual allocation), so
+      // there is no shared-balance to dedupe. Cap at the goal's own target,
+      // same as before (an over-funded goal must not spill into another
+      // goal's shortfall).
+      saved += Math.min(p.current, p.target);
+    }
   }
 
   return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
+}
+
+/**
+ * Which linked-account ids this goal's `current` is a direct sum of.
+ *
+ * Only true for save_up + all_balance: computeCurrent for that group sums
+ * `accounts.balance` directly, so those are the ids a header dedupe has to
+ * key on. pay_down sums the same accounts but as debt feeding a subtraction,
+ * not as held money, and specific_amount ignores accounts entirely -- so
+ * neither belongs in the same dedupe pass.
+ */
+function accountBalanceBackedIds(goal: Goal): string[] {
+  if (goal.type === "save_up" && goal.strategy !== "specific_amount") {
+    return goal.linked_account_ids;
+  }
+  return [];
+}
+
+/**
+ * For every active save_up/all_balance goal, the names of the other active
+ * goals of that same group that share at least one backing account with it.
+ *
+ * Product ruled (OWM-T0210) that sharing an account is supported, not an
+ * error, so this is plain information for the card, not a warning: it is
+ * what makes a 41%-of-combined-target header and a 100%-of-its-own-target
+ * card read as consistent instead of contradictory.
+ */
+export function sharedAccountGoalNames(goals: Goal[]): Map<string, string[]> {
+  const active = goals.filter((g) => !g.is_completed);
+  const byAccount = new Map<string, Goal[]>();
+  for (const g of active) {
+    for (const id of accountBalanceBackedIds(g)) {
+      const list = byAccount.get(id) ?? [];
+      list.push(g);
+      byAccount.set(id, list);
+    }
+  }
+
+  const result = new Map<string, Set<string>>();
+  for (const sharing of byAccount.values()) {
+    if (sharing.length < 2) continue;
+    for (const g of sharing) {
+      const names = result.get(g.id) ?? new Set<string>();
+      for (const other of sharing) {
+        if (other.id !== g.id) names.add(other.name);
+      }
+      result.set(g.id, names);
+    }
+  }
+
+  return new Map([...result.entries()].map(([id, names]) => [id, [...names]]));
 }
 
 /**
