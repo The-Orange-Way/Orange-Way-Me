@@ -31,9 +31,11 @@ interface Props {
   goal: Goal;
   accounts: Account[];
   txns: DecryptedTxn[];
+  /** Names of other active goals that share a backing account with this one. */
+  sharedWith?: string[];
 }
 
-export function GoalCard({ goal, accounts, txns }: Props) {
+export function GoalCard({ goal, accounts, txns, sharedWith = [] }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
@@ -95,7 +97,12 @@ export function GoalCard({ goal, accounts, txns }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                {/* Display only: never show more banked than this goal's own
+                    target asks for, even when the backing account also funds
+                    another goal and really does hold more (OWM-T0674). */}
+                <span className="font-semibold text-base">
+                  {fmtUSD(Math.min(prog.current, prog.target))}
+                </span>
                 <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
@@ -107,6 +114,11 @@ export function GoalCard({ goal, accounts, txns }: Props) {
                 </span>
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>
+              {sharedWith.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Shared with {sharedWith.join(", ")}
+                </p>
+              )}
             </div>
           )}
 
