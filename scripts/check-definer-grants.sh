@@ -28,6 +28,17 @@
 #    because the cast raises on a database where that role does not exist, and a
 #    gate that dies on an unrelated cast is a gate that stopped checking.
 #
+# THE ALLOWLIST SIGNATURE FORM, and how the other script matches it
+# The allowlist here is compared against oid::regprocedure, which prints TYPES
+# ONLY: is_invite_code_valid(text). Production declares that function with a
+# parameter name, is_invite_code_valid(p_code text), so the two are not the
+# same string. scripts/check-definer-grant-migrations.sh, which reads migration
+# TEXT rather than the catalog, therefore compares each added grant against the
+# allowlist twice: as literally written, and with argument modes and parameter
+# names stripped. Keep the entries here in the types-only form, and keep the
+# two allowlists identical, or the migration scan will refuse a grant this gate
+# permits.
+#
 # OUTCOMES, deliberately worded differently, because a check that reports
 # "I could not look" as a pass manufactures confidence:
 #   exit 0  PASS          examined N functions, nothing outside the allowlist

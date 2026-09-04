@@ -12,6 +12,25 @@
 #   3) a migration that adds GRANT EXECUTE ... TO anon on a function that IS
 #      on the allowlist, plus an unrelated migration with no grant at all
 #                                               -> must exit 0 (PASS)
+#   4) GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO anon
+#                                               -> must exit 1 (blanket, never
+#      allowlistable, because the allowlist is per function signature)
+#   5) ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon
+#                                               -> must exit 1 (same reason)
+#   6) the same grant as case 1 wrapped across three lines, which is normal
+#      formatting and which a line-at-a-time scan cannot see
+#                                               -> must exit 1
+#   7) ON PROCEDURE and ON ROUTINE spellings    -> must exit 1
+#   8) a comma list of two functions in one statement where the FIRST is
+#      allowlisted and the second is not, so a first-match-only scan would
+#      pass it                                   -> must exit 1
+#   9) GRANT EXECUTE ON FUNCTION f TO anon with no signature written
+#                                               -> must exit 1
+#  10) an allowlisted grant written with PARAMETER NAMES, which is how
+#      production declares the function, against a types-only allowlist entry
+#                                               -> must exit 0 (PASS)
+#  11) a grant that appears only inside a line comment
+#                                               -> must exit 0 (PASS)
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
@@ -84,6 +103,96 @@ SQL
 git add -A
 git commit -q -m "case3"
 check_case "allowlisted grant plus unrelated migration" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 4: a blanket schema-wide grant cannot be allowlisted, so it is refused.
+git checkout -q -b case4 main
+cat > supabase/migrations/0002_all_functions.sql <<'SQL'
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO anon;
+SQL
+git add -A
+git commit -q -m "case4"
+check_case "ON ALL FUNCTIONS IN SCHEMA" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 5: default privileges grant every FUTURE function, which is worse than
+# a single grant and carries no signature to allowlist.
+git checkout -q -b case5 main
+cat > supabase/migrations/0002_default_privs.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon;
+SQL
+git add -A
+git commit -q -m "case5"
+check_case "ALTER DEFAULT PRIVILEGES ON FUNCTIONS" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 6: the keywords never appear together on one input line.
+git checkout -q -b case6 main
+cat > supabase/migrations/0002_wrapped.sql <<'SQL'
+GRANT EXECUTE
+  ON FUNCTION public.some_definer_fn(uuid)
+  TO anon;
+SQL
+git add -A
+git commit -q -m "case6"
+check_case "grant wrapped across three lines" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 7: ON PROCEDURE and ON ROUTINE carry the same privilege.
+git checkout -q -b case7 main
+cat > supabase/migrations/0002_procedure.sql <<'SQL'
+GRANT EXECUTE ON PROCEDURE public.some_definer_proc(uuid) TO anon;
+GRANT EXECUTE ON ROUTINE public.some_definer_routine(uuid) TO PUBLIC;
+SQL
+git add -A
+git commit -q -m "case7"
+check_case "ON PROCEDURE and ON ROUTINE" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 8: first function is allowlisted, second is not. A scan that stops at
+# the first signature in the statement would report this clean.
+git checkout -q -b case8 main
+cat > supabase/migrations/0002_comma_list.sql <<'SQL'
+GRANT EXECUTE ON FUNCTION is_invite_code_valid(text), public.some_definer_fn(uuid) TO anon;
+SQL
+git add -A
+git commit -q -m "case8"
+check_case "comma list where only the second function is unallowlisted" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 9: a grant with no signature written is legal SQL when the name is
+# unique, and it cannot be matched against a per-signature allowlist.
+git checkout -q -b case9 main
+cat > supabase/migrations/0002_no_signature.sql <<'SQL'
+GRANT EXECUTE ON FUNCTION public.some_definer_fn TO anon;
+SQL
+git add -A
+git commit -q -m "case9"
+check_case "grant with no signature written" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 10: production declares is_invite_code_valid(p_code text). The allowlist
+# entry is the regprocedure form, types only. This must PASS, or a legitimate
+# re-grant migration is refused for a reason nobody can see in the output.
+git checkout -q -b case10 main
+cat > supabase/migrations/0002_named_params.sql <<'SQL'
+GRANT EXECUTE ON FUNCTION public.is_invite_code_valid(p_code text) TO anon;
+SQL
+git add -A
+git commit -q -m "case10"
+check_case "allowlisted grant written with parameter names" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 11: a commented-out grant is not a grant. Refusing it would train people
+# to ignore this gate.
+git checkout -q -b case11 main
+cat > supabase/migrations/0002_commented.sql <<'SQL'
+-- GRANT EXECUTE ON FUNCTION public.some_definer_fn(uuid) TO anon;
+CREATE INDEX IF NOT EXISTS idx_selftest_2 ON some_table (other_column);
+SQL
+git add -A
+git commit -q -m "case11"
+check_case "grant only inside a line comment" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
 if [ "$FAILURES" -gt 0 ]; then
