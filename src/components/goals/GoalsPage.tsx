@@ -40,6 +40,10 @@ export function GoalsPage() {
   const saveUp = goals.filter((g) => g.type === "save_up" && !g.is_completed);
   const payDown = goals.filter((g) => g.type === "pay_down" && !g.is_completed);
   const completed = goals.filter((g) => g.is_completed);
+  // The set GoalCard checks against to name a shared backing account
+  // (OWM-T0674). Completed goals are excluded: they no longer draw on the
+  // account in a way that matters to the customer reading an active card.
+  const activeGoals = [...saveUp, ...payDown];
 
   const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
 
