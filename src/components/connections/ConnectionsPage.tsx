@@ -775,13 +775,6 @@ export function ConnectionsPage() {
     // switch off, the press joins the pre-flip query and the credentials key
     // below crosses to the provider origin. The door version issues its own
     // read, and doors pressed together still share one of them.
-    await refreshRuntimeFlagsForDoor();
-    if (!isStealthSyncEnabled()) {
-      toast.error(
-        "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",
-      );
-      return;
-    }
     setSyncingId(conn.id);
     // Clear any line left over from the previous scan before this one starts.
     // Showing the last run's "97%" while a fresh scan is at zero is a lie the
