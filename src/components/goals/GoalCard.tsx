@@ -122,7 +122,7 @@ export function GoalCard({ goal, accounts, txns, allGoals = [] }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                <span className="font-semibold text-base">{fmtUSD(displayCurrent)}</span>
                 <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
@@ -134,6 +134,17 @@ export function GoalCard({ goal, accounts, txns, allGoals = [] }: Props) {
                 </span>
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>
+              {sharedWith.length > 0 && (
+                /*
+                 * Not a warning: Product ruled sharing an account is
+                 * supported and normal (OWM-T0210). This is the context
+                 * that makes this card and the goal(s) named here reading
+                 * different percentages off the same account legible.
+                 */
+                <p className="text-xs text-muted-foreground">
+                  Shared with {sharedWith.join(", ")}
+                </p>
+              )}
             </div>
           )}
 
