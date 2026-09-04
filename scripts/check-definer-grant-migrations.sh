@@ -23,6 +23,16 @@
 #   GRANT EXECUTE ON FUNCTION f TO anon            no signature written
 #   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA s TO anon
 #   ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon
+# and the same five statements written with ALL or ALL PRIVILEGES instead of
+# EXECUTE, for example:
+#   GRANT ALL ON FUNCTION f(args) TO anon
+#   GRANT ALL PRIVILEGES ON FUNCTION f(args) TO PUBLIC
+#   GRANT ALL ON ALL FUNCTIONS IN SCHEMA s TO anon
+#   ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon
+# EXECUTE is the only privilege a function has in PostgreSQL, so ALL is the
+# same grant written differently and is treated identically here. The object
+# type is checked before anything is refused, so a grant on a TABLE written
+# with ALL is left alone: that object is not this scan's remit.
 # The last three can never be allowlisted. The allowlist is per function
 # signature, and a blanket grant is not a signature, so it is always refused.
 #
@@ -35,6 +45,12 @@
 #    where the grantee is not literal text in the migration.
 # 3. A grant that already sits in a file this pull request does not touch.
 #    The scan reads ADDED lines only, on purpose.
+# 4. A privilege spelled as neither EXECUTE nor ALL / ALL PRIVILEGES. Those
+#    two are the only spellings that can confer EXECUTE on a function today,
+#    so the list is exhaustive as PostgreSQL stands, but it is a keyword list
+#    and not a parser: if a future version adds another way to write it, this
+#    scan will not see it until the keyword is added on the line below marked
+#    ENTRY FILTER.
 # Every one of those does show up in check-definer-grants.sh, which reads the
 # live catalog through aclexplode. Keep both.
 #
@@ -147,7 +163,11 @@ while IFS= read -r FILE; do
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
     LOWER=$(printf '%s' "$STMT" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
-    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+execute' || continue
+    # ENTRY FILTER. ALL and ALL PRIVILEGES confer EXECUTE on a function
+    # exactly as EXECUTE does, so both spellings come in here. What keeps a
+    # table grant written with ALL out of the results is the object-type
+    # classification below, not this line.
+    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+(execute|all)[[:space:]]' || continue
     printf '%s' "$LOWER" | grep -Eq '[[:space:]]to[[:space:]]' || continue
 
     # Everything after the LAST " to ", minus a trailing WITH GRANT OPTION.
@@ -158,9 +178,18 @@ while IFS= read -r FILE; do
     TARGETS=""
     BLANKET=""
     if printf '%s' "$LOWER" | grep -Eq 'alter[[:space:]]+default[[:space:]]+privileges'; then
-      BLANKET="ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS"
+      # The object type MUST be checked here. This branch used to fire on the
+      # phrase alone, which was safe only while EXECUTE was the only way in,
+      # because GRANT EXECUTE ON TABLES is not valid SQL and so could never
+      # reach it. ALL can, and defaulting privileges on TABLES is legal SQL
+      # this scan has no opinion about.
+      if printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(functions|procedures|routines)[[:space:]]'; then
+        BLANKET="ALTER DEFAULT PRIVILEGES ... GRANT ON FUNCTIONS"
+      else
+        continue
+      fi
     elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+all[[:space:]]+(functions|procedures|routines)[[:space:]]+in[[:space:]]+schema'; then
-      BLANKET="GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA"
+      BLANKET="GRANT ON ALL FUNCTIONS IN SCHEMA"
     elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(function|procedure|routine)[[:space:]]'; then
       TARGETS=$(printf '%s' "$LOWER" \
         | sed -E 's/.*[[:space:]]on[[:space:]]+(function|procedure|routine)[[:space:]]+//' \
