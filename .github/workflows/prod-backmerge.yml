@@ -175,7 +175,7 @@ jobs:
               # let a human decide. If no pull request depends on it, it is
               # safe to self-heal: delete it, and the next step recreates it
               # at the prod tip in this same run.
-              pr_number="$(gh pr list --head "${BACKMERGE_BRANCH}" --base "${BASE_BRANCH}" \
+              pr_number="$(gh pr list --head "${BACKMERGE_BRANCH}" \
                              --state open --json number --jq '.[0].number // empty')"
               if [ -n "${pr_number}" ]; then
                 pr_url="$(gh pr view "${pr_number}" --json url --jq .url)"
