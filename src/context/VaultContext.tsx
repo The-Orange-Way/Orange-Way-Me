@@ -56,6 +56,7 @@ import {
 import {
   readOrMaterialEvidence,
   shouldRecordPreRecoverySalt,
+  type OrMaterialEvidence,
 } from "@/lib/or/or-material-evidence";
 import {
   CURRENT_OR_KEY_EPOCH,
@@ -1407,7 +1408,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // be: the only miss it admits is a subaccount provisioned between this
     // read and that write, which is a far smaller window than the one it
     // replaces.
-    const orMaterialEvidence = await readOrMaterialEvidence({
+    const orMaterialEvidence: OrMaterialEvidence = await readOrMaterialEvidence({
       subaccountId: () =>
         supabase
           .from("user_profiles")
@@ -1415,7 +1416,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           .eq("user_id", user.id)
           .maybeSingle(),
       syncEvents: () =>
-        supabase.from("sync_events").select("id").eq("user_id", user.id).limit(1),
+        supabase
+          .from("sync_events")
+          .select("id")
+          .eq("user_id", user.id)
+          .limit(1),
     });
     const markPreRecoverySalt = shouldRecordPreRecoverySalt({
       hadNoOrMaterialBeforeRecovery,
