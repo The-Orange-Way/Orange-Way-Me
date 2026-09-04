@@ -23,6 +23,12 @@
 #   GRANT EXECUTE ON FUNCTION f TO anon            no signature written
 #   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA s TO anon
 #   ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon
+# EXECUTE is the only privilege a function has, so GRANT ALL and GRANT ALL
+# PRIVILEGES confer exactly the same thing, and every form above is matched
+# with ALL written in place of EXECUTE as well. ALL on something that is not a
+# function (a table, a sequence, a schema, a type) is not a function grant and
+# is ignored, including in the ALTER DEFAULT PRIVILEGES form, which counts only
+# when its target class is FUNCTIONS, PROCEDURES or ROUTINES.
 # The last three can never be allowlisted. The allowlist is per function
 # signature, and a blanket grant is not a signature, so it is always refused.
 #
@@ -147,8 +153,16 @@ while IFS= read -r FILE; do
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
     LOWER=$(printf '%s' "$STMT" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
-    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+execute' || continue
+    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+(execute|all)[[:space:]]' || continue
     printf '%s' "$LOWER" | grep -Eq '[[:space:]]to[[:space:]]' || continue
+
+    # Which spelling conferred it, for the message only. GRANT ALL and GRANT
+    # ALL PRIVILEGES confer EXECUTE on a function exactly as GRANT EXECUTE does.
+    if printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+all[[:space:]]'; then
+      PRIV="ALL"
+    else
+      PRIV="EXECUTE"
+    fi
 
     # Everything after the LAST " to ", minus a trailing WITH GRANT OPTION.
     GRANTEES=$(printf '%s' "$LOWER" | sed -E 's/.*[[:space:]]to[[:space:]]+//; s/[[:space:]]+with[[:space:]]+grant[[:space:]]+option.*//')
@@ -158,15 +172,18 @@ while IFS= read -r FILE; do
     TARGETS=""
     BLANKET=""
     if printf '%s' "$LOWER" | grep -Eq 'alter[[:space:]]+default[[:space:]]+privileges'; then
-      BLANKET="ALTER DEFAULT PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS"
+      # ALL is legal here on TABLES, SEQUENCES and TYPES too, none of which is
+      # a function grant. Only the function target classes count.
+      printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(functions|procedures|routines)[[:space:]]' || continue
+      BLANKET="ALTER DEFAULT PRIVILEGES ... GRANT ${PRIV} ON FUNCTIONS"
     elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+all[[:space:]]+(functions|procedures|routines)[[:space:]]+in[[:space:]]+schema'; then
-      BLANKET="GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA"
+      BLANKET="GRANT ${PRIV} ON ALL FUNCTIONS IN SCHEMA"
     elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(function|procedure|routine)[[:space:]]'; then
       TARGETS=$(printf '%s' "$LOWER" \
         | sed -E 's/.*[[:space:]]on[[:space:]]+(function|procedure|routine)[[:space:]]+//' \
         | grep -Eo '[a-z0-9_."]+\([^)]*\)' || true)
       if [ -z "$TARGETS" ]; then
-        BLANKET="GRANT EXECUTE ON FUNCTION (no signature written)"
+        BLANKET="GRANT ${PRIV} ON FUNCTION (no signature written)"
       fi
     else
       continue
@@ -234,7 +251,7 @@ done <<< "$CHANGED_FILES"
 } >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
-  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon or PUBLIC EXECUTE grant(s) added on SECURITY DEFINER functions in this pull request's migrations."
+  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon or PUBLIC EXECUTE-conferring grant(s), written as EXECUTE or as ALL, added on SECURITY DEFINER functions in this pull request's migrations."
   exit 1
 fi
 
