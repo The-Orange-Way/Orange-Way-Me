@@ -31,6 +31,22 @@
 #                                               -> must exit 0 (PASS)
 #  11) a grant that appears only inside a line comment
 #                                               -> must exit 0 (PASS)
+#  12) GRANT ALL ON FUNCTION f(args) TO anon    -> must exit 1. EXECUTE is the
+#      only privilege a function has, so ALL confers exactly what EXECUTE does
+#  13) GRANT ALL PRIVILEGES ON FUNCTION f(args) TO PUBLIC
+#                                               -> must exit 1, same reason
+#  14) GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon
+#                                               -> must exit 1 (blanket)
+#  15) ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon
+#                                               -> must exit 1 (blanket)
+#  16) ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES TO anon
+#                                               -> must exit 0. A table grant
+#      is not this scan's business. This case exists because accepting ALL at
+#      the first filter makes this statement reach the default-privileges
+#      branch for the first time, and that branch never checked the object
+#      type. Without the object-type check it would be refused as a blanket
+#      function grant, which is a false positive on legal, unrelated SQL
+#  17) GRANT ALL ON TABLE t TO anon             -> must exit 0, same reason
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
