@@ -146,10 +146,10 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * Two goals linked to the same account (DL-1589) are handled below: Product
+ * ruled on OWM-T0210 that sharing an account is supported, so a save_up +
+ * all_balance goal's contribution is deduped by account rather than summed
+ * once per goal.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
   let dedupedAccountSaved = 0;
