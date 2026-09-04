@@ -48,7 +48,10 @@ do $$
 declare
   found_jobs integer;
 begin
-  select count(*)
+  -- count DISTINCT job names, not rows. pg_cron is unique on (jobname, username),
+  -- so a job already present under another role adds a second row with the same
+  -- name and count(*) would raise on a healthy database.
+  select count(distinct jobname)
     into found_jobs
     from cron.job
    where active
@@ -59,7 +62,7 @@ begin
 
   if found_jobs <> 2 then
     raise exception
-      'household sweep schedules were not created: expected 2 active cron.job rows, found %',
+      'household sweep schedules were not created: expected 2 active cron.job names (expire-time-boxed-household-roles, purge-expired-old-household-key-wraps), found %',
       found_jobs;
   end if;
 end
