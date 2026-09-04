@@ -50,12 +50,18 @@ jobs:
 
       - name: Pick the branch and project ref to compare
         id: target
+        # The branch name reaches the shell through this mapping rather than
+        # being interpolated into the script text, so the runner never rewrites
+        # the body of the script with a value taken from a ref name.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
             BRANCH=prod
           else
-            BRANCH="${{ github.ref_name }}"
+            BRANCH="$REF_NAME"
           fi
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           if [ "$BRANCH" = "prod" ]; then
@@ -72,6 +78,7 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           BRANCH: ${{ steps.target.outputs.branch }}
           REF: ${{ steps.target.outputs.ref }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -81,11 +88,11 @@ jobs:
           # prod with no mapping means the comparison did not happen while the
           # job goes green. That case must go RED.
           if [ -z "${REF:-}" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              echo "No project ref for $BRANCH: nothing was compared (manual run off dev/prod)." >&2
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "No project ref for $BRANCH: nothing was compared (manual run off a branch that is neither dev nor prod)." >&2
               exit 0
             fi
-            echo "No project ref for $BRANCH on a ${{ github.event_name }} event: the comparison did not happen. Failing loudly." >&2
+            echo "No project ref for $BRANCH on a $EVENT_NAME event: the comparison did not happen. Failing loudly." >&2
             exit 1
           fi
 
@@ -100,6 +107,11 @@ jobs:
             exit 1
           fi
           basename -a supabase/migrations/*.sql | sort -u > local_files.txt
+          # sort -u collapses two files that share one 14-digit prefix into a
+          # single entry. That is deliberate, not a blind spot: the ledger holds
+          # ONE row per version, so a duplicate prefix cannot be compared as two
+          # in the first place, and the Migration filename hygiene job in ci.yml
+          # refuses any NEW duplicate before it can merge.
           sed -nE 's/^([0-9]{14}).*/\1/p' local_files.txt | sort -u > local.txt
           # A filename that does not begin with a 14-digit version is dropped by
           # the parse above and never reaches the comparison at all. The guard
@@ -110,7 +122,18 @@ jobs:
           # the first real run of this workflow is what settles whether the
           # access token alone can read the ledger. A filename must not be what
           # stops us finding that out.
-          grep -vE '^[0-9]{14}' local_files.txt > local_bad.txt || true
+          # grep exits 1 when nothing matches, which is the normal healthy case
+          # and must not fail the run under set -e. Anything above 1 is a real
+          # grep error, and swallowing that alongside the expected 1 would leave
+          # local_bad.txt empty and the report at the end of this run silent.
+          set +e
+          grep -vE '^[0-9]{14}' local_files.txt > local_bad.txt
+          GREP_STATUS=$?
+          set -e
+          if [ "$GREP_STATUS" -gt 1 ]; then
+            echo "grep exited $GREP_STATUS while listing migration filenames that do not begin with a 14-digit version. That is a grep failure, not an empty result, so nothing below it can be trusted." >&2
+            exit 1
+          fi
           if [ ! -s local.txt ]; then
             echo "Parsed zero versions out of the migration filenames. The naming convention changed and this check can no longer tell drift from silence." >&2
             exit 1
