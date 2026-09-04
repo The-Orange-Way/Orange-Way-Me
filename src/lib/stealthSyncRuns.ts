@@ -29,7 +29,7 @@ export type StealthSyncRunStatus = "success" | "error";
 const ERROR_CODE_MAX_LEN = 32;
 const ERROR_CODE_PATTERN = /^[A-Za-z0-9_]+$/;
 
-function normalizeErrorCode(raw: string | undefined | null): string | null {
+export function normalizeErrorCode(raw: string | undefined | null): string | null {
   if (!raw) return null;
   // Length is tested FIRST, on the original, and an over-long value is
   // rejected outright rather than cut down to fit. Never test a truncated
