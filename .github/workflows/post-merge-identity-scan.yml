@@ -100,6 +100,21 @@ jobs:
             exit 1
           fi
           . scripts/canon-terms.sh
+          # Sourcing without an error is not the same as defining what this
+          # step is about to call. Under the default `bash -e` shell a
+          # library with a syntax error aborts the step at the line above,
+          # so a partial source never reaches this guard. What does reach it
+          # is a library that sources cleanly and still leaves a function
+          # undefined: an early return, a conditional definition, or a name
+          # deleted or renamed by a later edit. Ask for all three by name,
+          # so a broken library names itself instead of sending the reader
+          # to edit a reserved-term list that is fine.
+          for FN in canon_terms canon_terms_usable canon_terms_reason_text; do
+            if ! declare -f "$FN" >/dev/null 2>&1; then
+              echo "::error::scripts/canon-terms.sh was sourced but defines no $FN; the identity scan cannot run."
+              exit 1
+            fi
+          done
           PATTERN="$(printf '%s\n' "$RAW_PATTERN" | canon_terms)"
 
           if [ -z "$PATTERN" ]; then
