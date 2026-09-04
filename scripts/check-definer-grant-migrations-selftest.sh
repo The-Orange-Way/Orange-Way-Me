@@ -31,6 +31,19 @@
 #                                               -> must exit 0 (PASS)
 #  11) a grant that appears only inside a line comment
 #                                               -> must exit 0 (PASS)
+#  12) GRANT ALL ON FUNCTION f(uuid) TO anon on an unallowlisted function.
+#      EXECUTE is the only privilege a function has, so ALL confers exactly
+#      what EXECUTE confers                      -> must exit 1
+#  13) GRANT ALL PRIVILEGES ... TO PUBLIC        -> must exit 1
+#  14) GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon
+#                                               -> must exit 1 (blanket)
+#  15) ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon
+#                                               -> must exit 1 (blanket)
+#  16) NEGATIVE CONTROLS for the widening: GRANT ALL on a TABLE, and ALTER
+#      DEFAULT PRIVILEGES ... GRANT ALL ON TABLES. Neither is a function
+#      grant, and this gate is about function EXECUTE only
+#                                               -> must exit 0 (PASS)
+#  17) GRANT ALL on an ALLOWLISTED function      -> must exit 0 (PASS)
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
@@ -193,6 +206,73 @@ SQL
 git add -A
 git commit -q -m "case11"
 check_case "grant only inside a line comment" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 12: ALL confers EXECUTE on a function. The scan used to match the
+# literal keyword pair GRANT then EXECUTE and skip this before classifying it.
+git checkout -q -b case12 main
+cat > supabase/migrations/0002_grant_all_fn.sql <<'SQL'
+GRANT ALL ON FUNCTION public.some_definer_fn(uuid) TO anon;
+SQL
+git add -A
+git commit -q -m "case12"
+check_case "GRANT ALL on an unallowlisted function" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 13: the ALL PRIVILEGES spelling, to PUBLIC.
+git checkout -q -b case13 main
+cat > supabase/migrations/0002_grant_all_privs_public.sql <<'SQL'
+GRANT ALL PRIVILEGES ON FUNCTION public.some_definer_fn(uuid) TO PUBLIC;
+SQL
+git add -A
+git commit -q -m "case13"
+check_case "GRANT ALL PRIVILEGES to PUBLIC" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 14: blanket schema-wide, written with ALL.
+git checkout -q -b case14 main
+cat > supabase/migrations/0002_all_privs_all_functions.sql <<'SQL'
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon;
+SQL
+git add -A
+git commit -q -m "case14"
+check_case "GRANT ALL ON ALL FUNCTIONS IN SCHEMA" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 15: every FUTURE function, written with ALL.
+git checkout -q -b case15 main
+cat > supabase/migrations/0002_default_privs_all.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon;
+SQL
+git add -A
+git commit -q -m "case15"
+check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON FUNCTIONS" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 16: the negative controls. ALL is legal on objects that are not
+# functions, and this gate is about function EXECUTE only. If widening the
+# keyword match made these fail, the gate would start refusing ordinary table
+# grants and people would route around it.
+git checkout -q -b case16 main
+cat > supabase/migrations/0002_table_grants.sql <<'SQL'
+GRANT ALL ON TABLE public.some_table TO anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon;
+GRANT ALL ON SEQUENCE public.some_seq TO anon;
+SQL
+git add -A
+git commit -q -m "case16"
+check_case "GRANT ALL on non-function objects is not a function grant" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 17: an allowlisted function granted with ALL is the same privilege
+# written differently, so the allowlist still applies.
+git checkout -q -b case17 main
+cat > supabase/migrations/0002_grant_all_allowlisted.sql <<'SQL'
+GRANT ALL ON FUNCTION public.is_invite_code_valid(text) TO anon;
+SQL
+git add -A
+git commit -q -m "case17"
+check_case "GRANT ALL on an allowlisted function" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
 if [ "$FAILURES" -gt 0 ]; then
