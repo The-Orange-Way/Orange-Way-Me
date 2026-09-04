@@ -152,9 +152,21 @@ fi
 # list would resolve empty, category 1 would print itself as skipped and
 # the run would still exit 0. In CI the canonicalizer self test runs as an
 # earlier step and would catch that first, so the property would be held by
-# step ORDER rather than by this script. Ask for the function itself.
-if ! declare -f canon_terms >/dev/null 2>&1; then
-  printf "\n\033[31m▎ scripts/canon-terms.sh was sourced but defines no canon_terms; the reserved-term scan cannot run.\033[0m\n\n" >&2
+# step ORDER rather than by this script. Ask for the functions themselves.
+#
+# ALL THREE are named, not only the first. A partial source that defines
+# canon_terms and stops leaves canon_terms_usable undefined; bash returns
+# 127 for it, the "! canon_terms_usable" test below reads that as unusable,
+# and the run is refused with a message telling the reader to fix a
+# fragment in a list that is perfectly fine. The direction is safe, so this
+# is a diagnostic bug and not a hole: it costs whoever reads it a hunt for
+# a typo in a value nobody can read back, for a fault that is in a script
+# sitting in front of them. Naming every function this script calls makes
+# the message say what is actually broken.
+if ! declare -f canon_terms >/dev/null 2>&1 \
+  || ! declare -f canon_terms_usable >/dev/null 2>&1 \
+  || ! declare -f canon_terms_reason_text >/dev/null 2>&1; then
+  printf "\n\033[31m▎ scripts/canon-terms.sh was sourced but does not define all of canon_terms, canon_terms_usable and canon_terms_reason_text. The library is broken, not the reserved-term list, and the reserved-term scan cannot run.\033[0m\n\n" >&2
   exit 1
 fi
 
