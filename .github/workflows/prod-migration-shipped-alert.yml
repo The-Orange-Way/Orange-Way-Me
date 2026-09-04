@@ -50,7 +50,17 @@ jobs:
             RANGE_FROM=$(git hash-object -t tree /dev/null)
           fi
 
-          ADDED=$(git diff --name-status --diff-filter=A "$RANGE_FROM" "$AFTER" -- supabase/migrations 2>/dev/null | awk '{print $2}' || true)
+          set +e
+          DIFF_OUTPUT=$(git diff --name-status --diff-filter=A "$RANGE_FROM" "$AFTER" -- supabase/migrations)
+          DIFF_STATUS=$?
+          set -e
+
+          if [ "$DIFF_STATUS" -ne 0 ]; then
+            echo "git diff failed (exit $DIFF_STATUS) reading $RANGE_FROM..$AFTER. Cannot tell whether a migration was added, so this run is NOT a clean negative."
+            exit 1
+          fi
+
+          ADDED=$(printf '%s\n' "$DIFF_OUTPUT" | awk '{print $2}')
 
           if [ -z "$ADDED" ]; then
             echo "No migration files were added by this push. Nothing to do."
@@ -109,7 +119,7 @@ jobs:
             printf '%s\n' "$FILES"
             echo '```'
             echo ""
-            echo "The DBA is the seat that applies production migrations."
+            echo "The database administrator is the role that applies production migrations."
             echo ""
             echo "This issue is closed only when the migration has actually been run against the production database and the ledger row exists for it, not when this PR merged or this app redeployed."
             echo ""
