@@ -22,12 +22,27 @@ export type StealthSyncRunStatus = "success" | "error";
 
 // Mirrors the CHECK constraint on stealth_sync_runs.error_code: a short
 // code only, never a message. Applied here too so a widget code that does
-// not fit (too long, or carrying anything other than [A-Za-z0-9_]) fails
+// not fit (too long, or carrying anything other than [A-Za-z0-9_.:-]) fails
 // closed to a fixed placeholder instead of failing the whole insert, and
 // so this column can never carry an address, a txid, or free text even if
 // the widget's own code vocabulary changes upstream.
+//
+// This class must stay in step with the migration that owns the constraint,
+// supabase/migrations/20260904120000_widen_stealth_sync_runs_error_code.sql.
+// This is the half that matters. Because normalizeErrorCode replaces a value
+// that fails the pattern rather than passing it on, a class narrower than the
+// database's does not fail loudly: it silently flattens every failure reason
+// to the single literal UNRECOGNIZED, and the column stops being able to tell
+// a rate limit from an auth failure. Hyphen, dot and colon are the separators
+// third party codes actually use (rate-limited, auth.failed, ERR:TIMEOUT).
+//
+// NOT widened, deliberately: the 32 character cap and the exclusion of space.
+// The cap is the real control here, not the class. Addresses, xpubs, bech32
+// address bodies and hex txids are all pure alphanumeric and already satisfied
+// the old class, so length is what stops them (an address is 34 characters, a
+// txid 64). Excluding space is what stops a human readable message.
 const ERROR_CODE_MAX_LEN = 32;
-const ERROR_CODE_PATTERN = /^[A-Za-z0-9_]+$/;
+const ERROR_CODE_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
 function normalizeErrorCode(raw: string | undefined | null): string | null {
   if (!raw) return null;
