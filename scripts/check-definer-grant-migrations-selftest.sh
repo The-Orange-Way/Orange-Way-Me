@@ -46,6 +46,10 @@
 #      privileges branch, so that branch has to check the object type or a
 #      legal table grant would be reported as a blanket function grant
 #  17) GRANT ALL ON TABLE t TO anon             -> must exit 0, same reason
+#  18) GRANT ALL ON FUNCTION on an ALLOWLISTED function
+#                                               -> must exit 0. The allowlist
+#      is per function signature, not per keyword, so the same privilege
+#      written a different way must still be allowed
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
@@ -273,6 +277,19 @@ SQL
 git add -A
 git commit -q -m "case17"
 check_case "GRANT ALL ON TABLE is not refused" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 18: the other direction of the widening. An allowlisted function
+# granted with ALL is the same privilege written differently and must still
+# pass, or a later change that matched on the keyword instead of the signature
+# would start refusing legitimate re-grants with every other case still green.
+git checkout -q -b case18 main
+cat > supabase/migrations/0002_grant_all_allowlisted.sql <<'SQL'
+GRANT ALL ON FUNCTION public.is_invite_code_valid(text) TO anon;
+SQL
+git add -A
+git commit -q -m "case18"
+check_case "GRANT ALL on an allowlisted function" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
 if [ "$FAILURES" -gt 0 ]; then
