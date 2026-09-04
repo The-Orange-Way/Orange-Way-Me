@@ -8,7 +8,7 @@ import { Plus, Target } from "lucide-react";
 import { useGoals, type GoalDraft } from "@/hooks/useGoals";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useTransactions } from "@/hooks/useTransactions";
-import { summariseGoals } from "@/lib/goals-math";
+import { summariseGoals, sharedAccountGoalNames } from "@/lib/goals-math";
 import { useLocaleFormat } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { GoalCard } from "./GoalCard";
@@ -42,6 +42,7 @@ export function GoalsPage() {
   const completed = goals.filter((g) => g.is_completed);
 
   const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
+  const sharedWith = useMemo(() => sharedAccountGoalNames(goals), [goals]);
 
   async function handleCreate(draft: GoalDraft) {
     await createGoal(draft);
@@ -77,10 +78,17 @@ export function GoalsPage() {
             </p>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">
-              You've made {fmtMoney(totals.saved)} of {fmtMoney(totals.target)} progress across{" "}
+              {/*
+               * PROVISIONAL COPY (OWM-T0674): dedupes an account backing two
+               * goals down to what the customer actually holds, instead of
+               * summing each goal's own claim on it. Wording pending
+               * orangeway/sr-copywriter sign-off, see the ticket note.
+               */}
+              {fmtMoney(totals.saved)} saved across{" "}
               {totals.counted < totals.active
                 ? `${totals.counted} of ${totals.active} active goals`
-                : `${totals.counted} active goal${totals.counted === 1 ? "" : "s"}`}{" "}
+                : `${totals.counted} active goal${totals.counted === 1 ? "" : "s"}`}
+              , against {fmtMoney(totals.target)} of targets{" "}
               <span className="font-medium text-foreground tabular-nums">
                 ({Math.round(totals.pct * 100)}%)
               </span>
@@ -124,7 +132,13 @@ export function GoalsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {saveUp.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard
+                    key={g.id}
+                    goal={g}
+                    accounts={accounts}
+                    txns={txns}
+                    sharedWith={sharedWith.get(g.id) ?? []}
+                  />
                 ))}
               </div>
             </section>
