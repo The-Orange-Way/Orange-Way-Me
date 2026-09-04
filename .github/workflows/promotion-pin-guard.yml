@@ -73,8 +73,12 @@ jobs:
           set -euo pipefail
           FILE=".github/workflows/scheduled-promotion.yml"
 
-          REF_LINE=$(grep -nF -- 'refs/heads/${BRANCH}' "${FILE}" | head -n1 | cut -d: -f1 || true)
-          PR_LINE=$(grep -nF -- 'gh pr create' "${FILE}" | head -n1 | cut -d: -f1 || true)
+          # grep -n on the whole file, then drop any hit whose own line is a
+          # comment (starts with optional whitespace then #). A prose
+          # mention like "...never reach gh pr create." in a comment must
+          # not count as the real invocation.
+          REF_LINE=$(grep -nF -- 'refs/heads/${BRANCH}' "${FILE}" | grep -vE '^[0-9]+:[[:space:]]*#' | head -n1 | cut -d: -f1 || true)
+          PR_LINE=$(grep -nF -- 'gh pr create' "${FILE}" | grep -vE '^[0-9]+:[[:space:]]*#' | head -n1 | cut -d: -f1 || true)
 
           if [ -z "${REF_LINE}" ]; then
             echo "::error::${FILE} no longer creates refs/heads/\${BRANCH}. Without cutting that ref, the promotion has nothing pinned to open from."
