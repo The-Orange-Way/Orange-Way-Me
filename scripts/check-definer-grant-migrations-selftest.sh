@@ -211,6 +211,71 @@ git commit -q -m "case11"
 check_case "grant only inside a line comment" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
+# Case 12: GRANT ALL on a named function. In PostgreSQL EXECUTE is the only
+# privilege a function has, so ALL is the same grant written differently.
+git checkout -q -b case12 main
+cat > supabase/migrations/0002_all_named_fn.sql <<'SQL'
+GRANT ALL ON FUNCTION public.some_definer_fn(uuid) TO anon;
+SQL
+git add -A
+git commit -q -m "case12"
+check_case "GRANT ALL on a named function to anon" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 13: the ALL PRIVILEGES spelling, to PUBLIC.
+git checkout -q -b case13 main
+cat > supabase/migrations/0002_all_privileges.sql <<'SQL'
+GRANT ALL PRIVILEGES ON FUNCTION public.some_definer_fn(uuid) TO PUBLIC;
+SQL
+git add -A
+git commit -q -m "case13"
+check_case "GRANT ALL PRIVILEGES on a named function to PUBLIC" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 14: the schema-wide blanket form written with ALL.
+git checkout -q -b case14 main
+cat > supabase/migrations/0002_all_all_functions.sql <<'SQL'
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon;
+SQL
+git add -A
+git commit -q -m "case14"
+check_case "GRANT ALL ON ALL FUNCTIONS IN SCHEMA" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 15: default privileges written with ALL, which grants every FUTURE
+# function in the schema.
+git checkout -q -b case15 main
+cat > supabase/migrations/0002_default_privs_all.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon;
+SQL
+git add -A
+git commit -q -m "case15"
+check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON FUNCTIONS" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 16: the same statement on TABLES. This is legal SQL that this scan has
+# no opinion about, and it must not be refused. It is the false positive that
+# widening the first filter to accept ALL introduces if the default-privileges
+# branch does not check the object type.
+git checkout -q -b case16 main
+cat > supabase/migrations/0002_default_privs_tables.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon;
+SQL
+git add -A
+git commit -q -m "case16"
+check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES is not refused" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 17: a plain table grant written with ALL, same direction as case 16.
+git checkout -q -b case17 main
+cat > supabase/migrations/0002_all_on_table.sql <<'SQL'
+GRANT ALL ON TABLE public.some_table TO anon;
+SQL
+git add -A
+git commit -q -m "case17"
+check_case "GRANT ALL ON TABLE is not refused" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
 if [ "$FAILURES" -gt 0 ]; then
   echo "::error::${FAILURES} self-test case(s) did not get the exit code they should. The gate cannot be trusted until this is green."
   exit 1
