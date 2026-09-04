@@ -266,7 +266,7 @@ else
   fi
 fi
 
-# ---- Check 4: gitleaks on the prepared commits (if installed) ----
+# ---- Check 4: gitleaks on the prepared commits (REQUIRED) ----
 # Scans only what this push adds, using the same base as check 3. Passing a
 # bare sha to --log-opts scanned every commit reachable from HEAD, so any
 # finding anywhere in history refused every push from every branch, no matter
