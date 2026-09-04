@@ -36,7 +36,9 @@ The `pre-push` gate refuses the push if any of these fail:
 1. The `/pr-this` skill has not been recorded against the current `HEAD` (marker at `.git/.pr-this-ran` must equal `git rev-parse HEAD`).
 2. The pre-publish leak scanner reports anything other than clean.
 3. The commits being pushed contain private / internal-only URLs (the gate scans for the founder's wiki hostnames, internal Tailscale hosts, internal email addresses, etc.).
-4. `gitleaks` reports a secret-shaped string in the prepared commits.
+4. `gitleaks` reports a secret-shaped string in the prepared commits, **or no `gitleaks` can be found at all**. An absent scan is not a clean scan, so the gate refuses rather than waving the push through.
+
+On check 4: the gate looks for `gitleaks` on `PATH` and then in the usual install locations (`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `/snap/bin`), and it runs the binary once to prove it works before trusting it. `PATH` alone was not enough: a git hook runs with a non-login `PATH`, so a perfectly good `~/.local/bin/gitleaks` was invisible to the old probe and the scan silently never ran. If yours lives somewhere else, `GITLEAKS_BIN=/path/to/gitleaks git push`. If you genuinely need to push with nothing scanning for secrets, `GITLEAKS_OPTIONAL=1 git push` warns loudly and lets it through.
 
 The marker is written by `scripts/mark-pr-this-ran.sh` as the **last step** of the `/pr-this` skill, so you should never need to write it by hand. If you ever do (true emergency), the script refuses to run on a dirty tree, so the marker can't lie about what was tested.
 
