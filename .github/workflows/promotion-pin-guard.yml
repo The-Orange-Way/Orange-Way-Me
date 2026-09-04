@@ -1,0 +1,94 @@
+name: promotion pin guard
+
+# OWM-T0684, out of OWM-T0540.
+#
+# scheduled-promotion.yml pins a dev-to-prod promotion pull request to one
+# commit: it cuts a release/prod-* branch at a fixed sha and opens the
+# promotion from that branch with `--head "${BRANCH}"`, never from dev
+# itself. Without that pin, the promotion PR would track the live dev
+# branch, so any unrelated merge into dev moves the PR head, voids the
+# Auditor's approval (require_last_push_approval), and can ship a commit
+# that was never the one reviewed.
+#
+# Nothing else in this repository reads scheduled-promotion.yml, so a
+# well-meant revert of the pin (for example "simplify this back to --head
+# dev") would pass every other check in the repo. This job exists only to
+# catch that one regression.
+#
+# It does not run scheduled-promotion.yml. It reads it as text and asserts
+# the two properties the pin depends on:
+#   1. The promotion is opened with --head "${BRANCH}", never --head dev.
+#   2. The release ref (refs/heads/${BRANCH}) is created strictly before
+#      `gh pr create` runs, so the branch exists by the time it is used.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/scheduled-promotion.yml'
+      - '.github/workflows/promotion-pin-guard.yml'
+  push:
+    branches:
+      - dev
+    paths:
+      - '.github/workflows/scheduled-promotion.yml'
+      - '.github/workflows/promotion-pin-guard.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-pin:
+    name: Assert the promotion pin is intact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Assert --head "${BRANCH}" is used, and --head dev is not
+        run: |
+          set -euo pipefail
+          FILE=".github/workflows/scheduled-promotion.yml"
+
+          if [ ! -f "${FILE}" ]; then
+            echo "::error::${FILE} is missing. The promotion pin cannot be checked."
+            exit 1
+          fi
+
+          if grep -qF -- '--head dev' "${FILE}"; then
+            echo "::error::${FILE} opens the promotion with --head dev. That tracks the live dev branch, so any later merge into dev moves the PR head and voids the Auditor's approval (require_last_push_approval). It must open from a pinned release/prod-* branch instead: --head \"\${BRANCH}\"."
+            exit 1
+          fi
+
+          if ! grep -qF -- '--head "${BRANCH}"' "${FILE}"; then
+            echo "::error::${FILE} no longer opens the promotion with --head \"\${BRANCH}\". The pin that binds an Auditor approval to the sha we actually ship is missing."
+            exit 1
+          fi
+
+          echo "OK: promotion is opened with --head \"\${BRANCH}\", not --head dev."
+
+      - name: Assert the release ref is created before the PR is opened
+        run: |
+          set -euo pipefail
+          FILE=".github/workflows/scheduled-promotion.yml"
+
+          REF_LINE=$(grep -nF -- 'refs/heads/${BRANCH}' "${FILE}" | head -n1 | cut -d: -f1 || true)
+          PR_LINE=$(grep -nF -- 'gh pr create' "${FILE}" | head -n1 | cut -d: -f1 || true)
+
+          if [ -z "${REF_LINE}" ]; then
+            echo "::error::${FILE} no longer creates refs/heads/\${BRANCH}. Without cutting that ref, the promotion has nothing pinned to open from."
+            exit 1
+          fi
+
+          if [ -z "${PR_LINE}" ]; then
+            echo "::error::${FILE} no longer calls 'gh pr create'. The promotion step this guard checks is missing entirely."
+            exit 1
+          fi
+
+          if [ "${REF_LINE}" -ge "${PR_LINE}" ]; then
+            echo "::error::${FILE} creates refs/heads/\${BRANCH} (line ${REF_LINE}) at or after 'gh pr create' (line ${PR_LINE}). The release ref must exist before the PR is opened from it, or the open can race an unpinned or missing branch."
+            exit 1
+          fi
+
+          echo "OK: refs/heads/\${BRANCH} is created at line ${REF_LINE}, before gh pr create at line ${PR_LINE}."
