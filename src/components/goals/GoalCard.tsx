@@ -31,15 +31,42 @@ interface Props {
   goal: Goal;
   accounts: Account[];
   txns: DecryptedTxn[];
+  /**
+   * The other active goals on the same screen. Used only to name a shared
+   * backing account (OWM-T0674); omit and no "Shared with" line is shown.
+   */
+  allGoals?: Goal[];
 }
 
-export function GoalCard({ goal, accounts, txns }: Props) {
+/**
+ * Names of the other active save_up + all_balance goals that link at least
+ * one of this goal's own linked accounts. Scoped to save_up + all_balance,
+ * the strategy whose current is a raw account-balance sum and the only one
+ * where sharing an account double-books money (see summariseGoals).
+ */
+function sharedAccountGoalNames(goal: Goal, allGoals: Goal[]): string[] {
+  if (goal.type !== "save_up" || goal.strategy === "specific_amount") return [];
+  const names = new Set<string>();
+  for (const other of allGoals) {
+    if (other.id === goal.id || other.is_completed) continue;
+    if (other.type !== "save_up" || other.strategy === "specific_amount") continue;
+    const shares = other.linked_account_ids.some((id) => goal.linked_account_ids.includes(id));
+    if (shares) names.add(other.name);
+  }
+  return [...names];
+}
+
+export function GoalCard({ goal, accounts, txns, allGoals = [] }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
   const prog = computeProgress(goal, accounts);
+  // Never claim more banked than the goal asks for, even though the raw
+  // current (used for pct and for projections below) is uncapped.
+  const displayCurrent = Math.min(prog.current, prog.target);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
+  const sharedWith = sharedAccountGoalNames(goal, allGoals);
 
   const Icon = goal.type === "save_up" ? PiggyBank : Banknote;
   const colorClass = goal.type === "save_up" ? "text-emerald-500" : "text-amber-500";
