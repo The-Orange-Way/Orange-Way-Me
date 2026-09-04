@@ -293,7 +293,7 @@ jobs:
 
           URL=$(gh pr create \
                   --base prod \
-                  --head "${BRANCH}" \
+                  --head dev \
                   --title "promote: dev to prod (${AHEAD} commits)" \
                   --body-file pr-body.md \
                   --label 'owner:release')
