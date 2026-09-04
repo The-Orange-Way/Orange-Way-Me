@@ -128,7 +128,7 @@ export function GoalsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {saveUp.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} allGoals={activeGoals} />
                 ))}
               </div>
             </section>
@@ -142,7 +142,7 @@ export function GoalsPage() {
               <PayoffPlanWidget goals={payDown} accounts={accounts} />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {payDown.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} allGoals={activeGoals} />
                 ))}
               </div>
             </section>
