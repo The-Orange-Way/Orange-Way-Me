@@ -11,11 +11,17 @@
 #      reports clean.
 #   3. No private-host / private-wiki URL leaks in the commits being pushed
 #      (commit messages + diff).
-#   4. No secret-shaped strings in the diff that gitleaks would catch.
+#   4. No secret-shaped strings in the commits being pushed, per gitleaks. A
+#      scanner that cannot be found REFUSES the push: an absent scan is not a
+#      clean scan.
 #   5. Every non-merge commit body ends with a Seat: <name> trailer.
 #
 # Override (escape hatch — emits a loud warning, do not use casually):
 #   PR_THIS_BYPASS=1 git push
+#
+# Check 4 knobs:
+#   GITLEAKS_BIN=/path/to/gitleaks  use a gitleaks that is not on PATH
+#   GITLEAKS_OPTIONAL=1             push with NO secret scan, loud warning, no refusal
 #
 # Install on a fresh clone:
 #   bash scripts/install-hooks.sh
@@ -268,7 +274,42 @@ fi
 # cannot prevent anything: if it is a real leak it is public already and needs
 # rotation, not a blocked push. Only the first sha was scanned, too, so a
 # multi-branch push checked one branch and waved the rest through.
-if command -v gitleaks >/dev/null; then
+#
+# Finding the binary is a separate problem from running it. `command -v
+# gitleaks` answers "is gitleaks on THIS shell's PATH", which is not the same
+# question as "is a secret scanner available on this machine". A git hook runs
+# with a non-login PATH, and gitleaks lives under ~/.local/bin on our push
+# hosts, so the old probe answered "missing" where the scanner is present and
+# working, and the fail-open branch below became permanent: nothing was ever
+# scanned. Resolve the binary explicitly instead, then fail closed.
+GITLEAKS_BIN="${GITLEAKS_BIN:-}"
+if [ -z "$GITLEAKS_BIN" ]; then
+  if command -v gitleaks >/dev/null 2>&1; then
+    GITLEAKS_BIN="$(command -v gitleaks)"
+  else
+    for candidate in \
+      "${HOME:-}/.local/bin/gitleaks" \
+      /usr/local/bin/gitleaks \
+      /opt/homebrew/bin/gitleaks \
+      /usr/bin/gitleaks \
+      /snap/bin/gitleaks; do
+      if [ -x "$candidate" ]; then GITLEAKS_BIN="$candidate"; break; fi
+    done
+  fi
+fi
+# On disk is not the same as runnable: a wrong-architecture or truncated binary
+# resolves fine and then fails on exec. Prove it runs before trusting it, and
+# treat a binary that will not run exactly like one that is not there.
+GITLEAKS_VERSION=""
+if [ -n "$GITLEAKS_BIN" ]; then
+  if ! GITLEAKS_VERSION="$("$GITLEAKS_BIN" version 2>&1 | head -1)"; then
+    yellow "- $GITLEAKS_BIN is present but did not run: $GITLEAKS_VERSION"
+    GITLEAKS_BIN=""
+  fi
+fi
+
+if [ -n "$GITLEAKS_BIN" ]; then
+  green "✓ gitleaks: $GITLEAKS_BIN (${GITLEAKS_VERSION:-version unknown})"
   CFG=""
   [ -f .gitleaks.toml ] && CFG="--config .gitleaks.toml"
   GITLEAKS_FAIL=0
@@ -282,7 +323,7 @@ if command -v gitleaks >/dev/null; then
     # way base..sha would by excluding it.
     if [ -n "$base" ]; then LOGOPTS="$base..$sha"; else LOGOPTS="$sha"; fi
     # shellcheck disable=SC2086 # CFG is a deliberate two-word flag or empty.
-    if ! gitleaks detect $CFG --no-banner --log-opts="$LOGOPTS" >/tmp/.gl.out 2>&1; then
+    if ! "$GITLEAKS_BIN" detect $CFG --no-banner --log-opts="$LOGOPTS" >/tmp/.gl.out 2>&1; then
       red "✗ gitleaks found secrets in $LOGOPTS:"
       tail -10 /tmp/.gl.out
       GITLEAKS_FAIL=1
@@ -293,21 +334,22 @@ if command -v gitleaks >/dev/null; then
   else
     FAIL=1
   fi
+elif [ "${GITLEAKS_OPTIONAL:-}" = "1" ]; then
+  # The escape hatch, taken deliberately. Loud, and it does not pretend the
+  # commits were scanned.
+  yellow "⚠ GITLEAKS_OPTIONAL=1: NO secret scan ran on the commits being pushed."
+  yellow "  Nothing here looked for API keys, tokens or private keys. You own that."
 else
-  # An absent scanner is not a clean scan. This branch did not exist: with
-  # gitleaks off PATH nothing ran, nothing printed, FAIL was untouched, and
-  # the gate went on to print PASSED, which reads as "a secret scan covered
-  # these commits". Announce the gap every time instead.
-  #
-  # This warns rather than refusing, unlike check 3, and the difference is
-  # deliberate: canon-terms.sh ships in the repository, so its absence means
-  # a broken tree, while gitleaks is an optional external binary that a
-  # fresh clone will not have. Whether this should also refuse is being
-  # settled on evidence about server-side coverage, not guessed here.
-  yellow "- gitleaks is not installed: NO secret scan ran on the commits being pushed."
-  yellow "  The checks above look for reserved terms and seat trailers. None of them"
-  yellow "  looks for secret-shaped strings such as API keys, tokens or private keys."
-  yellow "  Install gitleaks and push again for that cover: https://github.com/gitleaks/gitleaks"
+  # An absent scanner is not a clean scan, so this refuses. Unlike the old
+  # warning, the refusal is now meaningful: the probe above looks past PATH,
+  # so "not found" means not installed rather than not exported.
+  red "✗ gitleaks not found: NO secret scan can run on the commits being pushed."
+  red "  The other checks look for reserved terms and seat trailers. None of them"
+  red "  looks for secret-shaped strings such as API keys, tokens or private keys."
+  red "  Install it: https://github.com/gitleaks/gitleaks"
+  red "  Already installed somewhere odd? GITLEAKS_BIN=/path/to/gitleaks git push"
+  red "  Push anyway, with nothing scanning for secrets? GITLEAKS_OPTIONAL=1 git push"
+  FAIL=1
 fi
 
 # ---- Check 5: Seat trailer on every pushed non-merge commit ----
