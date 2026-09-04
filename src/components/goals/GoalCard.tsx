@@ -31,9 +31,11 @@ interface Props {
   goal: Goal;
   accounts: Account[];
   txns: DecryptedTxn[];
+  /** Names of other active goals that link at least one of the same accounts (OWM-T0674). */
+  sharedWithNames?: string[];
 }
 
-export function GoalCard({ goal, accounts, txns }: Props) {
+export function GoalCard({ goal, accounts, txns, sharedWithNames = [] }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
@@ -95,7 +97,16 @@ export function GoalCard({ goal, accounts, txns }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                {/*
+                 * Display only, not the math: a goal really is backed by
+                 * its whole linked account (goals-math.ts), so a shared
+                 * account can put more in `current` than this goal asks
+                 * for. The card never claims more banked than its own
+                 * target (OWM-T0674 item 2).
+                 */}
+                <span className="font-semibold text-base">
+                  {fmtUSD(Math.min(prog.current, prog.target))}
+                </span>
                 <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
@@ -108,6 +119,17 @@ export function GoalCard({ goal, accounts, txns }: Props) {
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>
             </div>
+          )}
+
+          {sharedWithNames.length > 0 && (
+            /*
+             * OWM-T0674 item 3. Sharing an account across goals is
+             * supported by product ruling (OWM-T0210), not a warning
+             * state: neutral styling, no icon, no error color.
+             */
+            <p className="text-xs text-muted-foreground">
+              Shared with {sharedWithNames.join(", ")}
+            </p>
           )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
