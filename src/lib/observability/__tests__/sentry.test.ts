@@ -302,4 +302,23 @@ describe("Sentry init no-PII contract", () => {
     expect(() => cfg.beforeBreadcrumb(hostileBc)).not.toThrow();
     expect(cfg.beforeBreadcrumb(hostileBc)).toBeNull();
   });
+
+  it("scrubs a non-string logentry.params element carrying a secret-looking key (OWM-T0620)", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      logentry: {
+        params: [
+          { xpub: "xpub6D4BDPcP2GT...", label: "safe context" },
+          "plain string stays a string",
+        ],
+      },
+    }) as { logentry: { params: Array<Record<string, unknown> | string> } };
+
+    const objParam = scrubbed.logentry.params[0] as Record<string, unknown>;
+    expect(objParam.xpub).toBe("[redacted]");
+    expect(objParam.label).toBe("safe context");
+    expect(scrubbed.logentry.params[1]).toBe("plain string stays a string");
+  });
 });
