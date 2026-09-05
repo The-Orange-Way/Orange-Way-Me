@@ -93,7 +93,9 @@ const notExecuted =
   (report.numPendingTests || 0) + (report.numTodoTests || 0);
 
 if (executed < MIN_EXECUTED) {
-  fail(`${executed} test(s) executed, ${notExecuted} skipped/pending/todo; need at least ${MIN_EXECUTED}`);
+  fail(
+    `${executed} test(s) executed, ${notExecuted} skipped/pending/todo; need at least ${MIN_EXECUTED}`,
+  );
 }
 
 const requiredDoc = readJson(requiredListPath, "required-test list");
