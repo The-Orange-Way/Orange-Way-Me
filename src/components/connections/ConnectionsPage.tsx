@@ -414,17 +414,19 @@ export function ConnectionsPage() {
   // the customer land on Connections and see nothing until they trigger an
   // OR action that throws.
   useEffect(() => {
-    if (!orNamespaceDisabledReason) return;
-    // Deliberately no else-branch clearing the banner here. The reason is
-    // nulled from several places (VaultContext on unlock, subaccount change,
-    // and sign-out among them), and the OPK registration effect below also
-    // clears securingError itself, but only on runs where its own guard
-    // (subaccountId && isUnlocked) passes; it returns early otherwise and
-    // leaves securingError untouched. So the banner is not guaranteed to
-    // clear on every path that nulls the reason. If that leaves it stuck
-    // after the customer has fixed the problem, update this comment and the
-    // effects together.
+    if (!orNamespaceDisabledReason) {
+      // Only clear the banner if THIS effect was the one that set it. The
+      // OPK registration effect below sets its own securingError on a
+      // failed key registration; we must never clobber that with a stale
+      // "no reason" pass.
+      if (orDisabledBannerSetRef.current) {
+        setSecuringError(null);
+        orDisabledBannerSetRef.current = false;
+      }
+      return;
+    }
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
+    orDisabledBannerSetRef.current = true;
   }, [orNamespaceDisabledReason]);
 
   // Register the OPK public key on OR once the subaccount exists. or-quiltt-sync
