@@ -347,6 +347,23 @@ describe("ConnectionsPage import bridge is not gated on a fresh-row count", () =
     ).toBe(false);
   });
 
+  it("excludes an errored single-connection sync from the import bridge (OW-T0263)", () => {
+    const code = handlerCode("handleSync");
+    const call = code.indexOf(BRIDGE);
+    const ifStart = code.lastIndexOf("if", call);
+    const condition = code.slice(ifStart, code.indexOf("{", ifStart));
+
+    expect(
+      condition.includes("errs.length === 0") || condition.includes("errs.length===0"),
+      "handleSync's import-bridge guard no longer excludes a connection whose own " +
+        "press just errored. handleSyncAll gates the same call on !c.error; the " +
+        "PR body and this file's own docstring above both describe the intended " +
+        "condition as 'processed and no error' for BOTH call sites, so the two " +
+        "guards must not read differently. Found: " +
+        JSON.stringify(condition.trim()),
+    ).toBe(true);
+  });
+
   it("selects connections in handleSyncAll by error alone, not by a row count", () => {
     const code = handlerCode("handleSyncAll");
     const call = code.indexOf(BRIDGE);
