@@ -33,7 +33,7 @@ describe("nextTransactionsPage", () => {
     expect(page.nextBefore).toBeNull();
   });
 
-  it("a full page that is NOT byte-truncated still says there may be more (the OWM-T0722 case)", () => {
+  it("a full untruncated page may not be everything (the OWM-T0722 case)", () => {
     // 500 held rows, requested in pages of 3: the first page comes back
     // exactly 3 long with truncated:false, which is exactly what a
     // long-history account looked like before this change. A one-call
@@ -52,7 +52,7 @@ describe("nextTransactionsPage", () => {
     expect(page.nextBefore).toBe("2026-01-01T00:00:00Z");
   });
 
-  it("honours the endpoint's own truncated/next_before signal over the page-size heuristic", () => {
+  it("truncated/next_before wins over the page-size heuristic", () => {
     // Only 1 row delivered even though the request asked for 500: OR's byte
     // cap cut the response short. truncated + next_before must win even
     // though rows.length (1) is far short of requestedLimit (500).
