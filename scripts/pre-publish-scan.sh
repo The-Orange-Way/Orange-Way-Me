@@ -203,9 +203,15 @@ fi
 # while we still know why, and say WHICH why: telling someone whose list
 # matches everything that it "does not compile" sends them hunting a typo
 # that is not there, in a value nobody can read back.
-if [[ -n "$RESERVED_TERMS" ]] && ! canon_terms_usable "$RESERVED_TERMS"; then
+if [[ -n "$RESERVED_TERMS_CI" ]] && ! canon_terms_usable "$RESERVED_TERMS_CI"; then
   printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
   printf "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line).\n" >&2
+  printf "  No part of the list is printed here.\n\n" >&2
+  exit 1
+fi
+if [[ -n "$RESERVED_TERMS_CS" ]] && ! canon_terms_usable "$RESERVED_TERMS_CS"; then
+  printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
+  printf "  Fix the offending CS:-marked fragment in OW_RESERVED_TERMS or .reserved-terms.\n" >&2
   printf "  No part of the list is printed here.\n\n" >&2
   exit 1
 fi
