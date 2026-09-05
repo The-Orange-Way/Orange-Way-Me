@@ -13,7 +13,11 @@
 // at module scope).
 
 import { describe, expect, it, vi } from "vitest";
-import { handleOwOrProxyRequest, type OwOrProxyDeps, type OwOrProxyServiceClient } from "./handler.ts";
+import {
+  handleOwOrProxyRequest,
+  type OwOrProxyDeps,
+  type OwOrProxyServiceClient,
+} from "./handler.ts";
 
 /** A service client whose app_flags read answers with the given `enabled`
  *  value. Also answers the rate-limit RPC with a low count so the gate under
@@ -81,7 +85,8 @@ describe("handleOwOrProxyRequest: or-link-mint-token stealth-sync gate", () => {
 
   it("flag false: refuses before any outbound call, 503, stable code, no widget token in the body", async () => {
     const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ widget_token: "should-never-be-seen" }), { status: 200 }),
+      async () =>
+        new Response(JSON.stringify({ widget_token: "should-never-be-seen" }), { status: 200 }),
     );
     const deps = fakeDeps(false, fetchMock as unknown as typeof fetch);
 
