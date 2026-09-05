@@ -1,0 +1,47 @@
+name: Anon table grant gate
+
+# Compensating check for OWM-T0497. The `postgres` default-privilege row on
+# schema public was narrowed on OWM-T0491, but the `supabase_admin` row could
+# not be (42501, permission denied to change default privileges from this
+# project). A table created through any path that runs as supabase_admin
+# still arrives with anon=arwdDxtm. Nothing in this repo creates tables that
+# way today, so this job exists to notice loudly if that ever changes, rather
+# than to fix something that is currently open.
+#
+# DEV ONLY, deliberately. Whether production carries the same two
+# default-privilege rows has not been measured by any seat that has looked at
+# this (see OWM-T0497), so this workflow does not claim to cover it.
+#
+# Full design rationale, allowlist and the two exit-vs-cannot-check
+# distinctions live in scripts/check-anon-table-grants.sh.
+
+on:
+  schedule:
+    - cron: '35 13 * * *'
+  push:
+    branches: [dev]
+    paths:
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: 'Supabase project ref to inspect. Empty means dev. Set a ref that does not resolve to force the gate red via the cannot-check path.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  anon-table-grants-dev:
+    name: anon/PUBLIC table grants (live dev database)
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Refuse anon or PUBLIC grants on public tables outside the allowlist (dev)
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          OW_ANON_GRANT_PROJECT_REF: ${{ github.event.inputs.project_ref || 'bogmoovbjpvcvdqrmjgt' }}
+        run: bash scripts/check-anon-table-grants.sh
