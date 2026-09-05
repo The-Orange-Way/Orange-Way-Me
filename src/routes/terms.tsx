@@ -65,7 +65,7 @@ function TermsPage() {
           (which, during beta, is zero).
         </p>
 
-        <p className="mt-10 text-xs text-muted-foreground">Questions? Email legal@orangeway.app.</p>
+        <p className="mt-10 text-xs text-muted-foreground">Questions? Email hello@orangeway.app.</p>
       </article>
     </MarketingShell>
   );
