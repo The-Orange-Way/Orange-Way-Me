@@ -170,12 +170,28 @@ if ! declare -f canon_terms >/dev/null 2>&1 \
   exit 1
 fi
 
-RESERVED_TERMS=""
-if [[ -n "${OW_RESERVED_TERMS:-}" ]]; then
-  RESERVED_TERMS="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+RESERVED_TERMS_CI=""
+RESERVED_TERMS_CS=""
+
+# Which source to read (env var, else .reserved-terms) is one decision made
+# ONCE against the whole list; a single line's CS: marker must not change
+# which source is in play. canon_terms (unsplit) is used here only to ask
+# "does this source have anything usable at all", the same test this code
+# always ran, before the marker split existed.
+RESERVED_SOURCE=""
+RESERVED_SOURCE_SET=0
+if [[ -n "${OW_RESERVED_TERMS:-}" ]] \
+  && [[ -n "$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)" ]]; then
+  RESERVED_SOURCE="$OW_RESERVED_TERMS"
+  RESERVED_SOURCE_SET=1
+elif [[ -f .reserved-terms ]] && [[ -n "$(canon_terms < .reserved-terms)" ]]; then
+  RESERVED_SOURCE="$(cat .reserved-terms)"
+  RESERVED_SOURCE_SET=1
 fi
-if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
-  RESERVED_TERMS="$(canon_terms < .reserved-terms)"
+
+if [[ "$RESERVED_SOURCE_SET" -eq 1 ]]; then
+  RESERVED_TERMS_CI="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_ci)"
+  RESERVED_TERMS_CS="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_cs)"
 fi
 
 # A list that cannot be scanned with is not a clean tree, and it fails in
@@ -187,9 +203,15 @@ fi
 # while we still know why, and say WHICH why: telling someone whose list
 # matches everything that it "does not compile" sends them hunting a typo
 # that is not there, in a value nobody can read back.
-if [[ -n "$RESERVED_TERMS" ]] && ! canon_terms_usable "$RESERVED_TERMS"; then
+if [[ -n "$RESERVED_TERMS_CI" ]] && ! canon_terms_usable "$RESERVED_TERMS_CI"; then
   printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
   printf "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line).\n" >&2
+  printf "  No part of the list is printed here.\n\n" >&2
+  exit 1
+fi
+if [[ -n "$RESERVED_TERMS_CS" ]] && ! canon_terms_usable "$RESERVED_TERMS_CS"; then
+  printf "\n\033[31m▎ %s\033[0m\n" "$(canon_terms_reason_text)" >&2
+  printf "  Fix the offending CS:-marked fragment in OW_RESERVED_TERMS or .reserved-terms.\n" >&2
   printf "  No part of the list is printed here.\n\n" >&2
   exit 1
 fi
@@ -309,27 +331,35 @@ printf "  repo: %s\n\n" "$REPO_ROOT"
 
 printf "\033[1m1. Reserved terms\033[0m\n"
 
-# Line-anchored exemptions for tree content that matches ONLY under
-# case-insensitive comparison and is not a leak. Each entry anchors to a
-# path AND to surrounding prose (^\./path:[0-9]+:.*context), so it exempts
-# one line rather than a whole file, and no entry needs to carry the
-# matched term itself. Never add an unanchored bare filename here.
-EXEMPT_RESERVED_CI="$(join_pipe \
-  "^\\./src/lib/vault-envelope\\.ts:[0-9]+:.*straight from the password" \
-  "^\\./src/lib/vault\\.ts:[0-9]+:.*is not 32 bytes; refusing to use it" \
-  "^\\./supabase/migrations/20260625130000_beta_allowlist\\.sql:[0-9]+:.*seeded with the migration" \
-)"
+# Per-term case control (canon_terms_ci / canon_terms_cs in
+# scripts/canon-terms.sh) replaces the whole-line exemptions this category
+# used to carry (EXEMPT_RESERVED_CI, removed here). A term that collides
+# with unrelated tree content only under case folding is now marked CS: in
+# the list itself and matched case-sensitively, instead of exempting the
+# whole line it happens to sit on. OWM-T0298.
 
-if [[ -n "$RESERVED_TERMS" ]]; then
+RESERVED_ANY=0
+if [[ -n "$RESERVED_TERMS_CI" ]]; then
   # -i: the post-merge identity scan already compares case-insensitively.
   # This gate runs first, so it has to be at least as strict, or a term in
   # another case passes here and is only caught after the merge.
-  scan "Reserved terms (internal list)" \
-       "$RESERVED_TERMS" \
+  scan "Reserved terms (internal list, case-insensitive)" \
+       "$RESERVED_TERMS_CI" \
        "-i" \
-       "$EXEMPT_RESERVED_CI" \
+       "" \
        "$REDACT_MATCHES"
-else
+  RESERVED_ANY=1
+fi
+if [[ -n "$RESERVED_TERMS_CS" ]]; then
+  # No -i: CS:-marked terms are matched exactly as written, on purpose.
+  scan "Reserved terms (internal list, case-sensitive)" \
+       "$RESERVED_TERMS_CS" \
+       "" \
+       "" \
+       "$REDACT_MATCHES"
+  RESERVED_ANY=1
+fi
+if [[ "$RESERVED_ANY" -eq 0 ]]; then
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
 
