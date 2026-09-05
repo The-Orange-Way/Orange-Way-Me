@@ -109,15 +109,19 @@ jobs:
           # deleted or renamed by a later edit. Ask for all three by name,
           # so a broken library names itself instead of sending the reader
           # to edit a reserved-term list that is fine.
-          for FN in canon_terms canon_terms_usable canon_terms_reason_text; do
+          for FN in canon_terms canon_terms_ci canon_terms_cs canon_terms_usable canon_terms_reason_text; do
             if ! declare -f "$FN" >/dev/null 2>&1; then
               echo "::error::scripts/canon-terms.sh was sourced but defines no $FN; the identity scan cannot run."
               exit 1
             fi
           done
-          PATTERN="$(printf '%s\n' "$RAW_PATTERN" | canon_terms)"
+          # Split into the default case-insensitive set and any term marked
+          # CS: in the secret, matched exactly as written (no -i). See
+          # scripts/canon-terms.sh: canon_terms_ci / canon_terms_cs.
+          PATTERN_CI="$(printf '%s\n' "$RAW_PATTERN" | canon_terms_ci)"
+          PATTERN_CS="$(printf '%s\n' "$RAW_PATTERN" | canon_terms_cs)"
 
-          if [ -z "$PATTERN" ]; then
+          if [ -z "$PATTERN_CI" ] && [ -z "$PATTERN_CS" ]; then
             echo "::error::OW_RESERVED_TERMS is set but contains no usable terms after dropping comments and blank lines."
             exit 1
           fi
@@ -132,14 +136,21 @@ jobs:
           # "Identity-scan clean" having compared nothing.
           #
           # Which of the three it was comes from scripts/canon-terms.sh, so
-          # every consumer of the list reports it the same way.
-          if ! canon_terms_usable "$PATTERN"; then
+          # every consumer of the list reports it the same way. Checked
+          # separately for the CI and CS halves, because a broken CS:
+          # fragment must not be hidden by a healthy default half.
+          if [ -n "$PATTERN_CI" ] && ! canon_terms_usable "$PATTERN_CI"; then
             echo "::error::$(canon_terms_reason_text) This scan cannot run and must not report clean. No part of the value is printed."
             exit 1
           fi
+          if [ -n "$PATTERN_CS" ] && ! canon_terms_usable "$PATTERN_CS"; then
+            echo "::error::$(canon_terms_reason_text) (CS:-marked terms.) This scan cannot run and must not report clean. No part of the value is printed."
+            exit 1
+          fi
           # Count only. The terms themselves are never printed to a public log.
-          TERM_COUNT=$(printf '%s' "$PATTERN" | tr '|' '\n' | grep -c .)
-          echo "Reserved-term list loaded: $TERM_COUNT term(s)."
+          TERM_COUNT_CI=$(printf '%s' "$PATTERN_CI" | tr '|' '\n' | grep -c . || true)
+          TERM_COUNT_CS=$(printf '%s' "$PATTERN_CS" | tr '|' '\n' | grep -c . || true)
+          echo "Reserved-term list loaded: $TERM_COUNT_CI case-insensitive term(s), $TERM_COUNT_CS case-sensitive term(s)."
 
           echo "Walking range: $RANGE"
           # Collect commit metadata first; a non-zero exit means git could not
