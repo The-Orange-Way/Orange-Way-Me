@@ -137,7 +137,9 @@ export function describeImportOutcome(counts: ImportCounts): ImportOutcome {
   // transaction lands in the ledger but the account balance does not move
   // by it. Say so in the same sentence rather than a silent success toast.
   if (unitMismatch > 0) {
-    parts.push(`${unitMismatch} balance credit${unitMismatch === 1 ? "" : "s"} not applied (unit mismatch)`);
+    parts.push(
+      `${unitMismatch} balance credit${unitMismatch === 1 ? "" : "s"} not applied (unit mismatch)`,
+    );
   }
   if (errored > 0) parts.push(`${errored} errored`);
 
