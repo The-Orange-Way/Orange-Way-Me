@@ -27,7 +27,9 @@ import type { Goal, GoalDraft, GoalType, PayDownStrategy, SaveUpStrategy } from 
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { PiggyBank, Banknote } from "lucide-react";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale } from "@/lib/locale";
+import { formatCurrencyWithMode } from "@/lib/format";
+import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 
 interface Props {
   open: boolean;
@@ -38,7 +40,8 @@ interface Props {
 
 export function GoalFormDialog({ open, onOpenChange, initial, onSave }: Props) {
   const { accounts } = useAccounts();
-  const fmt = useLocaleFormat();
+  const { prefs } = useDashboardPrefs();
+  const loc = numberLocale(prefs.numberFormat);
   const [type, setType] = useState<GoalType>("save_up");
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
@@ -229,9 +232,7 @@ export function GoalFormDialog({ open, onOpenChange, initial, onSave }: Props) {
                   />
                   <span className="flex-1 truncate">{a.name}</span>
                   <span className="text-xs text-muted-foreground tabular-nums">
-                    {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatCurrencyWithMode(a.balance, a.currency, prefs.btcDisplayMode, loc)}
                   </span>
                 </label>
               ))}
