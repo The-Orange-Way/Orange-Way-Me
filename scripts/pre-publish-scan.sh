@@ -331,27 +331,35 @@ printf "  repo: %s\n\n" "$REPO_ROOT"
 
 printf "\033[1m1. Reserved terms\033[0m\n"
 
-# Line-anchored exemptions for tree content that matches ONLY under
-# case-insensitive comparison and is not a leak. Each entry anchors to a
-# path AND to surrounding prose (^\./path:[0-9]+:.*context), so it exempts
-# one line rather than a whole file, and no entry needs to carry the
-# matched term itself. Never add an unanchored bare filename here.
-EXEMPT_RESERVED_CI="$(join_pipe \
-  "^\\./src/lib/vault-envelope\\.ts:[0-9]+:.*straight from the password" \
-  "^\\./src/lib/vault\\.ts:[0-9]+:.*is not 32 bytes; refusing to use it" \
-  "^\\./supabase/migrations/20260625130000_beta_allowlist\\.sql:[0-9]+:.*seeded with the migration" \
-)"
+# Per-term case control (canon_terms_ci / canon_terms_cs in
+# scripts/canon-terms.sh) replaces the whole-line exemptions this category
+# used to carry (EXEMPT_RESERVED_CI, removed here). A term that collides
+# with unrelated tree content only under case folding is now marked CS: in
+# the list itself and matched case-sensitively, instead of exempting the
+# whole line it happens to sit on. OWM-T0298.
 
-if [[ -n "$RESERVED_TERMS" ]]; then
+RESERVED_ANY=0
+if [[ -n "$RESERVED_TERMS_CI" ]]; then
   # -i: the post-merge identity scan already compares case-insensitively.
   # This gate runs first, so it has to be at least as strict, or a term in
   # another case passes here and is only caught after the merge.
-  scan "Reserved terms (internal list)" \
-       "$RESERVED_TERMS" \
+  scan "Reserved terms (internal list, case-insensitive)" \
+       "$RESERVED_TERMS_CI" \
        "-i" \
-       "$EXEMPT_RESERVED_CI" \
+       "" \
        "$REDACT_MATCHES"
-else
+  RESERVED_ANY=1
+fi
+if [[ -n "$RESERVED_TERMS_CS" ]]; then
+  # No -i: CS:-marked terms are matched exactly as written, on purpose.
+  scan "Reserved terms (internal list, case-sensitive)" \
+       "$RESERVED_TERMS_CS" \
+       "" \
+       "" \
+       "$REDACT_MATCHES"
+  RESERVED_ANY=1
+fi
+if [[ "$RESERVED_ANY" -eq 0 ]]; then
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
 
