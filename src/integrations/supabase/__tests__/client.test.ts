@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const createClientMock = vi.fn(() => ({}));
+const createClientMock = vi.fn((..._args: unknown[]) => ({}));
 
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...args: unknown[]) => createClientMock(...args),
@@ -16,9 +16,9 @@ describe("supabase client auth flow", () => {
 
   it("pins flowType to pkce so a library default or dependency bump cannot silently switch to implicit", async () => {
     const { supabase } = await import("../client");
-    // The client is a lazy singleton behind a Proxy: touching any
+    // The client is a lazy singleton behind a Proxy: reading any
     // property forces createSupabaseClient() to run once.
-    void supabase.auth;
+    expect(supabase.auth).toBeDefined();
 
     expect(createClientMock).toHaveBeenCalledTimes(1);
     const options = createClientMock.mock.calls[0]?.[2] as {
