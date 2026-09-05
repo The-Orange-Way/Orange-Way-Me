@@ -1569,6 +1569,7 @@ export function ConnectionsPage() {
       untagged: result.untagged,
       errored: result.errored,
       unreadable: decryptFailures,
+      unitMismatch: result.unitMismatch,
     });
     if (outcome.silent) {
       return { unmapped: 0, unmappedWalletIds: [] };
