@@ -1,12 +1,12 @@
 -- 47 PUBLIC-targeted RLS policies in schema public, retargeted to authenticated.
 --
--- WHY THIS EXISTS. Read live off OWM DEV bogmoovbjpvcvdqrmjgt via
--- pg_policy.polroles joined to pg_class/pg_namespace: 47 policies across 17
--- tables target PUBLIC (polroles is null), which means every role including
--- anon is evaluated by the policy instead of being excluded before the policy
--- is reached. household_keys and a handful of others already target
--- authenticated, which is why this reads as drift rather than a deliberate
--- design choice.
+-- WHY THIS EXISTS. Read live off the DEV Supabase project
+-- bogmoovbjpvcvdqrmjgt via pg_policy.polroles joined to pg_class/pg_namespace:
+-- 47 policies across 17 tables target PUBLIC (polroles is null), which means
+-- every role including anon is evaluated by the policy instead of being
+-- excluded before the policy is reached. household_keys and a handful of
+-- others already target authenticated, which is why this reads as drift
+-- rather than a deliberate design choice.
 --
 -- SEVERITY, STATED HONESTLY. Every USING/WITH CHECK clause below compares
 -- against auth.uid(), which is null for an anonymous request, so no rows
