@@ -158,14 +158,24 @@ jobs:
           # "non-fast-forward" -- a message that points the reader at prod
           # history rather than at the automation branch. This guard checks
           # ancestry first and prints the actionable fix instead.
-          # Fetch the automation branch explicitly so the rev-parse below has
-          # a real ref to work from. Without this, a runner whose clone never
-          # saw the branch takes the else path and exits zero -- the same
-          # silent pass the guard exists to prevent. The || true keeps the
-          # genuine first-run case clean.
-          git fetch --no-tags --quiet origin \
-            "+refs/heads/${BACKMERGE_BRANCH}:refs/remotes/origin/${BACKMERGE_BRANCH}" || true
-          if git rev-parse --verify "origin/${BACKMERGE_BRANCH}" >/dev/null 2>&1; then
+          # Ask the remote directly whether the branch exists, using its exit
+          # code, rather than inferring existence from a fetch that could
+          # itself fail. git ls-remote --exit-code separates the three real
+          # states: 0 exists, 2 does not exist on the remote, anything else
+          # could not look (network, rate limit, token). Collapsing the last
+          # two together was the bug: a fetch failure used to fall through to
+          # "does not exist yet" and exit 0 without comparing anything -- the
+          # same silent pass this guard exists to prevent.
+          ls_remote_rc=0
+          git ls-remote --exit-code --heads origin "${BACKMERGE_BRANCH}" >/dev/null 2>&1 || ls_remote_rc=$?
+          if [ "${ls_remote_rc}" -eq 2 ]; then
+            echo "Branch ${BACKMERGE_BRANCH} does not exist yet; ancestry check skipped."
+          elif [ "${ls_remote_rc}" -ne 0 ]; then
+            echo "::error title=Could not determine whether ${BACKMERGE_BRANCH} exists::git ls-remote exited ${ls_remote_rc} querying origin for ${BACKMERGE_BRANCH}. This can be transient (network, rate limit, token); refusing to guess rather than silently skipping the ancestry check. Re-run the workflow."
+            exit 1
+          else
+            git fetch --no-tags --quiet origin \
+              "+refs/heads/${BACKMERGE_BRANCH}:refs/remotes/origin/${BACKMERGE_BRANCH}"
             if ! git merge-base --is-ancestor \
                    "origin/${BACKMERGE_BRANCH}" \
                    "origin/${SOURCE_BRANCH}"; then
@@ -186,11 +196,11 @@ jobs:
                 echo "::error title=Automation branch is not an ancestor of prod::${BACKMERGE_BRANCH} is not an ancestor of ${SOURCE_BRANCH}, and open pull request #${pr_number} (${pr_url}) depends on it. Resolve or close that pull request, then delete the branch and re-run: git push origin --delete ${BACKMERGE_BRANCH}"
                 exit 1
               fi
-              # Read the live sha straight from the remote right before the delete,
-              # not from the local tracking ref: the fetch above ends in "|| true",
-              # so a transient fetch failure would leave that ref stale while the
-              # delete still removes whatever the server actually points at now.
-              deleted_sha="$(git ls-remote origin "refs/heads/${BACKMERGE_BRANCH}" | cut -f1)"
+              # The fetch above is now unconditional in this branch (the
+              # remote was just confirmed reachable and the ref exists), so
+              # the local tracking ref is current; no second remote round
+              # trip is needed to get the sha.
+              deleted_sha="$(git rev-parse "origin/${BACKMERGE_BRANCH}")"
               echo "${BACKMERGE_BRANCH} is not an ancestor of ${SOURCE_BRANCH} and no open pull request depends on it. Self-healing: deleting the branch (was ${deleted_sha})."
               git push origin --delete "${BACKMERGE_BRANCH}"
               {
@@ -201,8 +211,6 @@ jobs:
             else
               echo "Ancestry OK: origin/${BACKMERGE_BRANCH} is an ancestor of origin/${SOURCE_BRANCH}."
             fi
-          else
-            echo "Branch ${BACKMERGE_BRANCH} does not exist yet; ancestry check skipped."
           fi
 
       - name: Update the automation branch to the prod tip
