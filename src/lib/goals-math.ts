@@ -146,16 +146,18 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * Two goals linked to the same account (DL-1589) are handled below: Product
+ * ruled on OWM-T0210 that sharing an account is supported, so a save_up +
+ * all_balance goal's contribution is deduped by account rather than summed
+ * once per goal.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
-  let saved = 0;
+  let dedupedAccountSaved = 0;
+  let otherSaved = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+  const seenAccountIds = new Set<string>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -163,11 +165,37 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    // save_up + all_balance is the strategy whose `current` IS a raw sum of
+    // linked account balances (see computeCurrent above), so two such goals
+    // sharing an account each claim its whole balance. Counting a shared
+    // account's balance once here, instead of once per goal, is the header
+    // fix from OWM-T0210 / DL-1589. Every other goal type (a save_up
+    // specific_amount manual allocation, or a pay_down goal's paid-off
+    // amount) has no such overlap today and keeps the old per-goal sum,
+    // capped at that goal's own target as before.
+    if (g.type === "save_up" && g.strategy !== "specific_amount") {
+      for (const accId of g.linked_account_ids) {
+        if (seenAccountIds.has(accId)) continue;
+        seenAccountIds.add(accId);
+        const acc = accounts.find((a) => a.id === accId);
+        if (!acc) continue;
+        dedupedAccountSaved += Math.max(0, Number(acc.balance) || 0);
+      }
+    } else {
+      otherSaved += Math.min(p.current, p.target);
+    }
   }
 
-  return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
+  const saved = dedupedAccountSaved + otherSaved;
+  return {
+    saved,
+    target,
+    pct: target > 0 ? Math.min(1, saved / target) : 0,
+    counted,
+    active,
+  };
 }
 
 /**
