@@ -360,6 +360,10 @@ export function ConnectionsPage() {
   // The OR connection id the bank-sync dialog should pull. null = closed.
   const [bankSyncConnId, setBankSyncConnId] = useState<string | null>(null);
   const [txRefreshKey, setTxRefreshKey] = useState(0);
+  // Tracks whether the orNamespaceDisabledReason effect below is the one
+  // that last set securingError, so it can clear its own banner without
+  // ever touching the OPK registration effect's error.
+  const orDisabledBannerSetRef = useRef(false);
 
   // Stop any live stealth transport when this page goes away. The channel adds
   // a window message listener, so leaving it running would keep handling frames
