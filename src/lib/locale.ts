@@ -172,7 +172,7 @@ export function useLocaleFormat() {
       amount: number,
       currency: string,
       opts?: { maximumFractionDigits?: number; minimumFractionDigits?: number },
-    ) => formatCurrencyLocale(amount, currency, prefs.numberFormat, opts),
+    ) => formatCurrencyPref(amount, currency, prefs.numberFormat, prefs.btcDisplayMode, opts),
     formatDate: (value: Date | string | null | undefined, opts?: Intl.DateTimeFormatOptions) =>
       formatDate(value, prefs.dateFormat, opts),
     parseDate: (input: string) => parseDate(input, prefs.dateFormat),
