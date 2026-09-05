@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { captureException, captureMessage } from "@/lib/observability/sentry";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -1094,6 +1095,7 @@ export function ConnectionsPage() {
           }
         } catch (importErr) {
           console.error("[Connections] OR import bridge failed", importErr);
+          reportImportFailure(importErr, { area: "or_import_bridge", connection_id: conn.id });
           toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
         }
       }
@@ -1102,6 +1104,7 @@ export function ConnectionsPage() {
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
       console.error("[Connections] sync failed", err);
+      reportImportFailure(err, { area: "or_sync", connection_id: conn.id });
       toast.error(`Sync failed. ${humanizeError(err)}`);
     } finally {
       setSyncingId(null);
@@ -1334,6 +1337,32 @@ export function ConnectionsPage() {
     return out;
   }
 
+  // OWM-T0215 / DL-1518: GlitchTip is the only instrument this path can use
+  // (vault-derived keys mean import can never move server-side), and every
+  // failure below used to end at console output only. ZKA: never pass a
+  // decrypted payload, amount, address, txid or source_wallet_id into these
+  // -- only a connection id, an error class/area tag and a count travel.
+  function reportImportFailure(err: unknown, tags: Record<string, string>): void {
+    try {
+      captureException(err instanceof Error ? err : new Error(String(err)), { tags });
+    } catch {
+      // Sentry not initialised (VITE_SENTRY_DSN unset) -- console output
+      // above remains the primary signal in that case.
+    }
+  }
+
+  function reportImportIssue(
+    message: string,
+    tags: Record<string, string>,
+    extra?: Record<string, number>,
+  ): void {
+    try {
+      captureMessage(message, { level: "warning", tags, extra });
+    } catch {
+      // Sentry not initialised.
+    }
+  }
+
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
@@ -1456,6 +1485,14 @@ export function ConnectionsPage() {
       }
     }
 
+    if (decryptFailures > 0) {
+      reportImportIssue(
+        "[or_import_bridge] rows failed to decrypt",
+        { area: "or_import_bridge", connection_id: conn.id },
+        { decrypt_failures: decryptFailures, attempted: forThisConn.length + stealthRows.length },
+      );
+    }
+
     const result = await importOrTransactions(conn.id, decoded, {
       supabase,
       userId: user.id,
@@ -1465,6 +1502,7 @@ export function ConnectionsPage() {
       getAccountCurrency: (accountId) => accountById.get(accountId)?.currency,
       onError: (orTxId, err) => {
         console.warn(`[orImportBridge] tx ${orTxId} failed`, err);
+        reportImportFailure(err, { area: "or_import_bridge", connection_id: conn.id });
       },
       buildSignatureFields: buildHouseholdSignatureFields,
     });
