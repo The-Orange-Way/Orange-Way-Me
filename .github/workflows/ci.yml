@@ -98,7 +98,7 @@ jobs:
         # Neither guard above can tell a suite that RAN from one that was
         # collected and then skipped or emptied out. See
         # scripts/assert-tests-ran.mjs for why, and OW-T0101/OW-T0102 for the
-        # OWB defect this ports the fix from before OWM hits the same shape.
+        # OWB defect this ports the fix from before this repo hits the same shape.
         run: node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/vitest-results.json"
 
       - name: Prove the test-execution guard can go RED
