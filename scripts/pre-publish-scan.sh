@@ -170,12 +170,28 @@ if ! declare -f canon_terms >/dev/null 2>&1 \
   exit 1
 fi
 
-RESERVED_TERMS=""
-if [[ -n "${OW_RESERVED_TERMS:-}" ]]; then
-  RESERVED_TERMS="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+RESERVED_TERMS_CI=""
+RESERVED_TERMS_CS=""
+
+# Which source to read (env var, else .reserved-terms) is one decision made
+# ONCE against the whole list; a single line's CS: marker must not change
+# which source is in play. canon_terms (unsplit) is used here only to ask
+# "does this source have anything usable at all", the same test this code
+# always ran, before the marker split existed.
+RESERVED_SOURCE=""
+RESERVED_SOURCE_SET=0
+if [[ -n "${OW_RESERVED_TERMS:-}" ]] \
+  && [[ -n "$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)" ]]; then
+  RESERVED_SOURCE="$OW_RESERVED_TERMS"
+  RESERVED_SOURCE_SET=1
+elif [[ -f .reserved-terms ]] && [[ -n "$(canon_terms < .reserved-terms)" ]]; then
+  RESERVED_SOURCE="$(cat .reserved-terms)"
+  RESERVED_SOURCE_SET=1
 fi
-if [[ -z "$RESERVED_TERMS" && -f .reserved-terms ]]; then
-  RESERVED_TERMS="$(canon_terms < .reserved-terms)"
+
+if [[ "$RESERVED_SOURCE_SET" -eq 1 ]]; then
+  RESERVED_TERMS_CI="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_ci)"
+  RESERVED_TERMS_CS="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_cs)"
 fi
 
 # A list that cannot be scanned with is not a clean tree, and it fails in
