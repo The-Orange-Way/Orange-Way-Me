@@ -1,5 +1,5 @@
 /**
- * OWM-T0153. formatCurrencyPref is what every dashboard tile and goal page
+ * DL-1423. formatCurrencyPref is what every dashboard tile and goal page
  * calls through useLocaleFormat().formatCurrency. Before this fix it ignored
  * btcDisplayMode entirely for Bitcoin amounts, so the preference set in
  * Settings never reached these call sites (only the accounts list and
