@@ -200,6 +200,54 @@ jobs:
           fi
           exit $FAILED
 
+      - name: Refuse duplicate migration descriptive names
+        # Ported from The-Orange-Way/Orange-Way-Books PR #319 (OWB-T0179).
+        # Catches the case the version-prefix check above cannot: two files
+        # at DIFFERENT timestamps sharing the same descriptive name (the
+        # part after the timestamp prefix). That is the exact shape that got
+        # through OWB PR #304 -- two migrations, different timestamps, same
+        # three columns defined twice, both applying independently because
+        # Supabase keys purely on timestamp. A reviewer skimming the diff
+        # sees what looks like one migration filed twice rather than two
+        # candidates for the same change.
+        run: |
+          set -uo pipefail
+          MIG_DIR="supabase/migrations"
+
+          FILES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||')
+          if [ -z "$FILES" ]; then
+            echo "::error::No .sql files found under ${MIG_DIR} -- this job is checking nothing. Fix the path rather than let it report green."
+            exit 1
+          fi
+
+          NAME_DUPES=$(printf '%s\n' "$FILES" | grep -E '^[0-9]+_' | sed -E 's/^[0-9]+_//' | sort | uniq -d)
+
+          if [ -z "$NAME_DUPES" ]; then
+            echo "examined $(printf '%s\n' "$FILES" | wc -l | tr -d ' ') migration files; no duplicate descriptive names"
+            exit 0
+          fi
+
+          FAILED=0
+          while IFS= read -r NAME; do
+            [ -z "$NAME" ] && continue
+            MATCHES=$(printf '%s\n' "$FILES" | grep -E "_${NAME}\$" | sort | tr '\n' ' ' | sed 's/ $//')
+            {
+              echo "### :rotating_light: Duplicate migration descriptive name \`${NAME}\`"
+              echo ""
+              echo "Used by more than one file at different timestamps:"
+              echo ""
+              for F in $MATCHES; do echo "- \`${F}\`"; done
+              echo ""
+              echo "Different timestamps mean Supabase applies BOTH independently. Give"
+              echo "the newer one a distinct descriptive name, or fold it into the"
+              echo "earlier migration if it is really the same change."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::duplicate migration descriptive name '${NAME}' used by more than one file: ${MATCHES}"
+            FAILED=1
+          done <<< "$NAME_DUPES"
+
+          exit $FAILED
+
   deno-typecheck:
     name: Typecheck edge functions (Deno)
     runs-on: ubuntu-latest
