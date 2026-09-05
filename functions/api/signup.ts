@@ -79,7 +79,8 @@ const COPY: Record<
 <p>Thanks for signing up for <em>Sato &amp; the Chocolate Coins</em>.</p>
 <p>${kidsBlurb}</p>
 <p>We'll email you the moment the book is ready to ship. Until then, the rest of OrangeWay is being built around the same idea: helping families get good with money.</p>
-<p>— OrangeWay</p>`;
+<p>— OrangeWay</p>
+<p style="color: #888; font-size: 12px;">The Orange Way Inc, 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada</p>`;
     },
   },
 };
