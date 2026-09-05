@@ -1,0 +1,6 @@
+{
+  "required": [
+    "src/lib/or/__tests__/or-key-material.test.ts",
+    "src/context/__tests__/resolveOrKeyMaterial.test.ts"
+  ]
+}
