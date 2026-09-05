@@ -89,8 +89,7 @@ if (typeof report.numPassedTests !== "number" || typeof report.numFailedTests !=
 }
 
 const executed = report.numPassedTests + report.numFailedTests;
-const notExecuted =
-  (report.numPendingTests || 0) + (report.numTodoTests || 0);
+const notExecuted = (report.numPendingTests || 0) + (report.numTodoTests || 0);
 
 if (executed < MIN_EXECUTED) {
   fail(
