@@ -76,6 +76,29 @@ function handlerCode(name: string): string {
   throw new Error(`Braces in ${name} never balanced; the slice would run to EOF.`);
 }
 
+/**
+ * The block starting at `searchFrom`, from its first `{` to the matching
+ * closing brace. Used to isolate one `if` statement's body so a return
+ * inside it cannot be confused with a return anywhere else in the handler
+ * (OWM-T0694).
+ */
+function blockAt(code: string, searchFrom: number): string {
+  const bodyStart = code.indexOf("{", searchFrom);
+  if (bodyStart === -1) {
+    throw new Error(`No opening brace found after index ${searchFrom}.`);
+  }
+  let depth = 0;
+  for (let i = bodyStart; i < code.length; i += 1) {
+    const ch = code[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return code.slice(searchFrom, i + 1);
+    }
+  }
+  throw new Error(`Braces starting at index ${searchFrom} never balanced.`);
+}
+
 describe("ConnectionsPage handleSync wiring", () => {
   it("still exists as a handler this test can read", () => {
     const code = handlerCode("handleSync");
@@ -198,6 +221,38 @@ describe("ConnectionsPage handleStealthSync wiring", () => {
         "loaded, so the one customer the switch fails to reach is the customer already " +
         "in the app (OWM-T0504), and joining a query that was already in flight can " +
         "answer from before the press (OWM-T0587).",
+    ).toBe(true);
+  });
+
+  it("isStealthSyncEnabled( is not duplicated above the gate", () => {
+    const code = handlerCode("handleStealthSync");
+    const occurrences = code.split("isStealthSyncEnabled(").length - 1;
+    expect(
+      occurrences,
+      "isStealthSyncEnabled( appears more than once in handleStealthSync. The " +
+        "assertions in this file find only the FIRST occurrence, so a decoy call " +
+        "placed above the real gate would let the real gate move below the key " +
+        "export undetected (OWM-T0694).",
+    ).toBe(1);
+  });
+
+  it("the gate actually returns: deleting the return reopens the hole", () => {
+    const code = handlerCode("handleStealthSync");
+    const gate = code.indexOf("isStealthSyncEnabled(");
+    expect(gate).toBeGreaterThan(-1);
+    const ifStart = code.lastIndexOf("if", gate);
+    expect(ifStart).toBeGreaterThan(-1);
+    const gateBlock = blockAt(code, ifStart);
+    const refusal = gateBlock.indexOf(SYNC_DOOR_REFUSAL);
+    const returnAfterRefusal = gateBlock.indexOf("return", refusal);
+    expect(
+      refusal > -1 && returnAfterRefusal > refusal,
+      "The switch gate's if-block no longer contains a return after its refusal " +
+        "message. Without it, a refused press shows the toast and falls straight " +
+        "through into the code below the gate, including the credentials key " +
+        "export (OWM-T0694: deleting one `return;` reopens the hole with a green " +
+        "suite, because the three existing assertions here are all presence-only " +
+        "and none of them checks control flow).",
     ).toBe(true);
   });
 
