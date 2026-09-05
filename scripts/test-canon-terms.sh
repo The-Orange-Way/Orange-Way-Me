@@ -382,7 +382,57 @@ check 'the explanation prints no part of the list' \
 # defect in this gate has had, in the file written to catch it. Raising
 # this number when a case is added is the point: it makes deleting a case
 # a deliberate act instead of a silent one.
-EXPECTED_CASES=35
+# ----------------------------------------------------------------------
+# The CS: marker split. canon_terms_ci returns unmarked lines, canonicalized
+# exactly as before; canon_terms_cs returns marked lines with the prefix
+# stripped. A caller must scan the CS result WITHOUT -i.
+# ----------------------------------------------------------------------
+
+check 'canon_terms_ci drops CS:-marked lines entirely' \
+  'zzalpha|zzcharlie' \
+  "$(printf 'zzalpha\nCS:zzbravo\nzzcharlie\n' | canon_terms_ci)"
+
+check 'canon_terms_cs returns only the marked lines, prefix stripped' \
+  'zzbravo' \
+  "$(printf 'zzalpha\nCS:zzbravo\nzzcharlie\n' | canon_terms_cs)"
+
+check 'canon_terms_cs strips the marker even with leading whitespace' \
+  'zzbravo' \
+  "$(printf 'zzalpha\n  CS:zzbravo\nzzcharlie\n' | canon_terms_cs)"
+
+check 'a term merely containing the substring CS: does not mark' \
+  'aCS:zzalpha' \
+  "$(printf 'aCS:zzalpha\n' | canon_terms_ci)"
+
+check 'canon_terms_cs is empty when nothing is marked' \
+  '' \
+  "$(printf 'zzalpha\nzzbravo\n' | canon_terms_cs)"
+
+check 'canon_terms_ci is empty when everything is marked' \
+  '' \
+  "$(printf 'CS:zzalpha\nCS:zzbravo\n' | canon_terms_ci)"
+
+# Behaviour, not shape: a CS:-marked term must not fold case, an unmarked
+# one still must.
+CS_PATTERN="$(printf 'CS:zzcasemarker\n' | canon_terms_cs)"
+if printf 'ZZCASEMARKER\n' | grep -qE "$CS_PATTERN"; then
+  CS_FOLDS=folded
+else
+  CS_FOLDS=exact
+fi
+check 'a CS:-marked term is matched case-sensitively (no fold)' \
+  'exact' "$CS_FOLDS"
+
+CI_PATTERN="$(printf 'zzcasemarker\n' | canon_terms_ci)"
+if printf 'ZZCASEMARKER\n' | grep -qEi "$CI_PATTERN"; then
+  CI_FOLDS=folded
+else
+  CI_FOLDS=exact
+fi
+check 'an unmarked term still folds case (matched with -i by the caller)' \
+  'folded' "$CI_FOLDS"
+
+EXPECTED_CASES=43
 TOTAL=$((PASSED + FAILED))
 
 printf '\n%d passed, %d failed, %d ran of %d expected\n\n' \
