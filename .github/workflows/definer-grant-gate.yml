@@ -86,7 +86,7 @@ jobs:
         run: bash scripts/check-definer-grants.sh
 
   definer-grants-pr-scan:
-    name: SECURITY DEFINER EXECUTE grants (changed migrations)
+    name: "SECURITY DEFINER grants (changed migrations): unallowlisted GRANT + unrevoked REPLACE"
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
@@ -96,7 +96,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Refuse a new anon or PUBLIC EXECUTE grant in a changed migration
+      - name: Refuse an unallowlisted anon/PUBLIC EXECUTE grant, or a hardened function replaced with no matching revoke
         run: |
           bash scripts/check-definer-grant-migrations.sh \
             "origin/${{ github.event.pull_request.base.ref }}" \
