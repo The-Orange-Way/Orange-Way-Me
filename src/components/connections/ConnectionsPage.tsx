@@ -1362,7 +1362,7 @@ export function ConnectionsPage() {
    * `!hasMore`, cap at `MAX_PAGES` so a pathological response cannot spin
    * forever.
    */
-  async function fetchAllTransactionRows(subaccountId: string): Promise<TransactionRow[]> {
+  async function fetchAllTransactionRows(forSubaccountId: string): Promise<TransactionRow[]> {
     const PAGE_LIMIT = 500;
     const MAX_PAGES = 25;
     const out: TransactionRow[] = [];
@@ -1372,7 +1372,7 @@ export function ConnectionsPage() {
       let res: unknown;
       try {
         res = await callProxy("or-transactions-list", {
-          subaccount_id: subaccountId,
+          subaccount_id: forSubaccountId,
           limit: PAGE_LIMIT,
           ...(before ? { before } : {}),
         });
