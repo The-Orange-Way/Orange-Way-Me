@@ -61,6 +61,12 @@ describe("formatCurrencyPref — non-Bitcoin currencies are unaffected", () => {
   });
 
   it("respects the eu number locale for a non-Bitcoin currency", () => {
-    expect(formatCurrencyPref(1200, "EUR", "eu", "btc")).toBe("1.200 €");
+    const out = formatCurrencyPref(1200, "EUR", "eu", "btc");
+    // Grouping is a period in de-DE ("1.200", not "1,200"); the exact
+    // whitespace character Intl inserts before the symbol is ICU-version
+    // dependent, so this checks content, not byte-for-byte spacing.
+    expect(out).toContain("1.200");
+    expect(out).toContain("€");
+    expect(out).not.toContain("1,200");
   });
 });
