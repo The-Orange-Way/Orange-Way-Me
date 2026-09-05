@@ -2,8 +2,8 @@
 /**
  * Test-execution guard (OWM-T0353).
  *
- * OWM CI already fails when zero test FILES are collected (see the pre-test
- * and post-test guards in ci.yml). Neither guard can tell a suite that ran
+ * This repo's CI already fails when zero test FILES are collected (see the
+ * pre-test and post-test guards in ci.yml). Neither guard can tell a suite that ran
  * from one that was collected and then skipped or emptied out: a file whose
  * every test carries describe.skip still counts as one collected suite, and
  * COLLECTED >= EXPECTED still holds with zero real assertions run. That is
