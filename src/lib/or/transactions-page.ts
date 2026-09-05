@@ -68,10 +68,7 @@ function isTransactionRow(value: unknown): value is TransactionRow {
  * A malformed row is dropped rather than propagated, matching
  * `orRowsForConnection`'s existing behaviour for this same wire shape.
  */
-export function nextTransactionsPage(
-  response: unknown,
-  requestedLimit: number,
-): TransactionsPage {
+export function nextTransactionsPage(response: unknown, requestedLimit: number): TransactionsPage {
   const empty: TransactionsPage = { rows: [], hasMore: false, nextBefore: null };
   if (!response || typeof response !== "object") return empty;
   const body = response as Record<string, unknown>;
