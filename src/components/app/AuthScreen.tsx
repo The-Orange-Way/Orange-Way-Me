@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
+import { PasswordSignInForm } from "@/components/auth/PasswordSignInForm";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 
 /**
