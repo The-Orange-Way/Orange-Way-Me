@@ -66,6 +66,29 @@ export function formatCurrencyLocale(
   }
 }
 
+/**
+ * Locale- and preference-aware currency formatter.
+ *
+ * BTC and sats route through formatCurrencyWithMode so the user's
+ * btcDisplayMode (sats / btc / btc_easy / primary) is honoured. Every other
+ * currency renders exactly as formatCurrencyLocale always has.
+ *
+ * This exists as a plain function, separate from useLocaleFormat, so it can
+ * be unit tested with no React context. See locale.test.ts.
+ */
+export function formatCurrencyPref(
+  amount: number,
+  currency: string,
+  numberPref: NumberFormatPref,
+  btcDisplayMode: BtcDisplayMode,
+  opts?: { maximumFractionDigits?: number; minimumFractionDigits?: number },
+): string {
+  if (currency === "BTC" || currency === "sats") {
+    return formatCurrencyWithMode(amount, currency, btcDisplayMode, numberLocale(numberPref));
+  }
+  return formatCurrencyLocale(amount, currency, numberPref, opts);
+}
+
 /** Format a Date (or YYYY-MM-DD string) using the user's dateFormat pref. */
 export function formatDate(
   value: Date | string | null | undefined,
