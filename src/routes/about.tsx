@@ -25,8 +25,18 @@ export const Route = createFileRoute("/about")({
         "@context": "https://schema.org",
         "@type": "Organization",
         name: "Orange Way",
+        legalName: "The Orange Way Inc",
         url: "https://orangeway.app",
         description: "Zero knowledge personal finance for Bitcoin first households.",
+        email: "hello@orangeway.app",
+        address: {
+          "@type": "PostalAddress",
+          streetAddress: "620 Veterans Drive Suite 12",
+          addressLocality: "Barrie",
+          addressRegion: "ON",
+          postalCode: "L4N9J4",
+          addressCountry: "CA",
+        },
         sameAs: [],
       }),
     ],
@@ -60,6 +70,12 @@ function AboutPage() {
           We're built for the next generation of financially-sovereign households, people who hold
           Bitcoin, run their own infrastructure when they can, and want their tools to respect that
           worldview.
+        </p>
+        <p className="mt-10 text-xs text-muted-foreground">
+          The Orange Way Inc · 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada · Contact:{" "}
+          <a href="mailto:hello@orangeway.app" className="underline">
+            hello@orangeway.app
+          </a>
         </p>
       </article>
     </MarketingShell>
