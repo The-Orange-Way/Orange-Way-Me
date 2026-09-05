@@ -65,6 +65,7 @@ import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
+import { dispatchSync } from "@/lib/or/sync-dispatch";
 import { requestOrSync } from "@/lib/or/or-sync-request";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
@@ -1004,46 +1005,68 @@ export function ConnectionsPage() {
     // (OWM-T0530, OWM-T0528, OWM-T0533).
     const route = planSyncRoute(conn);
 
-    // Bank (Quiltt) connections use the OPK sealed-box path, not the
-    // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
-    // fetches OPK-sealed rows via or-transactions-list, unseals with the
-    // vault OPK key, and imports. The or-sync path below is for
-    // Bitcoin sources (Blink/Strike/etc.) only.
-    if (route === "bank") {
-      setBankSyncConnId(conn.id);
-      return;
-    }
+    // OWM-T0590. The three arms below used to be three `if (route === ...)`
+    // blocks written out here, and deleting any one of them failed no test in
+    // the repository: nothing renders this component, and there are no DOM
+    // test dependencies, so no unit test of this wiring could exist. The
+    // mapping now lives in dispatchSync, which is pure and tested, so an arm
+    // going missing fails src/lib/or/__tests__/sync-dispatch.test.ts.
+    //
+    // Honest limit, because a comment that overstates a safety property is
+    // how the OWM-T0530 defect survived review: the ONE line below that calls
+    // dispatchSync is itself untested, and deleting it still fails nothing.
+    // This shrank the undefended surface from three branches to one
+    // delegation. It did not reach zero.
+    await dispatchSync(route, {
+      // Bank (Quiltt) connections use the OPK sealed-box path, not the
+      // Bitcoin-source or-sync path. The BankSyncDialog fetches OPK-sealed
+      // rows via or-transactions-list, unseals with the vault OPK key, and
+      // imports. The or-sync arm is for Bitcoin sources (Blink/Strike/etc.)
+      // only.
+      bank: () => {
+        setBankSyncConnId(conn.id);
+      },
 
-    // Stealth connections are scanned by the OR widget in this browser, never
-    // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, which does not contain this row. Routing them below
-    // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the bank branch above: a provider whose sync lives
-    // somewhere else gets sent there.
-    //
-    // Do NOT read the branch below as a safe fallthrough. This comment used to
-    // say or-sync "matches nothing and honestly returns { synced: 0 }". That
-    // was never measured and it is wrong. Observed on production 2026-08-18,
-    // signed in, with the network recorded: one request, or-sync via the
-    // proxy, answered 400 "stealth connections cannot be synced via this
-    // endpoint". It is a rejection, not an empty success, and it is raised
-    // before or-sync ever selects anything.
-    //
-    // DL-1047 / DL-1378 / OWM-T0530: the kill switch is deliberately NOT
-    // consulted in this condition. It is read at the press inside
-    // handleStealthSync, which awaits refreshRuntimeFlags and refuses ABOVE
-    // the credentials key export. An off switch has to refuse a private
-    // connection; it must never redirect one onto the branch below, which is
-    // the only branch in this handler that exports vault keys.
-    //
-    // Routing on is_stealth alone also matches planSyncAll, which has always
-    // held private connections back from or-sync unconditionally. This path
-    // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
-    }
+      // Stealth connections are scanned by the OR widget in this browser,
+      // never by or-sync: they live in the stealth store, and or-sync selects
+      // from the `connections` table, which does not contain this row.
+      // Routing them to or-sync would ask a function that cannot see this row
+      // whether this row is up to date. Same shape as the bank arm above: a
+      // provider whose sync lives somewhere else gets sent there.
+      //
+      // Do NOT read the or-sync arm as a safe fallthrough. This comment used
+      // to say or-sync "matches nothing and honestly returns { synced: 0 }".
+      // That was never measured and it is wrong. Observed on production
+      // 2026-08-18, signed in, with the network recorded: one request,
+      // or-sync via the proxy, answered 400 "stealth connections cannot be
+      // synced via this endpoint". It is a rejection, not an empty success,
+      // and it is raised before or-sync ever selects anything.
+      //
+      // DL-1047 / DL-1378 / OWM-T0530: the kill switch is deliberately NOT
+      // consulted in the routing. It is read at the press inside
+      // handleStealthSync, which awaits the door read and refuses ABOVE the
+      // credentials key export. An off switch has to refuse a private
+      // connection; it must never redirect one onto the or-sync arm, which is
+      // the only arm in this handler that exports vault keys.
+      //
+      // Routing on is_stealth alone also matches planSyncAll, which has
+      // always held private connections back from or-sync unconditionally.
+      // This path was the one that disagreed.
+      private: () => handleStealthSync(conn),
 
+      orSync: () => runOrSync(conn, subaccount),
+    });
+  }
+
+  /**
+   * The ordinary Bitcoin-source arm of handleSync: the or-sync request, which
+   * is the only path in this component that exports vault keys.
+   *
+   * Lifted out of handleSync so the routing above is one dispatch call with no
+   * body inlined under it (OWM-T0590). Behaviour is unchanged: same loading
+   * state, same toasts, same import bridge, same finally.
+   */
+  async function runOrSync(conn: ConnectionRow, subaccount: string) {
     setSyncingId(conn.id);
     try {
       // OWM-T0544. No key is exported here any more. requestOrSync asks
