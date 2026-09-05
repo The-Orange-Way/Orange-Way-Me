@@ -129,7 +129,13 @@ describe("describeImportOutcome", () => {
 
   describe("a refused unit-mismatch balance credit is told to the customer (DEV-0064)", () => {
     it("is not silent when a refused credit is the only thing that happened", () => {
-      const onlyMismatch: ImportCounts = { ...NOTHING, attempted: 1, opened: 1, imported: 1, unitMismatch: 1 };
+      const onlyMismatch: ImportCounts = {
+        ...NOTHING,
+        attempted: 1,
+        opened: 1,
+        imported: 1,
+        unitMismatch: 1,
+      };
       const out = describeImportOutcome(onlyMismatch);
       expect(out.silent).toBe(false);
       expect(out.message).toContain("1 balance credit not applied (unit mismatch)");
@@ -145,7 +151,9 @@ describe("describeImportOutcome", () => {
       };
       const out = describeImportOutcome(mixed);
       expect(out.level).toBe("warning");
-      expect(out.message).toBe("Wallet ledger: 3 imported, 2 balance credits not applied (unit mismatch).");
+      expect(out.message).toBe(
+        "Wallet ledger: 3 imported, 2 balance credits not applied (unit mismatch).",
+      );
     });
 
     it("does not appear when there was no mismatch", () => {
