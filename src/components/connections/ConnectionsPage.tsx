@@ -1086,7 +1086,22 @@ export function ConnectionsPage() {
         );
       }
 
-      if (user && res.synced > 0) {
+      // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
+      // itself just fetched, so a connection whose rows were fetched on an
+      // EARLIER press reports 0 forever and never gets imported. That is not
+      // hypothetical: one tester's 146 transactions were fetched five minutes
+      // before her account and wallet mapping existed, so the first press had
+      // nowhere to file them, and every press since has honestly answered 0.
+      //
+      // This is the same defect DL-1116 already fixed on the stealth path, one
+      // path over, and for the same reason: a sync that finds nothing new
+      // still has to reconcile what is already stored.
+      //
+      // Safe to run unconditionally. We only reach here when `attempted` is
+      // set, so the connection really was processed, and the import helper is
+      // not delta based: it reads what is held for the connection and dedupes,
+      // returning immediately when there is nothing to import.
+      if (user) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
@@ -1180,7 +1195,11 @@ export function ConnectionsPage() {
       }
 
       if (user) {
-        const succeeded = returned.filter((c) => !c.error && c.synced > 0);
+        // OWM-T0717, same reasoning as the single-connection path above: a
+        // connection that synced cleanly with 0 new rows may still be holding
+        // rows that were never imported, so `synced > 0` is not the condition.
+        // Error-free is.
+        const succeeded = returned.filter((c) => !c.error);
         for (const succ of succeeded) {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
@@ -1529,13 +1548,16 @@ export function ConnectionsPage() {
   /**
    * DL-1116. Read back and import what the widget just sealed.
    *
-   * Deliberately NOT gated on the widget's transaction count. The or-sync path
-   * guards its import on `res.synced > 0` because or-sync reports what it
-   * itself just wrote, but the stealth widget's count is what it stored on the
-   * Orange Rails side, and rows stored by an earlier scan may never have been
-   * imported here at all. That is exactly the state this ticket was filed
-   * from: fourteen rows sealed and stored, zero of them in the ledger. A scan
-   * that finds nothing new still has to reconcile.
+   * Deliberately NOT gated on the widget's transaction count, because rows
+   * stored by an earlier scan may never have been imported here at all. That
+   * is exactly the state this ticket was filed from: fourteen rows sealed and
+   * stored, zero of them in the ledger. A scan that finds nothing new still
+   * has to reconcile.
+   *
+   * This paragraph used to note that the or-sync path took the opposite
+   * approach and guarded on `res.synced > 0`. It no longer does. That guard
+   * had the identical defect this comment describes and cost a tester her
+   * whole history (OWM-T0717), so both paths now reconcile unconditionally.
    *
    * Failure is reported rather than swallowed. A scan that succeeded and an
    * import that failed is a different situation from a failed scan, and the

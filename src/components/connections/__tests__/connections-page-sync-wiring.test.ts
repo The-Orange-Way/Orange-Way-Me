@@ -284,3 +284,98 @@ describe("ConnectionsPage handleStealthSync wiring", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The import bridge, read as source (OWM-T0717).
+ *
+ * WHAT IT DEFENDS. or-sync fetches transactions and stores them on the Orange
+ * Rails side; a separate call copies them into this app's ledger. Both call
+ * sites used to run that copy only when the SAME press reported newly fetched
+ * rows. or-sync reports only what it itself just fetched, so a connection
+ * whose rows arrived on an earlier press answers 0 for ever, the copy never
+ * runs again, and rows that are stored one hop away are never filed. That is
+ * not a hypothetical: a tester had 146 transactions fetched five minutes
+ * before her account and her wallet mapping existed, so the press that
+ * fetched them had nowhere to file them, and every press since answered 0
+ * honestly. She saw an empty ledger and a working Sync button.
+ *
+ * WHY IT IS SAFE TO RUN EVERY TIME. importSyncedTransactionsForConnection is
+ * not delta based. It reads what is held for the connection, dedupes, and
+ * returns immediately when there is nothing to file. The condition that
+ * matters is "this connection was processed and did not error", which is what
+ * both call sites now use.
+ *
+ * The same defect was fixed one path over, on the private-wallet widget, under
+ * DL-1116. Its comment already stated the rule: a sync that finds nothing new
+ * still has to reconcile.
+ *
+ * IF THIS FAILS, someone has put a fresh-row count back in front of the copy.
+ * That is the bug, not the test.
+ */
+describe("ConnectionsPage import bridge is not gated on a fresh-row count", () => {
+  const BRIDGE = "importSyncedTransactionsForConnection(";
+
+  it("runs the bridge in handleSync without consulting res.synced", () => {
+    const code = handlerCode("handleSync");
+    const call = code.indexOf(BRIDGE);
+    expect(
+      call,
+      "handleSync no longer calls the import bridge at all. Without it a sync " +
+        "fetches transactions and never copies them into the customer's ledger.",
+    ).toBeGreaterThan(-1);
+
+    const ifStart = code.lastIndexOf("if", call);
+    expect(ifStart).toBeGreaterThan(-1);
+    const condition = code.slice(ifStart, code.indexOf("{", ifStart));
+
+    expect(
+      condition.includes("user"),
+      "The condition immediately above the import bridge is no longer the signed-in " +
+        "check this test expects to read. It found: " +
+        JSON.stringify(condition.trim()) +
+        ". Re-anchor this assertion on the real guard rather than deleting it, " +
+        "otherwise the check below passes without measuring anything.",
+    ).toBe(true);
+
+    expect(
+      /synced/.test(condition),
+      "The import bridge is gated on a fresh-row count again (OWM-T0717). " +
+        "or-sync reports only what THIS press fetched, so a connection whose rows " +
+        "arrived on an earlier press reports 0 for ever and its stored rows are " +
+        "never copied into the ledger. The condition is 'processed and no error', " +
+        "not 'brought back something new'.",
+    ).toBe(false);
+  });
+
+  it("selects connections in handleSyncAll by error alone, not by a row count", () => {
+    const code = handlerCode("handleSyncAll");
+    const call = code.indexOf(BRIDGE);
+    expect(
+      call,
+      "handleSyncAll no longer calls the import bridge, so a bulk press fetches " +
+        "transactions for every connection and files none of them.",
+    ).toBeGreaterThan(-1);
+
+    const filterStart = code.lastIndexOf("returned.filter(", call);
+    expect(
+      filterStart,
+      "handleSyncAll no longer selects the connections to import from the results " +
+        "of the press. Re-anchor this assertion on whatever selects them now.",
+    ).toBeGreaterThan(-1);
+    const selector = code.slice(filterStart, code.indexOf(";", filterStart));
+
+    expect(
+      selector.includes("c.error"),
+      "The selector above the import bridge no longer filters out failed " +
+        "connections. It found: " +
+        JSON.stringify(selector.trim()),
+    ).toBe(true);
+
+    expect(
+      /synced/.test(selector),
+      "The bulk import is gated on a fresh-row count again (OWM-T0717). Same " +
+        "reasoning as the single-connection path: a connection that synced cleanly " +
+        "with nothing new may still be holding rows that were never copied across.",
+    ).toBe(false);
+  });
+});
