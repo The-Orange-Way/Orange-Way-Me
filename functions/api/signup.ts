@@ -61,7 +61,8 @@ const COPY: Record<
 <p>The first 100 households get lifetime founder pricing — $100 a year, locked in forever. We'll email you before launch.</p>
 <p>OrangeWay is open source: <a href="https://github.com/The-Orange-Way/Orange-Way-Me">github.com/The-Orange-Way/Orange-Way-Me</a>. Don't trust. Verify.</p>
 <p>— OrangeWay</p>
-<p style="color: #888; font-size: 12px;">The finance app that minds its own business around your data. Not your keys, not your privacy.</p>`,
+<p style="color: #888; font-size: 12px;">The finance app that minds its own business around your data. Not your keys, not your privacy.</p>
+<p style="color: #888; font-size: 12px;">The Orange Way Inc, 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada</p>`,
   },
   book: {
     subject: "We'll email you when Sato ships",
@@ -78,7 +79,8 @@ const COPY: Record<
 <p>Thanks for signing up for <em>Sato &amp; the Chocolate Coins</em>.</p>
 <p>${kidsBlurb}</p>
 <p>We'll email you the moment the book is ready to ship. Until then, the rest of OrangeWay is being built around the same idea: helping families get good with money.</p>
-<p>— OrangeWay</p>`;
+<p>— OrangeWay</p>
+<p style="color: #888; font-size: 12px;">The Orange Way Inc, 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada</p>`;
     },
   },
 };
