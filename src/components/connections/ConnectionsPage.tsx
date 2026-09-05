@@ -94,7 +94,11 @@ import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./B
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
 import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
-import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
+import {
+  CallProxyError,
+  isSubaccountNotFound,
+  proxyErrorMessageFromBody,
+} from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
@@ -181,16 +185,25 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
         }
       }
     }
-    const message =
-      (body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : null) ||
-      res.error.message ||
-      `${endpoint} failed`;
+    // The message goes through the SAME rule as the body, not merely the same
+    // length cap. proxyErrorMessageFromBody refuses a non-scalar under `error`,
+    // so a list the body drops cannot ride out in the message beside it. The
+    // raw String(body.error) that used to be here was the second door: the
+    // constructor cap bounded that content at 200 characters rather than
+    // refusing it. Both fallbacks are unchanged.
+    const message = proxyErrorMessageFromBody(body) || res.error.message || `${endpoint} failed`;
     throw new CallProxyError(message, status, body);
   }
   if (res.data && typeof res.data === "object" && "error" in res.data && res.data.error) {
-    throw new CallProxyError(String((res.data as { error: unknown }).error), 200, res.data);
+    // Same rule as the non-2xx branch above. There is no transport message to
+    // fall back to on a 200, so when `error` is not a short scalar the endpoint
+    // name is the honest answer: it says which call failed without repeating
+    // the content we just refused to carry.
+    throw new CallProxyError(
+      proxyErrorMessageFromBody(res.data) ?? `${endpoint} failed`,
+      200,
+      res.data,
+    );
   }
   return res.data;
 }
