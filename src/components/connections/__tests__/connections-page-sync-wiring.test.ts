@@ -76,6 +76,36 @@ function handlerCode(name: string): string {
   throw new Error(`Braces in ${name} never balanced; the slice would run to EOF.`);
 }
 
+/**
+ * Finds the sync-door gate `if (!isStealthSyncEnabled()) { ... }` inside a
+ * handler body and returns the balanced brace span of its body.
+ *
+ * Anchored to the actual `if (!isStealthSyncEnabled())` shape rather than a
+ * bare substring search, so an earlier, unrelated mention of
+ * isStealthSyncEnabled( in the same handler cannot be mistaken for the real
+ * gate (OWM-T0694).
+ */
+function syncDoorGate(code: string): { open: number; close: number } {
+  const match = code.match(/if\s*\(\s*!isStealthSyncEnabled\(\)\s*\)\s*\{/);
+  if (!match || match.index === undefined) {
+    throw new Error(
+      "Could not find `if (!isStealthSyncEnabled()) { ... }` in handleStealthSync. " +
+        "If the gate's shape changed, update this helper; do not delete the " +
+        "assertions that depend on it.",
+    );
+  }
+  const open = match.index + match[0].length - 1;
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    if (code[i] === "{") depth += 1;
+    else if (code[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return { open, close: i };
+    }
+  }
+  throw new Error("Braces in the sync-door gate never balanced; the scan ran to EOF.");
+}
+
 describe("ConnectionsPage handleSync wiring", () => {
   it("still exists as a handler this test can read", () => {
     const code = handlerCode("handleSync");
@@ -181,7 +211,7 @@ describe("ConnectionsPage handleStealthSync wiring", () => {
   it("reads the switch above the key export", () => {
     const code = handlerCode("handleStealthSync");
     const refresh = code.indexOf("refreshRuntimeFlagsForDoor(");
-    const gate = code.indexOf("isStealthSyncEnabled(");
+    const { open: gate } = syncDoorGate(code);
     const keyExport = code.indexOf("exportOrCredsKey(");
     expect(keyExport).toBeGreaterThan(-1);
     expect(
@@ -210,6 +240,23 @@ describe("ConnectionsPage handleStealthSync wiring", () => {
       "The sync door no longer shows its refusal message above the key export. A gate " +
         "that returns with no word to anyone reads as a dead Sync button, which turns " +
         "a switched-off feature into a support conversation instead of an explanation.",
+    ).toBe(true);
+  });
+
+  it("returns inside the gate instead of falling through to the key export", () => {
+    const code = handlerCode("handleStealthSync");
+    const { open, close } = syncDoorGate(code);
+    const gateBody = code.slice(open, close + 1);
+    expect(
+      gateBody.includes(SYNC_DOOR_REFUSAL),
+      "The sync-door gate block no longer shows the refusal message inside its braces.",
+    ).toBe(true);
+    expect(
+      /\breturn\s*;/.test(gateBody),
+      "The sync-door gate no longer returns. Deleting the `return;` here leaves the " +
+        "suite green while a refused press shows the toast and falls straight through " +
+        "to exportOrCredsKey below it, which is exactly what the kill switch exists to " +
+        "stop (OWM-T0694).",
     ).toBe(true);
   });
 
