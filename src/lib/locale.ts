@@ -18,6 +18,7 @@ import {
   type DateFormatPref,
   type NumberFormatPref,
 } from "@/hooks/useDashboardPrefs";
+import { formatCurrencyWithMode, type BtcDisplayMode } from "@/lib/format";
 
 export function numberLocale(pref: NumberFormatPref): string {
   return pref === "eu" ? "de-DE" : "en-US";
