@@ -76,6 +76,29 @@ function handlerCode(name: string): string {
   throw new Error(`Braces in ${name} never balanced; the slice would run to EOF.`);
 }
 
+/**
+ * The block starting at `searchFrom`, from its first `{` to the matching
+ * closing brace. Used to isolate one `if` statement's body so a return
+ * inside it cannot be confused with a return anywhere else in the handler
+ * (OWM-T0694).
+ */
+function blockAt(code: string, searchFrom: number): string {
+  const bodyStart = code.indexOf("{", searchFrom);
+  if (bodyStart === -1) {
+    throw new Error(`No opening brace found after index ${searchFrom}.`);
+  }
+  let depth = 0;
+  for (let i = bodyStart; i < code.length; i += 1) {
+    const ch = code[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return code.slice(searchFrom, i + 1);
+    }
+  }
+  throw new Error(`Braces starting at index ${searchFrom} never balanced.`);
+}
+
 describe("ConnectionsPage handleSync wiring", () => {
   it("still exists as a handler this test can read", () => {
     const code = handlerCode("handleSync");
@@ -153,5 +176,111 @@ describe("ConnectionsPage handleSyncAll wiring", () => {
     for (const forbidden of ["exportOrCredsKey", "exportOrTxnsKey"]) {
       expect(code.includes(forbidden), `handleSyncAll calls ${forbidden} directly.`).toBe(false);
     }
+  });
+});
+
+/**
+ * The stealth SYNC door, read as source (OWM-T0671).
+ *
+ * WHY THIS IS SEPARATE FROM handleSync ABOVE. The routing block asserts the
+ * kill switch is NOT in handleSync's routing decision, because reading it
+ * there was the OWM-T0530 defect. That leaves open where the switch IS, and
+ * the answer is at the top of handleStealthSync, above the credentials key
+ * export, covering both ways into a private scan: the routed press, and the
+ * "Try again" action on the failure toast, which calls this function directly
+ * (OWM-T0495). Until this block existed, deleting that gate failed nothing.
+ *
+ * ORDER IS THE PROPERTY, not presence. Below the export the gate guards
+ * nothing, because the key has already left the vault by then.
+ */
+describe("ConnectionsPage handleStealthSync wiring", () => {
+  const SYNC_DOOR_REFUSAL = "Scanning a private wallet is temporarily unavailable.";
+
+  it("still exists as a handler this test can read", () => {
+    const code = handlerCode("handleStealthSync");
+    expect(code.length).toBeGreaterThan(200);
+  });
+
+  it("reads the switch above the key export", () => {
+    const code = handlerCode("handleStealthSync");
+    const refresh = code.indexOf("refreshRuntimeFlagsForDoor(");
+    const gate = code.indexOf("isStealthSyncEnabled(");
+    const keyExport = code.indexOf("exportOrCredsKey(");
+    expect(keyExport).toBeGreaterThan(-1);
+    expect(
+      gate > -1 && gate < keyExport,
+      "The kill switch check is gone from handleStealthSync, or it now sits BELOW " +
+        "exportOrCredsKey. This gate is the last thing between a flag flip and the " +
+        "customer's credentials key crossing to the provider origin. Below the export " +
+        "it guards nothing: the key has already left the vault (OWM-T0495, OWM-T0671).",
+    ).toBe(true);
+    expect(
+      refresh > -1 && refresh < gate,
+      "handleStealthSync no longer re-reads the runtime flags before it consults the " +
+        "switch. Without that read the door answers from the copy cached when the tab " +
+        "loaded, so the one customer the switch fails to reach is the customer already " +
+        "in the app (OWM-T0504), and joining a query that was already in flight can " +
+        "answer from before the press (OWM-T0587).",
+    ).toBe(true);
+  });
+
+  it("isStealthSyncEnabled( is not duplicated above the gate", () => {
+    const code = handlerCode("handleStealthSync");
+    const occurrences = code.split("isStealthSyncEnabled(").length - 1;
+    expect(
+      occurrences,
+      "isStealthSyncEnabled( appears more than once in handleStealthSync. The " +
+        "assertions in this file find only the FIRST occurrence, so a decoy call " +
+        "placed above the real gate would let the real gate move below the key " +
+        "export undetected (OWM-T0694).",
+    ).toBe(1);
+  });
+
+  it("the gate actually returns: deleting the return reopens the hole", () => {
+    const code = handlerCode("handleStealthSync");
+    const gate = code.indexOf("isStealthSyncEnabled(");
+    expect(gate).toBeGreaterThan(-1);
+    const ifStart = code.lastIndexOf("if", gate);
+    expect(ifStart).toBeGreaterThan(-1);
+    const gateBlock = blockAt(code, ifStart);
+    const refusal = gateBlock.indexOf(SYNC_DOOR_REFUSAL);
+    const returnAfterRefusal = gateBlock.indexOf("return", refusal);
+    expect(
+      refusal > -1 && returnAfterRefusal > refusal,
+      "The switch gate's if-block no longer contains a return after its refusal " +
+        "message. Without it, a refused press shows the toast and falls straight " +
+        "through into the code below the gate, including the credentials key " +
+        "export (OWM-T0694: deleting one `return;` reopens the hole with a green " +
+        "suite, because the three existing assertions here are all presence-only " +
+        "and none of them checks control flow).",
+    ).toBe(true);
+  });
+
+  it("refuses out loud instead of returning silently", () => {
+    const code = handlerCode("handleStealthSync");
+    const refusal = code.indexOf(SYNC_DOOR_REFUSAL);
+    const keyExport = code.indexOf("exportOrCredsKey(");
+    expect(
+      refusal > -1 && refusal < keyExport,
+      "The sync door no longer shows its refusal message above the key export. A gate " +
+        "that returns with no word to anyone reads as a dead Sync button, which turns " +
+        "a switched-off feature into a support conversation instead of an explanation.",
+    ).toBe(true);
+  });
+
+  it("keeps the retry action pointed back at this gated handler", () => {
+    const code = handlerCode("handleStealthSync");
+    expect(
+      code.includes('label: "Try again"'),
+      "The failure toast lost its Try again action. OWM-T0495 closed the retry hole by " +
+        "gating this handler, not by deleting the retry; deleting it takes a working " +
+        "recovery away from every customer whose scan failed for a retryable reason.",
+    ).toBe(true);
+    expect(
+      /onClick:\s*\(\)\s*=>\s*void handleStealthSync\(/.test(code),
+      "The Try again action no longer re-enters handleStealthSync. It has to, because " +
+        "that is the entry the gate above covers. Any other retry target is a second " +
+        "door into the private scan with no kill switch on it (OWM-T0495).",
+    ).toBe(true);
   });
 });

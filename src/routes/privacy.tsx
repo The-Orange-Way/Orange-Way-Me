@@ -276,17 +276,17 @@ function PrivacyPage() {
           purposes of Quebec Law 25 §8.1 and GDPR Art. 13(1)(a), is reachable at:
         </p>
         <address className="mt-2 not-italic text-muted-foreground">
-          Orange Way
+          The Orange Way Inc
           <br />
-          24 Maple Ave #1
+          620 Veterans Drive Suite 12
           <br />
-          Barrie, ON L4N 1R6
+          Barrie, ON L4N9J4
           <br />
           Canada
         </address>
 
         <p className="mt-10 text-xs text-muted-foreground">
-          Questions? Email privacy@orangeway.app or write to the address above.
+          Questions? Email hello@orangeway.app or write to the address above.
         </p>
       </article>
     </MarketingShell>

@@ -121,25 +121,49 @@ canon_terms() {
 # this. The invocation is deliberately the same shape the consumers use,
 # so a pattern that grep would refuse in a scan is refused here too.
 #
-# The probe feeds ONE BLANK LINE, and the difference from zero bytes is the
-# whole reason this function can answer the second question below. grep
-# tests lines: given no input at all there are no lines to test, so it
+# THE PROBE IS TWO LINES, fed to grep one at a time, and each one answers a
+# different question. Neither can be dropped.
+#
+# Probe line 1 is ONE BLANK LINE, and the difference from zero bytes is the
+# whole reason this function can ask the match-everything question at all.
+# grep tests lines: given no input at all there are no lines to test, so it
 # returns "no match" for every pattern including one that matches the empty
 # string. An earlier version of this probe piped in zero bytes and then
 # reasoned about what a match would mean, which could never happen. One
 # blank line gives grep something to test that no real reserved term can
-# appear in.
+# appear in. It catches the patterns that match the EMPTY string: an empty
+# alternation branch left by a stray pipe, and an entirely optional
+# fragment.
+#
+# Probe line 2 holds ONE control character, and it exists because the blank
+# line covers only half of the match-everything class. A branch of ".", or
+# ".+", or "[^x]", matches every NON-EMPTY line of every file and does NOT
+# match a blank line, so probe 1 on its own reports it healthy. The list is
+# documented as one regex FRAGMENT per line, so a fragment edited down to a
+# bare "." is a realistic edit, and the resulting "termA|.|termB" makes
+# every consumer flag every file in the tree.
+#
+# The character is SOH (\001). No reserved term can contain it, the list
+# being names and hostnames, so a pattern that matches a lone control byte
+# is matching by breadth and not by content. It is deliberately not NUL,
+# which grep would read as binary input.
+#
+# A pattern that survives both probes compiles, does not match the empty
+# string, and does not match an arbitrary non-empty line. That is as close
+# to usable as a probe can get without the real tree.
 canon_terms_usable() {
   local pattern="${1-}"
   local rc=0
   CANON_TERMS_REASON=empty
   [ -n "$pattern" ] || return 1
+
+  # Probe 1: does it match the empty string.
   printf '\n' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
   case "$rc" in
-    # 1 = compiled and did not match. That is the only healthy answer.
+    # 1 = compiled and did not match. Healthy so far, so ask probe 2. This
+    #     is the only branch that continues.
     1)
-      CANON_TERMS_REASON=ok
-      return 0
+      :
       ;;
     # 0 = the pattern matched a line with nothing in it. The empty string is
     #     contained in every line, so such a pattern matches every line of
@@ -155,6 +179,33 @@ canon_terms_usable() {
       ;;
     # 2 or higher = grep refused the pattern outright, which is the typo
     #     case this function was added for.
+    *)
+      CANON_TERMS_REASON=refused
+      return 1
+      ;;
+  esac
+
+  # Probe 2: does it match an arbitrary non-empty line.
+  rc=0
+  printf '\001\n' | grep -qE "$pattern" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    # 1 = it compiles, matches neither probe line, and is the only answer
+    #     that gets to be called usable.
+    1)
+      CANON_TERMS_REASON=ok
+      return 0
+      ;;
+    # 0 = it matches a line holding one control character, which no real
+    #     reserved term can appear in. The pattern is matching by breadth,
+    #     so it matches every non-empty line of every file: the same
+    #     match-everything failure as probe 1 reports, one class over.
+    0)
+      CANON_TERMS_REASON=matches-everything
+      return 1
+      ;;
+    # 2 or higher cannot normally arrive here, since probe 1 already
+    #     compiled the same pattern. Kept because a refusal must never be
+    #     read as a pass, whatever the reason for it.
     *)
       CANON_TERMS_REASON=refused
       return 1
@@ -182,7 +233,7 @@ canon_terms_reason_text() {
       printf '%s\n' "The reserved-term list does not compile as a regular expression, so every scan that uses it would report clean while checking nothing. At least one fragment is not valid regex; an unbalanced parenthesis or bracket is the usual cause."
       ;;
     matches-everything)
-      printf '%s\n' "The reserved-term list matches every line of every file, so every scan that uses it would flag the whole tree instead of checking it. One fragment matches the empty string; an empty alternation branch left by a stray pipe, or an entirely optional fragment, is the usual cause."
+      printf '%s\n' "The reserved-term list matches every line of every file, so every scan that uses it would flag the whole tree instead of checking it. One fragment matches far more than it names: an empty alternation branch left by a stray pipe, an entirely optional fragment, or a fragment edited down to a catch-all such as a bare dot, are the usual causes."
       ;;
     empty)
       printf '%s\n' "The reserved-term list holds no usable terms, so every scan that uses it would check for nothing. Either nothing is configured, or every line is blank or a comment."

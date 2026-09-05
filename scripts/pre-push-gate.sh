@@ -162,9 +162,20 @@ else
   # shellcheck source=scripts/canon-terms.sh
   . "$CANON_TERMS_LIB"
   # Present is not the same as usable: a file that exists and fails to
-  # source leaves canon_terms undefined. Ask for the function.
-  if ! declare -f canon_terms >/dev/null 2>&1; then
-    red "✗ scripts/canon-terms.sh was sourced but defines no canon_terms; the reserved-term check cannot run."
+  # source leaves its functions undefined. Ask for them.
+  #
+  # ALL THREE are named, not only the first. A partial source that defines
+  # canon_terms and stops leaves canon_terms_usable undefined; bash returns
+  # 127 for it, the "! canon_terms_usable" test below reads that as
+  # unusable, and the push is refused with a line telling the developer to
+  # fix a fragment in a list that is perfectly fine. Fail closed either
+  # way, so this is the message and not a hole: it sends someone hunting a
+  # typo in a value nobody can read back, for a fault in a script sitting
+  # in front of them.
+  if ! declare -f canon_terms >/dev/null 2>&1 \
+    || ! declare -f canon_terms_usable >/dev/null 2>&1 \
+    || ! declare -f canon_terms_reason_text >/dev/null 2>&1; then
+    red "✗ scripts/canon-terms.sh was sourced but does not define all of canon_terms, canon_terms_usable and canon_terms_reason_text. The library is broken, not the reserved-term list, and the reserved-term check cannot run."
     FAIL=1
   else
     if [ -n "${OW_RESERVED_TERMS:-}" ]; then
