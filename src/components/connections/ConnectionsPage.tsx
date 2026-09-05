@@ -89,6 +89,7 @@ import {
   type StealthSealedRow,
 } from "@/lib/stealth/ledger";
 import type { StealthChannel } from "@/lib/stealth/channel";
+import { nextTransactionsPage, type TransactionRow } from "@/lib/or/transactions-page";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
