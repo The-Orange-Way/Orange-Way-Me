@@ -94,6 +94,47 @@ jobs:
           fi
           echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
+      - name: Executed-test guard (OWM-T0353)
+        # File-count guards above cannot tell a test that RAN from one that
+        # was collected and then skipped in place. This reads the same
+        # vitest-results.json and fails if the suite executed zero tests, or
+        # if either named P0 recovery-guard file executed zero tests.
+        run: node scripts/assert-tests-executed.mjs "$RUNNER_TEMP/vitest-results.json"
+
+      - name: Prove the executed-test guard can fail
+        # A guard that has never been watched go red is unproven. This feeds
+        # it a synthetic report with zero executed tests and fails the JOB
+        # only if the guard does NOT exit non-zero on it -- so a future edit
+        # that quietly neuters the guard (for example, always returning 0)
+        # is itself caught here rather than discovered when a real skip slips
+        # through.
+        run: |
+          set -euo pipefail
+          FAKE="$RUNNER_TEMP/fake-zero-executed.json"
+          cat > "$FAKE" <<'JSON'
+          {
+            "numPassedTests": 0,
+            "numFailedTests": 0,
+            "numPendingTests": 3,
+            "numTodoTests": 0,
+            "testResults": [
+              {
+                "name": "src/lib/or/__tests__/or-key-material.test.ts",
+                "assertionResults": [
+                  { "status": "pending" },
+                  { "status": "pending" },
+                  { "status": "pending" }
+                ]
+              }
+            ]
+          }
+          JSON
+          if node scripts/assert-tests-executed.mjs "$FAKE" scripts/required-test-specs.json; then
+            echo "::error::assert-tests-executed.mjs exited 0 on a synthetic zero-executed report. The guard is not working and would report a fully-skipped run as green."
+            exit 1
+          fi
+          echo "Executed-test guard correctly failed on a synthetic zero-executed report."
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
