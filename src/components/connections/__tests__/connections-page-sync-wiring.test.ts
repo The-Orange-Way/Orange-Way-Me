@@ -155,6 +155,23 @@ describe("ConnectionsPage handleSync wiring", () => {
         "refuse-or-scan inside handleStealthSync, above that path's own export.",
     ).toBe(false);
   });
+
+  it("does not run the import bridge when this press's sync just errored (OW-T0263)", () => {
+    const code = handlerCode("handleSync");
+    expect(
+      code.includes("importSyncedTransactionsForConnection(conn)"),
+      "handleSync no longer calls importSyncedTransactionsForConnection. If it " +
+        "was renamed, update this test; do not delete the assertion.",
+    ).toBe(true);
+    expect(
+      code.includes("if (user && errs.length === 0) {"),
+      "handleSync's import-bridge guard no longer excludes a connection whose " +
+        "sync attempt on THIS press errored. handleSyncAll gates the same call " +
+        "on `!c.error`; a guard of `if (user)` alone runs the import bridge even " +
+        "on an errored sync, producing a confusing extra toast right after the " +
+        "sync-failed toast and an unneeded round trip on every failed sync.",
+    ).toBe(true);
+  });
 });
 
 describe("ConnectionsPage handleSyncAll wiring", () => {
