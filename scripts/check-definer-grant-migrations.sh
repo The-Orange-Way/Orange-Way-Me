@@ -138,6 +138,27 @@ strip_param_names() {
   printf '%s(%s)' "$fname" "$out"
 }
 
+# RULE 2: a CREATE OR REPLACE FUNCTION added for one of the hardened names in
+# HARDENED_DEFINER_FUNCTIONS resets EXECUTE to PUBLIC on the Postgres default.
+# If this file's added lines (buf, already comment-stripped and statement-
+# joined the same way rule 1 reads it) contain that replace and do NOT also
+# contain a REVOKE EXECUTE naming the same function, the reset is never taken
+# back and the migration is refused. Appends to RULE2_VIOLATIONS, declared at
+# top level alongside VIOLATIONS.
+check_rule2_unrevoked_replace() {
+  local file="$1" buf="$2" lowerbuf hfunc
+  lowerbuf=$(printf '%s' "$buf" | tr '[:upper:]' '[:lower:]')
+  while IFS= read -r hfunc; do
+    [ -n "$hfunc" ] || continue
+    if printf '%s' "$lowerbuf" | grep -Eq "create[[:space:]]+or[[:space:]]+replace[[:space:]]+function[[:space:]]+(public\.)?${hfunc}[[:space:]]*\("; then
+      if ! printf '%s' "$lowerbuf" | grep -Eq "revoke[[:space:]]+execute[[:space:]]+on[[:space:]]+function[[:space:]]+(public\.)?${hfunc}[[:space:]]*\([^)]*\)[[:space:]]+from"; then
+        RULE2_VIOLATIONS+=("${file}"$'\t'"${hfunc}")
+        echo "REFUSED (rule 2): ${file}: CREATE OR REPLACE FUNCTION ${hfunc} added with no matching REVOKE EXECUTE in the same migration; EXECUTE resets to PUBLIC by Postgres default."
+      fi
+    fi
+  done <<< "$HARDENED_DEFINER_FUNCTIONS"
+}
+
 while IFS= read -r FILE; do
   [ -n "$FILE" ] || continue
   # Only lines this PR ADDS, so an untouched GRANT already sitting in a file
