@@ -35,12 +35,31 @@ export const VAULT_VERIFIER_PLAINTEXT = "ORANGE_WAY_VAULT_V1";
  */
 export const MIN_VAULT_PASSWORD_LENGTH = 14;
 
-// Argon2id parameters (OWASP 2023 recommended tier).
-// 64 MiB memory × 3 iterations × 4 parallelism gives ~500 ms on a modern
-// laptop and is >10,000× harder to attack on GPU/ASIC than PBKDF2-SHA256.
-const ARGON2ID_MEMORY_KIB = 64 * 1024; // 64 MiB
-const ARGON2ID_ITERATIONS = 3;
-const ARGON2ID_PARALLELISM = 4;
+/**
+ * Argon2id cost parameters, FROZEN as v1 (OWASP 2023 recommended tier).
+ * 64 MiB memory x 3 iterations x 4 parallelism gives ~500 ms on a modern
+ * laptop and is >10,000x harder to attack on GPU/ASIC than PBKDF2-SHA256.
+ *
+ * NEVER EDIT THESE VALUES IN PLACE. Nothing on the row records which
+ * parameter set produced a given key: vault_metadata.kdf_iterations is a
+ * PBKDF2 field and is explicitly NOT a fallback for this. So changing a value
+ * here silently changes the key derived by every account that still derives
+ * at unlock, and everything sealed under the old key stops opening, with no
+ * error that names the cause. The edit looks like pure hardening and is a
+ * data-loss change.
+ *
+ * Hardening later means ADDING an ARGON2ID_V2 and using it only for material
+ * stamped v2. It never means changing v1. Stamping the parameter set on the
+ * row is wanted too, but that is DDL and belongs with the migration.
+ *
+ * Object.freeze is here so an accidental mutation is loud rather than silent.
+ */
+export const ARGON2ID_V1 = Object.freeze({
+  version: 1,
+  memoryKib: 64 * 1024, // 64 MiB
+  iterations: 3,
+  parallelism: 4,
+});
 
 // ---------- helpers ----------
 
@@ -504,9 +523,9 @@ export async function deriveMekRawBytesArgon2id(
   const hex = await argon2id({
     password: new TextEncoder().encode(password),
     salt: b64decode(saltB64),
-    iterations: ARGON2ID_ITERATIONS,
-    memorySize: ARGON2ID_MEMORY_KIB,
-    parallelism: ARGON2ID_PARALLELISM,
+    iterations: ARGON2ID_V1.iterations,
+    memorySize: ARGON2ID_V1.memoryKib,
+    parallelism: ARGON2ID_V1.parallelism,
     hashLength: 32,
     outputType: "hex",
   });
@@ -618,9 +637,9 @@ export async function deriveOrMekBytes(
   const hashBytes = await argon2id({
     password: encoder.encode(password),
     salt: saltBytes,
-    memorySize: ARGON2ID_MEMORY_KIB,
-    iterations: ARGON2ID_ITERATIONS,
-    parallelism: ARGON2ID_PARALLELISM,
+    memorySize: ARGON2ID_V1.memoryKib,
+    iterations: ARGON2ID_V1.iterations,
+    parallelism: ARGON2ID_V1.parallelism,
     hashLength: 32,
     outputType: "binary",
   });
