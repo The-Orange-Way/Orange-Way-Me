@@ -17,6 +17,12 @@ name: prod-drift-guard
 on:
   push:
     branches: [dev, prod]
+  pull_request:
+    paths:
+      - 'scripts/prod-drift-guard.sh'
+      - 'scripts/tests/prod-drift-guard-null-files.test.sh'
+      - 'scripts/tests/fixtures/**'
+      - '.github/workflows/prod-drift-guard.yml'
   workflow_dispatch:
     inputs:
       base_branch:
