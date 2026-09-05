@@ -794,7 +794,6 @@ export function ConnectionsPage() {
       toast.error(
         "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",
       );
-      return;
     }
     setSyncingId(conn.id);
     // Clear any line left over from the previous scan before this one starts.
