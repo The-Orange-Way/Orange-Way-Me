@@ -1115,7 +1115,7 @@ export function ConnectionsPage() {
       // set, so the connection really was processed, and the import helper is
       // not delta based: it reads what is held for the connection and dedupes,
       // returning immediately when there is nothing to import.
-      if (user) {
+      if (user && errs.length === 0) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
