@@ -77,7 +77,10 @@ interface RawConnectionRow {
   encrypted_last_error: string | null;
 }
 
-async function callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown> {
+export async function callProxy(
+  endpoint: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
