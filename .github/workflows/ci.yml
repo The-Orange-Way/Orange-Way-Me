@@ -94,6 +94,34 @@ jobs:
           fi
           echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
+          # Identity guard (OWM-T0359): the count check above cannot tell "deleted
+          # one test file" from "deleted a different test file" when the total still
+          # looks plausible. Assert specific must-never-disappear files were actually
+          # collected, not just that some number of files were.
+          if [ ! -f scripts/ci-must-collect-tests.txt ]; then
+            echo "::error::scripts/ci-must-collect-tests.txt is missing, so the manifest guard cannot run."
+            exit 1
+          fi
+          node -e "
+            const fs = require('fs');
+            const r = require('$RUNNER_TEMP/vitest-results.json');
+            const collected = (r.testResults || []).map((t) => t.name || '');
+            const manifest = fs.readFileSync('scripts/ci-must-collect-tests.txt', 'utf8')
+              .split('\n')
+              .map((l) => l.trim())
+              .filter((l) => l && !l.startsWith('#'));
+            if (manifest.length === 0) {
+              console.log('::error::scripts/ci-must-collect-tests.txt has no usable entries (every line blank or a comment). The manifest guard would check nothing.');
+              process.exit(1);
+            }
+            const missing = manifest.filter((m) => !collected.some((c) => c.endsWith(m)));
+            if (missing.length > 0) {
+              console.log('::error::Manifest test file(s) missing from vitest collection: ' + missing.join(', ') + '. A must-never-disappear test was deleted, renamed, or excluded from the include glob.');
+              process.exit(1);
+            }
+            console.log('Manifest guard OK: ' + manifest.length + ' must-never-disappear file(s) present in the collected suite.');
+          "
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
