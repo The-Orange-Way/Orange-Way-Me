@@ -860,7 +860,13 @@ function Footer() {
         className="mx-auto mt-10 max-w-7xl border-t pt-6 text-xs"
         style={{ borderColor: C.border, color: C.muted }}
       >
-        © {year} {COPY.footerLegalLine}
+        <p>
+          © {year} {COPY.footerLegalLine}
+        </p>
+        <p className="mt-1">
+          The Orange Way Inc · 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada ·{" "}
+          <a href="mailto:hello@orangeway.app">hello@orangeway.app</a>
+        </p>
       </div>
     </footer>
   );
