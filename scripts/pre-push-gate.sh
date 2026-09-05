@@ -230,7 +230,7 @@ fi
 if [ "$RESERVED_UNUSABLE" != "0" ]; then
   # Already refused above, with the reason. Do not also claim it was skipped.
   :
-elif [ -z "$PRIVATE_PATTERN" ]; then
+elif [ -z "$PRIVATE_PATTERN_CI" ] && [ -z "$PRIVATE_PATTERN_CS" ]; then
   # Says which of the two real causes this is. "Not configured" and
   # "configured, but every line is a comment or blank" look identical from
   # here and send a contributor looking in different places.
@@ -238,7 +238,9 @@ elif [ -z "$PRIVATE_PATTERN" ]; then
   yellow "  OW_RESERVED_TERMS and .reserved-terms are unset, or hold only comments and blank lines."
   yellow "  The server-side post-merge identity scan still enforces the list."
 else
-  # Scan commits being pushed: messages + diff
+  # Scan commits being pushed: messages + diff, once for the default
+  # case-insensitive terms and once for CS:-marked terms matched exactly as
+  # written (no -i on that pass).
   for i in "${!LOCAL_SHAS[@]}"; do
     sha="${LOCAL_SHAS[$i]}"
     base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
@@ -262,18 +264,32 @@ else
     # commit time. This mirrors the server post-merge identity scan so the two
     # cannot drift. Only this exact trailer line is dropped.
     COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:[[:space:]]*Claude[[:space:]]+[A-Za-z]+[[:space:]]+[0-9.]+[[:space:]]*<noreply@anthropic\.com>[[:space:]]*$'
-    if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-      red "✗ Reserved-term leak in commit messages:"
-      git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi --color=always "$PRIVATE_PATTERN"
-      FAIL=1
+    if [ -n "$PRIVATE_PATTERN_CI" ]; then
+      if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi "$PRIVATE_PATTERN_CI" >/dev/null; then
+        red "✗ Reserved-term leak in commit messages:"
+        git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi --color=always "$PRIVATE_PATTERN_CI"
+        FAIL=1
+      fi
+      # Diff content: ADDED lines only. Deletions are how leaks get removed;
+      # blocking a push because its diff deletes a reserved term would make
+      # cleanups impossible.
+      if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN_CI" >/dev/null; then
+        red "✗ Reserved-term leak in added diff lines:"
+        git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN_CI" | head -20
+        FAIL=1
+      fi
     fi
-    # Diff content: ADDED lines only. Deletions are how leaks get removed;
-    # blocking a push because its diff deletes a reserved term would make
-    # cleanups impossible.
-    if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-      red "✗ Reserved-term leak in added diff lines:"
-      git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
-      FAIL=1
+    if [ -n "$PRIVATE_PATTERN_CS" ]; then
+      if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nE "$PRIVATE_PATTERN_CS" >/dev/null; then
+        red "✗ Reserved-term leak in commit messages:"
+        git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nE --color=always "$PRIVATE_PATTERN_CS"
+        FAIL=1
+      fi
+      if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nE "$PRIVATE_PATTERN_CS" >/dev/null; then
+        red "✗ Reserved-term leak in added diff lines:"
+        git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nE --color=always "$PRIVATE_PATTERN_CS" | head -20
+        FAIL=1
+      fi
     fi
   done
   # Not a short-circuit AND: under set -e, an AND-list whose final status is
