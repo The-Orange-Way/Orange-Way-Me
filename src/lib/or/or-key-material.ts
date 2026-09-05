@@ -162,7 +162,7 @@ export interface PlanOrKeyMaterialOptions {
  * against its own private copy of the sentence (OWM-T0396).
  */
 export const OR_UNPINNED_SALT_ROTATED_REASON =
-  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs attention.";
+  "Orange Rails key material was never pinned for this account and the vault salt has just changed, so the key that opened existing rows cannot be reproduced. Anything synced before this point needs a re-sync.";
 
 /**
  * Decide, from what is stored, how to obtain the Orange Rails key material.
