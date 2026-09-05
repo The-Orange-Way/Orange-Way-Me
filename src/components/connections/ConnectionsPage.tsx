@@ -1110,11 +1110,14 @@ export function ConnectionsPage() {
       // path over, and for the same reason: a sync that finds nothing new
       // still has to reconcile what is already stored.
       //
-      // Safe to run unconditionally. We only reach here when `attempted` is
-      // set, so the connection really was processed, and the import helper is
-      // not delta based: it reads what is held for the connection and dedupes,
-      // returning immediately when there is nothing to import.
-      if (user) {
+      // Gated on errs.length === 0, matching handleSyncAll's !c.error filter.
+      // `attempted` only proves or-sync tried this connection, not that the
+      // attempt succeeded; running the import after a just-failed attempt
+      // for this same connection still reconciles whatever was already
+      // stored (the helper is dedup based, not delta based), but it produces
+      // a confusing second toast on every failed sync and an extra round
+      // trip that buys nothing.
+      if (user && errs.length === 0) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
