@@ -151,23 +151,7 @@ while IFS= read -r FILE; do
   # added lines, drop line comments, collapse whitespace, split on ';'.
   BUFFER=$(printf '%s\n' "$ADDED_LINES" | sed 's/--.*$//' | tr '\n' ' ' | tr -s '[:space:]' ' ')
 
-  # RULE 2: a CREATE OR REPLACE FUNCTION added for one of the hardened names
-  # resets EXECUTE to PUBLIC on the Postgres default. If this file's added
-  # lines contain that replace and do NOT also contain a REVOKE EXECUTE
-  # naming the same function, the reset is never taken back and the
-  # migration is refused. Reuses BUFFER as rule 1 built it: added lines only,
-  # comments stripped, statements joined, so a wrapped or multi-statement
-  # migration is read whole rather than one line at a time.
-  LOWERBUF=$(printf '%s' "$BUFFER" | tr '[:upper:]' '[:lower:]')
-  while IFS= read -r HFUNC; do
-    [ -n "$HFUNC" ] || continue
-    if printf '%s' "$LOWERBUF" | grep -Eq "create[[:space:]]+or[[:space:]]+replace[[:space:]]+function[[:space:]]+(public\.)?${HFUNC}[[:space:]]*\("; then
-      if ! printf '%s' "$LOWERBUF" | grep -Eq "revoke[[:space:]]+execute[[:space:]]+on[[:space:]]+function[[:space:]]+(public\.)?${HFUNC}[[:space:]]*\([^)]*\)[[:space:]]+from"; then
-        RULE2_VIOLATIONS+=("${FILE}"$'\t'"${HFUNC}")
-        echo "REFUSED (rule 2): ${FILE}: CREATE OR REPLACE FUNCTION ${HFUNC} added with no matching REVOKE EXECUTE in the same migration; EXECUTE resets to PUBLIC by Postgres default."
-      fi
-    fi
-  done <<< "$HARDENED_DEFINER_FUNCTIONS"
+  check_rule2_unrevoked_replace "$FILE" "$BUFFER"
 
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
