@@ -462,3 +462,61 @@ jobs:
           name: playwright-report-${{ github.ref_name }}
           path: playwright-report/
           retention-days: 7
+
+      # Authenticated vault unlock, dev deployment only.
+      #
+      # The chromium step above is the unauthenticated public surface: it
+      # never signs a user in, so vault unlock has never been exercised in
+      # CI against a deployed origin under the enforced response headers.
+      # That is the one screen where a wrong header locks a customer out of
+      # their own data, so it is the one CI must prove on every dev push.
+      #
+      # Ordering matters twice. These steps run after the Pages deploy, so
+      # they hit the freshly deployed origin rather than a local preview,
+      # and they take PLAYWRIGHT_BASE_URL from the same
+      # steps.target.outputs.verify_url the chromium step uses rather than
+      # hardcoding a host. They also run after the report upload above, so
+      # nothing an authenticated run produces can reach that artifact.
+      # playwright.config.ts already sets trace and screenshot to "off" for
+      # both authenticated projects, and --reporter=list below replaces the
+      # html reporter so playwright-report/ is never written at all. Keep
+      # all three of those true if you touch this.
+      #
+      # Dev only on purpose: tests/e2e/auth.setup.ts refuses to run against
+      # orangeway.app, and the fixture user is a non-production identity.
+      - name: Check authenticated E2E credentials are present
+        if: github.ref_name == 'dev'
+        env:
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # auth.setup.ts skips rather than throws when a credential is
+          # absent (tests/e2e/auth.setup.ts, the setup.skip call). That is
+          # right for a contributor on a clean clone and wrong here: in CI
+          # it produces a green job that proves nothing about unlock. Fail
+          # loudly instead, and name the secret that is missing.
+          missing=""
+          [ -n "$E2E_USER_EMAIL" ] || missing="$missing E2E_USER_EMAIL"
+          [ -n "$E2E_USER_PASSWORD" ] || missing="$missing E2E_USER_PASSWORD"
+          [ -n "$E2E_VAULT_PASSWORD" ] || missing="$missing E2E_VAULT_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Authenticated Playwright run cannot start. Missing secret(s) on the dev environment:$missing"
+            exit 1
+          fi
+          echo "All three authenticated E2E credentials are present."
+
+      - name: Playwright authenticated vault unlock
+        if: github.ref_name == 'dev'
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
+        # --project=authenticated pulls in authenticated-setup through the
+        # project dependency declared in playwright.config.ts, so the sign
+        # in and the vault unlock actually run before the authenticated
+        # specs. --reporter=list keeps the html reporter out of play, per
+        # the ordering note above.
+        run: bunx playwright test --project=authenticated --reporter=list
