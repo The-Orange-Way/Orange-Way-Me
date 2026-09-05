@@ -125,6 +125,16 @@ export interface OrImportResult {
    * "import failed".
    */
   blockedByOpeningDate: number;
+  /**
+   * DL-1424. Destination-account credits skipped because the transaction's
+   * unit did not match the account's stored currency (e.g. a sats integer
+   * routed into a whole-BTC account, which would otherwise inflate the
+   * balance by 1e8). Counted per DESTINATION ACCOUNT CREDIT, not per
+   * transaction: a 1:N mapped transaction contributes one count per account
+   * it would have credited. The transaction row itself still lands with its
+   * own correct enc_currency; only the balance credit is withheld.
+   */
+  unitMismatch: number;
 }
 
 /**
@@ -216,6 +226,38 @@ function pickCurrency(tx: OrImportTransaction, accountCurrency: string | undefin
   if (accountCurrency && accountCurrency.trim().length > 0) return accountCurrency;
   if (tx.currency && tx.currency.trim().length > 0) return tx.currency;
   return null;
+}
+
+/**
+ * DL-1424. True when the signed amount we would credit to the account's
+ * stored balance is in the same unit as that balance.
+ *
+ * The balance is stored in the account's own currency. The credited amount
+ * is in the transaction's native unit: a satoshi integer when `amount_sats`
+ * is set, otherwise the tx currency (falling back to the account currency
+ * when the payload omits one). When those units differ, adding the raw
+ * number corrupts the balance, the classic case being a Bitcoin wallet
+ * reporting sats imported into an account the user keeps in whole BTC,
+ * which inflates it by 1e8.
+ *
+ * Compared case-insensitively (OWM-T0240): "btc" vs "BTC" is the SAME unit
+ * per this function's own contract of refusing only a PROVABLE mismatch, so
+ * a difference of case alone must not refuse the credit. "sats" vs "BTC"
+ * stays a mismatch either way. We never guess a conversion: returns false
+ * ONLY for a provable mismatch; when the account currency is unknown we
+ * cannot prove one, so we return true and preserve the existing behaviour
+ * rather than silently stop crediting.
+ */
+function balanceUnitMatches(tx: OrImportTransaction, accountCurrency: string | undefined): boolean {
+  const balanceUnit = accountCurrency?.trim();
+  if (!balanceUnit) return true;
+  const amountUnit =
+    typeof tx.amount_sats === "number" && Number.isFinite(tx.amount_sats)
+      ? "sats"
+      : tx.currency && tx.currency.trim().length > 0
+        ? tx.currency.trim()
+        : balanceUnit;
+  return amountUnit.toUpperCase() === balanceUnit.toUpperCase();
 }
 
 /**
