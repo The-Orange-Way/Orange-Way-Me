@@ -174,7 +174,7 @@ interface TransactionsListResponse {
  * shorter than the requested limit means nothing is left. Capped at
  * MAX_PAGES so a pathological response cannot spin forever.
  */
-async function fetchAllQuilttRows(
+export async function fetchAllQuilttRows(
   callProxy: CallProxy,
   subaccountId: string,
 ): Promise<EncryptedTxRow[]> {
