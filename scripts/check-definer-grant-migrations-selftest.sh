@@ -195,6 +195,37 @@ git commit -q -m "case11"
 check_case "grant only inside a line comment" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
+# Case 12: CREATE OR REPLACE of a hardened function with no accompanying
+# REVOKE must be refused. Postgres resets EXECUTE to PUBLIC on replace.
+git checkout -q -b case12 main
+cat > supabase/migrations/0002_unrevoked_replace.sql <<'SQL'
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
+RETURNS boolean
+LANGUAGE sql SECURITY DEFINER
+AS $$ SELECT true $$;
+SQL
+git add -A
+git commit -q -m "case12"
+check_case "CREATE OR REPLACE of hardened function with no REVOKE" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 13: the same replace, but the migration also revokes and re-grants
+# properly (the pattern the repo's own history already uses). Must pass.
+git checkout -q -b case13 main
+cat > supabase/migrations/0002_revoked_replace.sql <<'SQL'
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
+RETURNS boolean
+LANGUAGE sql SECURITY DEFINER
+AS $$ SELECT true $$;
+
+REVOKE EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) TO authenticated;
+SQL
+git add -A
+git commit -q -m "case13"
+check_case "CREATE OR REPLACE of hardened function WITH matching REVOKE" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
 if [ "$FAILURES" -gt 0 ]; then
   echo "::error::${FAILURES} self-test case(s) did not get the exit code they should. The gate cannot be trusted until this is green."
   exit 1
