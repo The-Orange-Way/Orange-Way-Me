@@ -1348,14 +1348,52 @@ export function ConnectionsPage() {
     return out;
   }
 
+  /**
+   * Page through `or-transactions-list` for the whole subaccount (OWM-T0722).
+   *
+   * One call with `limit: 500` treated whatever came back as everything the
+   * store held: no error, no counter, and a customer whose history ran past
+   * 500 rows got a ledger that looked complete and silently was not.
+   *
+   * `nextTransactionsPage` is the one place that knows how to tell "may be
+   * more" from "store exhausted" on this endpoint (see that module for why
+   * its own `truncated` flag does not settle it alone). This loop just
+   * drives it, same idiom as `fetchStealthRows` above: walk pages, stop on
+   * `!hasMore`, cap at `MAX_PAGES` so a pathological response cannot spin
+   * forever.
+   */
+  async function fetchAllTransactionRows(subaccountId: string): Promise<TransactionRow[]> {
+    const PAGE_LIMIT = 500;
+    const MAX_PAGES = 25;
+    const out: TransactionRow[] = [];
+    let before: string | undefined;
+
+    for (let i = 0; i < MAX_PAGES; i += 1) {
+      let res: unknown;
+      try {
+        res = await callProxy("or-transactions-list", {
+          subaccount_id: subaccountId,
+          limit: PAGE_LIMIT,
+          ...(before ? { before } : {}),
+        });
+      } catch (err) {
+        console.warn("[Connections] transaction list read failed", err);
+        break;
+      }
+      const page = nextTransactionsPage(res, PAGE_LIMIT);
+      out.push(...page.rows);
+      if (!page.hasMore || !page.nextBefore) break;
+      before = page.nextBefore;
+    }
+    return out;
+  }
+
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
-    const listRes = await callProxy("or-transactions-list", {
-      subaccount_id: subaccountId,
-      limit: 500,
-    });
+    const allRows = await fetchAllTransactionRows(subaccountId);
+    const listRes = { transactions: allRows };
     // Shape lives in one place. Orange Rails has not finalised how stealth
     // rows come back (their DL-1174) and has ruled they will NOT be extra
     // entries in `transactions`, so nothing here may assume that array is the
