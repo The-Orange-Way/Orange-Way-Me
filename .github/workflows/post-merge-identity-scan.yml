@@ -172,7 +172,11 @@ jobs:
             # line before matching; author, committer, and the rest of the body
             # stay fully in scope so no other line gets a free pass.
             while IFS= read -r line; do
-              if printf '%s' "$line" | grep -qEi "$PATTERN"; then
+              if [ -n "$PATTERN_CI" ] && printf '%s' "$line" | grep -qEi "$PATTERN_CI"; then
+                echo "::error::Reserved-term pattern found in just-pushed commit metadata (redacted; see OW_RESERVED_TERMS)."
+                MATCHES=$((MATCHES + 1))
+              elif [ -n "$PATTERN_CS" ] && printf '%s' "$line" | grep -qE "$PATTERN_CS"; then
+                # No -i: CS:-marked terms are matched exactly as written.
                 echo "::error::Reserved-term pattern found in just-pushed commit metadata (redacted; see OW_RESERVED_TERMS)."
                 MATCHES=$((MATCHES + 1))
               fi
