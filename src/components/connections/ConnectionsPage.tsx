@@ -360,6 +360,10 @@ export function ConnectionsPage() {
   // The OR connection id the bank-sync dialog should pull. null = closed.
   const [bankSyncConnId, setBankSyncConnId] = useState<string | null>(null);
   const [txRefreshKey, setTxRefreshKey] = useState(0);
+  // Tracks whether the orNamespaceDisabledReason effect below is the one
+  // that last set securingError, so it can clear its own banner without
+  // ever touching the OPK registration effect's error.
+  const orDisabledBannerSetRef = useRef(false);
 
   // Stop any live stealth transport when this page goes away. The channel adds
   // a window message listener, so leaving it running would keep handling frames
@@ -414,17 +418,19 @@ export function ConnectionsPage() {
   // the customer land on Connections and see nothing until they trigger an
   // OR action that throws.
   useEffect(() => {
-    if (!orNamespaceDisabledReason) return;
-    // Deliberately no else-branch clearing the banner here. The reason is
-    // nulled from several places (VaultContext on unlock, subaccount change,
-    // and sign-out among them), and the OPK registration effect below also
-    // clears securingError itself, but only on runs where its own guard
-    // (subaccountId && isUnlocked) passes; it returns early otherwise and
-    // leaves securingError untouched. So the banner is not guaranteed to
-    // clear on every path that nulls the reason. If that leaves it stuck
-    // after the customer has fixed the problem, update this comment and the
-    // effects together.
+    if (!orNamespaceDisabledReason) {
+      // Only clear the banner if THIS effect was the one that set it. The
+      // OPK registration effect below sets its own securingError on a
+      // failed key registration; we must never clobber that with a stale
+      // "no reason" pass.
+      if (orDisabledBannerSetRef.current) {
+        setSecuringError(null);
+        orDisabledBannerSetRef.current = false;
+      }
+      return;
+    }
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
+    orDisabledBannerSetRef.current = true;
   }, [orNamespaceDisabledReason]);
 
   // Register the OPK public key on OR once the subaccount exists. or-quiltt-sync
