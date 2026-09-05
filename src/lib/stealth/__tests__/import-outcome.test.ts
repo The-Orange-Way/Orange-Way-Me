@@ -21,6 +21,7 @@ const NOTHING: ImportCounts = {
   untagged: 0,
   errored: 0,
   unreadable: 0,
+  unitMismatch: 0,
 };
 
 describe("describeImportOutcome", () => {
@@ -123,6 +124,33 @@ describe("describeImportOutcome", () => {
     it("treats an errored row as a warning", () => {
       const bad: ImportCounts = { ...NOTHING, attempted: 2, opened: 2, imported: 1, errored: 1 };
       expect(describeImportOutcome(bad).level).toBe("warning");
+    });
+  });
+
+  describe("a refused unit-mismatch balance credit is told to the customer (DEV-0064)", () => {
+    it("is not silent when a refused credit is the only thing that happened", () => {
+      const onlyMismatch: ImportCounts = { ...NOTHING, attempted: 1, opened: 1, imported: 1, unitMismatch: 1 };
+      const out = describeImportOutcome(onlyMismatch);
+      expect(out.silent).toBe(false);
+      expect(out.message).toContain("1 balance credit not applied (unit mismatch)");
+    });
+
+    it("names the count in a mixed summary and treats it as a warning", () => {
+      const mixed: ImportCounts = {
+        ...NOTHING,
+        attempted: 3,
+        opened: 3,
+        imported: 3,
+        unitMismatch: 2,
+      };
+      const out = describeImportOutcome(mixed);
+      expect(out.level).toBe("warning");
+      expect(out.message).toBe("Wallet ledger: 3 imported, 2 balance credits not applied (unit mismatch).");
+    });
+
+    it("does not appear when there was no mismatch", () => {
+      const ok: ImportCounts = { ...NOTHING, attempted: 1, opened: 1, imported: 1 };
+      expect(describeImportOutcome(ok).message).not.toMatch(/unit mismatch/i);
     });
   });
 
