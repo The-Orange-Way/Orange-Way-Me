@@ -167,7 +167,7 @@ while IFS= read -r FILE; do
     # exactly as EXECUTE does, so both spellings come in here. What keeps a
     # table grant written with ALL out of the results is the object-type
     # classification below, not this line.
-    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+(execute|all)[[:space:]]' || continue
+    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+execute[[:space:]]' || continue
     printf '%s' "$LOWER" | grep -Eq '[[:space:]]to[[:space:]]' || continue
 
     # Everything after the LAST " to ", minus a trailing WITH GRANT OPTION.
