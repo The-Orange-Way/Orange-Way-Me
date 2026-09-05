@@ -107,8 +107,8 @@ const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 // actually provisioned. Branch-derived in .github/workflows/deploy.yml
 // (VITE_OR_CONNECT_ENABLED). It is set to "true" on BOTH the dev and prod
 // branches (OWM-T0501), so the "+ Connect a Bitcoin source" button renders
-// on production too. `=== "true"` so an absent or empty value, any other
-// branch or a local build that forgets the variable, reads as OFF.
+// on production too. `=== "true"` so an absent or empty value (any other
+// branch, or a local build that forgets the variable) reads as OFF.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
