@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_RETAINED_STRING } from "@/lib/or/proxy-errors";
 
 const invoke = vi.fn();
@@ -12,12 +12,9 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 describe("useOrConnectionsList's callProxy", () => {
-  beforeEachSetup();
-
-  function beforeEachSetup() {
-    // vitest hoists vi.mock, but the fakes still need resetting per test.
+  beforeEach(() => {
     getSession.mockResolvedValue({ data: { session: { access_token: "t" } } });
-  }
+  });
 
   it("does not join a non-scalar error array unbounded into the thrown message", async () => {
     invoke.mockResolvedValue({ data: { error: ["aaa", "bbb"] }, error: null });
