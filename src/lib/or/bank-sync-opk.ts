@@ -159,15 +159,64 @@ export interface SyncQuilttResult extends OrImportResult {
 /**
  * Fetch + unseal + import all sealed transactions for one Quiltt connection.
  */
+interface TransactionsListResponse {
+  transactions?: EncryptedTxRow[];
+  truncated?: boolean;
+  next_before?: string;
+}
+
+/**
+ * Page through `or-transactions-list` for the whole subaccount (OWM-T0726,
+ * twin of OWM-T0722's fetchAllTransactionRows). Loops until the endpoint's
+ * own signals say the store is exhausted: a byte-truncated response with a
+ * cursor resumes from that cursor; an untruncated full page may still have
+ * more below it and resumes from its oldest row's occurred_at; anything
+ * shorter than the requested limit means nothing is left. Capped at
+ * MAX_PAGES so a pathological response cannot spin forever.
+ */
+async function fetchAllQuilttRows(
+  callProxy: CallProxy,
+  subaccountId: string,
+): Promise<EncryptedTxRow[]> {
+  const PAGE_LIMIT = 1000;
+  const MAX_PAGES = 25;
+  const out: EncryptedTxRow[] = [];
+  let before: string | undefined;
+
+  for (let i = 0; i < MAX_PAGES; i += 1) {
+    let res: TransactionsListResponse;
+    try {
+      res = (await callProxy("or-transactions-list", {
+        subaccount_id: subaccountId,
+        limit: PAGE_LIMIT,
+        ...(before ? { before } : {}),
+      })) as TransactionsListResponse;
+    } catch (err) {
+      console.warn("[bank-sync-opk] transaction list read failed", err);
+      break;
+    }
+    const page = res.transactions ?? [];
+    out.push(...page);
+
+    const truncated = res.truncated === true;
+    const nextBefore = typeof res.next_before === "string" ? res.next_before : null;
+    if (truncated && nextBefore) {
+      before = nextBefore;
+      continue;
+    }
+    if (page.length === 0 || page.length < PAGE_LIMIT) break;
+    const oldest = page[page.length - 1]?.occurred_at;
+    if (!oldest) break;
+    before = oldest;
+  }
+  return out;
+}
+
 export async function syncQuilttConnection(args: SyncQuilttArgs): Promise<SyncQuilttResult> {
   const { callProxy, subaccountId, connectionId, keypair, deps, onProgress } = args;
 
-  const listRes = (await callProxy("or-transactions-list", {
-    subaccount_id: subaccountId,
-    limit: 1000,
-  })) as { transactions?: EncryptedTxRow[] };
-
-  const rows = (listRes.transactions ?? []).filter((t) => t.connection_id === connectionId);
+  const allRows = await fetchAllQuilttRows(callProxy, subaccountId);
+  const rows = allRows.filter((t) => t.connection_id === connectionId);
   const total = rows.length;
 
   const decoded: OrImportTransaction[] = [];
