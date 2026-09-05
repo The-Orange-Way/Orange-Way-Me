@@ -99,11 +99,43 @@ export default defineConfig({
       // The default config sets trace: "on-first-retry"; an
       // authenticated retry would otherwise embed the Supabase JWT,
       // the refresh token, and full DOM snapshots of the unlocked
-      // vault into the trace.zip. If the HTML report ever gets
-      // uploaded as a workflow artifact (currently not, but the
-      // config shouldn't trust that to stay true), those credentials
-      // leak. The harness's own page.screenshot() calls write to a
-      // gitignored dir for human review and are unaffected.
+      // vault into the trace.zip.
+      //
+      // The HTML report, stated exactly, because these two settings
+      // do not cover it and the details decide what that costs.
+      //
+      // The deploy workflow does have an upload step: on failure it
+      // uploads playwright-report/ as an artifact with 7 day
+      // retention. It has nothing to collect today. The same workflow
+      // runs `playwright test --project=chromium --reporter=list`,
+      // and a reporter passed on the command line replaces the
+      // reporter configured at the top of this file, so the html
+      // reporter never runs and playwright-report/ is never written.
+      // (An earlier version of this comment said the report was
+      // "currently not" uploaded, which was wrong the other way
+      // round: the upload step is real.)
+      //
+      // So nothing is exposed today for two independent reasons, and
+      // each is one edit away from stopping being true. The reporter
+      // flag means no report exists at all. Chromium never
+      // authenticates, so a report could not contain a signed-in
+      // session even if one were written.
+      //
+      // Turning trace and screenshot off does NOT empty a report that
+      // does get written. Playwright puts error context, DOM snippets
+      // and stack traces in the report itself. So if an authenticated
+      // project is added to that job AND the html reporter is in
+      // play, a failing run ships a report built from an
+      // unlocked-vault session.
+      //
+      // Two things follow, and the second is the one that gets
+      // missed. Trace and screenshot stay "off" here. And whoever
+      // adds an authenticated project to CI owns keeping its output
+      // out of that upload, because these two settings do not cover
+      // it and the command line flag that covers it today is an
+      // argument in a workflow file, not a guarantee. The harness's
+      // own page.screenshot() calls write to a gitignored dir for
+      // human review and are unaffected.
       name: "authenticated",
       testMatch: /authenticated-routes\.spec\.ts/,
       use: {

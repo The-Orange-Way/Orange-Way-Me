@@ -333,6 +333,44 @@ describe("planOrKeyMaterial", () => {
       epoch: CURRENT_OR_KEY_EPOCH,
     });
   });
+
+  /**
+   * `[] == null` is false, so an array used to pass the nullish guard and
+   * reach the column reads, where every column is undefined. That is the
+   * all-absent shape, so it answered derive-and-pin: a fresh key minted and
+   * pinned as authoritative. The empty array is not a hypothetical shape
+   * either. It is what supabase-js returns for a plain .select() that matched
+   * nothing, which is precisely the unreadable state this guard is for.
+   */
+  it("refuses an empty array row, which is what a plain select returns for no match", () => {
+    const plan = planWithoutTypes([] as unknown as OrKeyMaterialRow, "current-salt", UNCHANGED);
+    expect(plan.mode).toBe("refuse");
+  });
+
+  it("refuses a one-element array row rather than reading columns off the array", () => {
+    const plan = planWithoutTypes(
+      [PINNED] as unknown as OrKeyMaterialRow,
+      "current-salt",
+      UNCHANGED,
+    );
+    expect(plan.mode).toBe("refuse");
+  });
+
+  /**
+   * The same hole with other inputs: every primitive except null and undefined
+   * also passes `== null`. Pinned in its own case so a future guard that
+   * special-cases arrays and forgets the rest fails here.
+   */
+  it("refuses a non-object row of any primitive shape", () => {
+    for (const notARow of ["a-string", 0, 42, false, true]) {
+      const plan = planWithoutTypes(
+        notARow as unknown as OrKeyMaterialRow,
+        "current-salt",
+        UNCHANGED,
+      );
+      expect(plan.mode).toBe("refuse");
+    }
+  });
 });
 
 describe("OrNamespaceDisabledError", () => {

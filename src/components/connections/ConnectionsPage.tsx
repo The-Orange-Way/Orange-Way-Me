@@ -65,6 +65,7 @@ import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
+import { requestOrSync } from "@/lib/or/or-sync-request";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -74,7 +75,7 @@ import {
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
-import { isStealthSyncEnabled, refreshRuntimeFlags } from "@/lib/stealth/runtimeFlags";
+import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
 import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
 import { describeImportOutcome } from "@/lib/stealth/import-outcome";
@@ -217,6 +218,24 @@ export function ConnectionsPage() {
     orNamespaceDisabledReason,
   } = useVault();
   const { accounts, updateAccount } = useAccounts();
+
+  /**
+   * The vault key handover for or-sync, built once and shared by both press
+   * paths. or-sync is the only path in this app that takes these two keys out
+   * of the vault, so there is one object that can do it and one function that
+   * accepts it, and that function checks the route before it uses either
+   * (OWM-T0544). callProxy is module scope and stable, so it is not a
+   * dependency here.
+   */
+  const orSyncKeys = useMemo(
+    () => ({
+      exportCredentialsKey: exportOrCredsKey,
+      exportTransactionsKey: exportOrTxnsKey,
+      callProxy,
+    }),
+    [exportOrCredsKey, exportOrTxnsKey],
+  );
+
   const {
     rows: connAccountMapRows,
     getActiveAccountIds,
@@ -382,6 +401,15 @@ export function ConnectionsPage() {
   // OR action that throws.
   useEffect(() => {
     if (!orNamespaceDisabledReason) return;
+    // Deliberately no else-branch clearing the banner here. The reason is
+    // nulled from several places (VaultContext on unlock, subaccount change,
+    // and sign-out among them), and the OPK registration effect below also
+    // clears securingError itself, but only on runs where its own guard
+    // (subaccountId && isUnlocked) passes; it returns early otherwise and
+    // leaves securingError untouched. So the banner is not guaranteed to
+    // clear on every path that nulls the reason. If that leaves it stuck
+    // after the customer has fixed the problem, update this comment and the
+    // effects together.
     setSecuringError(humanizeOrDisabledReason(orNamespaceDisabledReason));
   }, [orNamespaceDisabledReason]);
 
@@ -585,7 +613,14 @@ export function ConnectionsPage() {
     // the door this gate protects stood open for exactly the customer already
     // in the app. One round trip, and it fails closed: a read that errors
     // leaves the gate false and this press is refused.
-    await refreshRuntimeFlags();
+    //
+    // refreshRuntimeFlagsForDoor, not the plain refresh (OWM-T0587). The plain
+    // one shares a read that is already running, so a press landing part way
+    // through the background tick used to be answered by a query issued before
+    // the press, and a flag turned off in between was invisible to this gate.
+    // The door version guarantees the answer comes from a read that started
+    // after this line was reached.
+    await refreshRuntimeFlagsForDoor();
     const addGate = planCatalogueAdd({ stealthSyncEnabled: isStealthSyncEnabled() });
     if (!addGate.allowed) {
       toast.error(addGate.message);
@@ -731,9 +766,16 @@ export function ConnectionsPage() {
     // feature to come back is a delay, while a customer handing a key to the
     // provider origin after the switch was thrown is an incident.
     //
-    // Fails closed. refreshRuntimeFlags never throws and leaves the gate false
-    // on any read that errors, so a flag we cannot read refuses the scan.
-    await refreshRuntimeFlags();
+    // Fails closed. The read never throws and leaves the gate false on any read
+    // that errors, so a flag we cannot read refuses the scan.
+    //
+    // refreshRuntimeFlagsForDoor, not the plain refresh (OWM-T0587). Joining a
+    // query that was already in flight when the customer pressed meant the
+    // answer could predate the press: the tick reads true, operations turn the
+    // switch off, the press joins the pre-flip query and the credentials key
+    // below crosses to the provider origin. The door version issues its own
+    // read, and doors pressed together still share one of them.
+    await refreshRuntimeFlagsForDoor();
     if (!isStealthSyncEnabled()) {
       toast.error(
         "Scanning a private wallet is temporarily unavailable. Your existing connections and transactions are not affected.",
@@ -991,17 +1033,12 @@ export function ConnectionsPage() {
 
     setSyncingId(conn.id);
     try {
-      const credentials_key = await exportOrCredsKey();
-      const transactions_key = await exportOrTxnsKey();
-      const res = (await callProxy("or-sync", {
-        subaccount_id: subaccount,
-        connection_ids: [conn.id],
-        credentials_key,
-        transactions_key,
-      })) as {
-        synced: number;
-        connections: Array<{ connection_id: string; synced: number; error?: string }>;
-      };
+      // OWM-T0544. No key is exported here any more. requestOrSync asks
+      // planSyncRoute itself and refuses above its own export, so deleting the
+      // private arm above now stops a press rather than starting a key
+      // handover: it reaches this call and is refused, instead of exporting two
+      // vault keys for a request or-sync answers with a 400.
+      const res = await requestOrSync(subaccount, [conn], orSyncKeys);
 
       // DL-1051: a status toast must be driven by positive evidence that this
       // connection was actually processed. or-sync only returns an entry for a
@@ -1102,20 +1139,18 @@ export function ConnectionsPage() {
       let synced = 0;
       let returned: SyncAllResultEntry[] = [];
 
-      // Skip the round trip entirely when nothing is syncable, rather than
-      // asking or-sync about an empty list and interpreting its answer.
-      if (plan.syncableIds.length > 0) {
-        const credentials_key = await exportOrCredsKey();
-        const transactions_key = await exportOrTxnsKey();
-        const res = (await callProxy("or-sync", {
-          subaccount_id: subaccount,
-          connection_ids: plan.syncableIds,
-          credentials_key,
-          transactions_key,
-        })) as { synced: number; connections: SyncAllResultEntry[] };
-        synced = res.synced;
-        returned = res.connections;
-      }
+      // Skipping the round trip when nothing is syncable now lives inside
+      // requestOrSync, which answers an empty list with a zero and exports
+      // nothing, so that skip holds even if this call site is edited.
+      //
+      // Rows are passed rather than ids so requestOrSync can check each one
+      // itself. planSyncAll already holds private connections back and is
+      // tested; this is the net under it, at the point the keys leave rather
+      // than in the caller above it (OWM-T0544).
+      const syncable = connections.filter((c) => plan.syncableIds.includes(c.id));
+      const res = await requestOrSync(subaccount, syncable, orSyncKeys);
+      synced = res.synced;
+      returned = res.connections;
 
       const errs = returned.filter((c) => c.error);
       const report = reportSyncAll({
