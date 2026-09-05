@@ -215,7 +215,7 @@ jobs:
           set -euo pipefail
           body="${RUNNER_TEMP}/backmerge-body.md"
           {
-            echo "Automated back-merge opened by \`.github/workflows/prod-backmerge.yml\` (DL-0565, Gate 3)."
+            echo "Automated back-merge opened by \`.github/workflows/prod-backmerge.yml\`."
             echo
             echo "## Why this exists"
             echo
@@ -228,7 +228,7 @@ jobs:
             echo
             echo "## Commits being brought back"
             echo
-            git log --no-merges --reverse --date=short \
+            git log --reverse --date=short \
               --pretty=format:'- \`%h\` %ad %s' \
               "origin/${BASE_BRANCH}..origin/${SOURCE_BRANCH}"
             echo
