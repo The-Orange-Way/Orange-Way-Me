@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { captureException, captureMessage } from "@/lib/observability/sentry";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -1123,6 +1124,14 @@ export function ConnectionsPage() {
           }
         } catch (importErr) {
           console.error("[Connections] OR import bridge failed", importErr);
+          try {
+            captureException(importErr, {
+              tags: { area: "or-import-bridge" },
+              extra: { connectionId: conn.id },
+            });
+          } catch {
+            // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+          }
           toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
         }
       }
@@ -1131,6 +1140,14 @@ export function ConnectionsPage() {
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
       console.error("[Connections] sync failed", err);
+      try {
+        captureException(err, {
+          tags: { area: "connections-sync" },
+          extra: { connectionId: conn.id },
+        });
+      } catch {
+        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+      }
       toast.error(`Sync failed. ${humanizeError(err)}`);
     } finally {
       setSyncingId(null);
@@ -1224,6 +1241,14 @@ export function ConnectionsPage() {
               `[Connections] OR import bridge failed for ${succ.connection_id}`,
               importErr,
             );
+            try {
+              captureException(importErr, {
+                tags: { area: "or-import-bridge" },
+                extra: { connectionId: succ.connection_id },
+              });
+            } catch {
+              // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+            }
           }
         }
       }
@@ -1232,6 +1257,11 @@ export function ConnectionsPage() {
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
       console.error("[Connections] sync all failed", err);
+      try {
+        captureException(err, { tags: { area: "connections-sync-all" } });
+      } catch {
+        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+      }
       toast.error(`Sync failed. ${humanizeError(err)}`);
     } finally {
       setSyncingAll(false);
@@ -1279,6 +1309,21 @@ export function ConnectionsPage() {
           buildSignatureFields: buildHouseholdSignatureFields,
         },
       });
+
+      if (result.errored > 0) {
+        try {
+          captureMessage(
+            `bank sync: ${result.errored} of ${result.total} transaction(s) failed to import`,
+            {
+              level: "warning",
+              tags: { area: "bank-sync-import" },
+              extra: { connectionId: orConnectionId, errored: result.errored, total: result.total },
+            },
+          );
+        } catch {
+          // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+        }
+      }
 
       // Apply per-account balance deltas for newly-inserted rows.
       for (const [accountId, net] of Object.entries(result.netByAccount)) {
@@ -1540,6 +1585,32 @@ export function ConnectionsPage() {
       buildSignatureFields: buildHouseholdSignatureFields,
     });
 
+    if (decryptFailures > 0) {
+      try {
+        captureMessage(
+          `OR import: ${decryptFailures} of ${forThisConn.length + stealthRows.length} row(s) failed to open`,
+          {
+            level: "warning",
+            tags: { area: "or-import-decrypt" },
+            extra: { connectionId: conn.id, decryptFailures },
+          },
+        );
+      } catch {
+        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+      }
+    }
+    if (result.errored > 0) {
+      try {
+        captureMessage(`OR import: ${result.errored} of ${result.total} row(s) errored`, {
+          level: "warning",
+          tags: { area: "or-import-bridge" },
+          extra: { connectionId: conn.id, errored: result.errored },
+        });
+      } catch {
+        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+      }
+    }
+
     const balanceEntries = Object.entries(result.netByAccount);
     if (balanceEntries.length > 0) {
       for (const [accountId, net] of balanceEntries) {
@@ -1631,6 +1702,14 @@ export function ConnectionsPage() {
       }
     } catch (err) {
       console.error("[Connections] stealth ledger import failed", err);
+      try {
+        captureException(err, {
+          tags: { area: "stealth-ledger-import" },
+          extra: { connectionId: conn.id },
+        });
+      } catch {
+        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+      }
       toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
     }
   }

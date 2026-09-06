@@ -94,6 +94,62 @@ jobs:
           fi
           echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
+      - name: Test-execution guard (no silent skip or empty suite)
+        # Neither guard above can tell a suite that RAN from one that was
+        # collected and then skipped or emptied out. See
+        # scripts/assert-tests-ran.mjs for why, and OW-T0101/OW-T0102 for the
+        # OWB defect this ports the fix from before this repo hits the same shape.
+        run: node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/vitest-results.json"
+
+      - name: Prove the test-execution guard can go RED
+        # Same discipline as the OWB E2E guard: feed the guard synthetic
+        # reports and require it to fail on every broken shape and pass on a
+        # healthy one, in this same run, so it is a proven gate and not a
+        # green rubber stamp.
+        run: |
+          set -euo pipefail
+
+          # Case 1: suites collected, nothing executed at all.
+          cat > "$RUNNER_TEMP/zero-executed.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"skipped"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"skipped"}]}]}
+          JSON
+          if node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/zero-executed.json"; then
+            echo "::error::test-execution guard did NOT fail on a zero-executed report"
+            exit 1
+          fi
+          echo "guard correctly failed: zero executed"
+
+          # Case 2: one suite entirely skipped (a file-scope describe.skip)
+          # while the rest of the run has real passes -- exactly what
+          # describe.skip on a single P0 file produces.
+          cat > "$RUNNER_TEMP/one-suite-skipped.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"skipped"},{"status":"skipped"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]},{"name":"src/some/other.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          if node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/one-suite-skipped.json"; then
+            echo "::error::test-execution guard did NOT fail when the P0 or-key-material suite was entirely skipped"
+            exit 1
+          fi
+          echo "guard correctly failed: P0 suite entirely skipped"
+
+          # Case 3: a P0 file removed from the report entirely (deleted, or
+          # excluded by an include-glob change).
+          cat > "$RUNNER_TEMP/p0-missing.json" <<'JSON'
+          {"testResults":[{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]},{"name":"src/some/other.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          if node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/p0-missing.json"; then
+            echo "::error::test-execution guard did NOT fail when a P0 suite was missing from the report"
+            exit 1
+          fi
+          echo "guard correctly failed: P0 suite missing"
+
+          # Case 4: everything healthy -- the guard must PASS, so a guard
+          # that is always red does not look identical to one that works.
+          cat > "$RUNNER_TEMP/healthy.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"passed"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/healthy.json"
+          echo "guard correctly passed on a healthy report"
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
