@@ -153,8 +153,8 @@ export interface ORBIMatrixRow {
  * subset. See OWM-T0159's ZKA section for why a narrower request is a leak
  * even though no amount or plaintext is disclosed. No account, household,
  * transaction or user identifier appears anywhere in this call; the request
- * shape depends only on the date range, so it is identical for every OWM
- * client asking about the same range.
+ * shape depends only on the date range, so it is identical for every Orange
+ * Way Me client asking about the same range.
  */
 export async function fetchRateMatrix(
   startDate: Date,
