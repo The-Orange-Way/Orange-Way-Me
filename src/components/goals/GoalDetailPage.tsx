@@ -57,7 +57,8 @@ import { GoalFormDialog } from "./GoalFormDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
-import { useLocaleFormat } from "@/lib/locale";
+import { useLocaleFormat, numberLocale } from "@/lib/locale";
+import { formatCurrencyWithMode, isBitcoinCurrency, unitIsExact } from "@/lib/format";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 
 function trailing12() {
@@ -348,9 +349,17 @@ export function GoalDetailPage({ id }: { id: string }) {
                     </div>
                   </div>
                   <div className="font-mono tabular-nums text-sm">
-                    {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {isBitcoinCurrency(a.currency)
+                      ? formatCurrencyWithMode(
+                          a.balance,
+                          a.currency,
+                          prefs.btcDisplayMode,
+                          numberLocale(prefs.numberFormat),
+                          { unitIsExact: unitIsExact(a.format_version) },
+                        )
+                      : fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
+                          maximumFractionDigits: 2,
+                        })}
                   </div>
                 </div>
               ))}
