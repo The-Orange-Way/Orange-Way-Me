@@ -65,6 +65,18 @@ function TermsPage() {
           (which, during beta, is zero).
         </p>
 
+        <h2 className="mt-8 text-xl font-semibold">Who you're contracting with</h2>
+        <p className="mt-2 text-muted-foreground">Orange Way is operated by:</p>
+        <address className="mt-2 not-italic text-muted-foreground">
+          The Orange Way Inc
+          <br />
+          620 Veterans Drive Suite 12
+          <br />
+          Barrie, ON L4N9J4
+          <br />
+          Canada
+        </address>
+
         <p className="mt-10 text-xs text-muted-foreground">Questions? Email hello@orangeway.app.</p>
       </article>
     </MarketingShell>
