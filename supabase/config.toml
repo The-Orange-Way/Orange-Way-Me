@@ -11,12 +11,13 @@ project_id = "bogmoovbjpvcvdqrmjgt"
 # declare verify_jwt = false explicitly, with a comment saying what the
 # real authentication is.
 
-# TEMPORARY EXPERIMENT (verify_jwt drift investigation): the
-# sweep-expired-household-roles exemption is removed on dev only, to test
-# whether the deploy workflow reconciles verify_jwt on an already-existing
-# function or only sets it at creation. This is reverted immediately after
-# the probe. The function still checks its own cron secret; removing the
-# gateway exemption only affects the dev cron for the test window.
+# sweep-expired-household-roles is called by an external cron job
+# every minute with a shared `x-cron-secret` header. It is NOT called
+# by a logged-in user, so the Supabase gateway should not enforce JWT —
+# the function itself checks the cron secret. Without this override,
+# the gateway 401s before the function runs.
+[functions.sweep-expired-household-roles]
+verify_jwt = false
 
 # or-webhook-receiver is called server-to-server by OrangeRails, which
 # cannot mint a Supabase user JWT. Authentication is the HMAC signature
