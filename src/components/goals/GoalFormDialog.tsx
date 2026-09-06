@@ -232,9 +232,17 @@ export function GoalFormDialog({ open, onOpenChange, initial, onSave }: Props) {
                   />
                   <span className="flex-1 truncate">{a.name}</span>
                   <span className="text-xs text-muted-foreground tabular-nums">
-                    {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {isBitcoinCurrency(a.currency)
+                      ? formatCurrencyWithMode(
+                          a.balance,
+                          a.currency,
+                          prefs.btcDisplayMode,
+                          numberLocale(prefs.numberFormat),
+                          { unitIsExact: unitIsExact(a.format_version) },
+                        )
+                      : fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
+                          maximumFractionDigits: 2,
+                        })}
                   </span>
                 </label>
               ))}
