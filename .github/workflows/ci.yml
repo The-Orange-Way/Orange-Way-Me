@@ -208,14 +208,35 @@ jobs:
           BASELINE_VERSION="20260812000000"
           BASELINE_FILES="20260812000000_reassert_redeem_invite_code_auth_admin_only.sql 20260812000000_revoke_invite_codes_table_grants.sql"
 
+          # ---- Duplicate descriptive name ------------------------------------
+          # Parity check with Orange-Way-Books (OWB PR #319 /
+          # ci/owb-t0179-migration-filename-hygiene): two files can share a
+          # descriptive name while using DIFFERENT timestamps, which the
+          # version-prefix check below cannot see at all. That is exactly the
+          # shape that got through OWB PR #304 -- two files at different
+          # timestamps both defining the same three columns. Checked first, and
+          # independently of the version-dupe check, so a name collision fails
+          # even when the timestamps differ.
+          FAILED=0
+          NAME_DUPES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | sed -E 's/^[0-9]{14}_//' | sort | uniq -d)
+          if [ -n "$NAME_DUPES" ]; then
+            while IFS= read -r NAME; do
+              [ -z "$NAME" ] && continue
+              MATCHES=$(ls "$MIG_DIR"/*"_${NAME}" 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')
+              echo "::error::duplicate migration name '${NAME}' used by more than one file: ${MATCHES}"
+              FAILED=1
+            done <<< "$NAME_DUPES"
+          fi
+
           DUPES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | cut -d_ -f1 | sort | uniq -d)
 
           if [ -z "$DUPES" ]; then
-            echo "examined ${COUNT} migration files; no duplicate version prefixes"
-            exit 0
+            if [ "$FAILED" -eq 0 ]; then
+              echo "examined ${COUNT} migration files; no duplicate version prefixes, no duplicate descriptive names"
+            fi
+            exit $FAILED
           fi
 
-          FAILED=0
           for V in $DUPES; do
             FILES=$(ls "$MIG_DIR"/${V}_*.sql 2>/dev/null | sed 's|.*/||' | sort | tr '\n' ' ' | sed 's/ $//')
             if [ "$V" = "$BASELINE_VERSION" ] && [ "$FILES" = "$BASELINE_FILES" ]; then
