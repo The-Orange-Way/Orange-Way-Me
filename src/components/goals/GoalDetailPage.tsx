@@ -57,7 +57,8 @@ import { GoalFormDialog } from "./GoalFormDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
-import { useLocaleFormat } from "@/lib/locale";
+import { useLocaleFormat, numberLocale } from "@/lib/locale";
+import { formatCurrencyWithMode, isBitcoinCurrency, unitIsExact } from "@/lib/format";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 
 function trailing12() {
