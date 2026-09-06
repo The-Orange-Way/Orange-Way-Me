@@ -375,7 +375,7 @@ export function AuthScreen() {
               </TabsList>
 
               <TabsContent value="signin" className="mt-6 space-y-4">
-                <PasswordSignIn
+                <PasswordSignInForm
                   email={email}
                   onEmailChange={setEmail}
                   password={password}
@@ -385,8 +385,7 @@ export function AuthScreen() {
                   onSubmit={onSignIn}
                   widgetRef={widgetRef}
                   onCaptchaSuccess={setCaptchaToken}
-                  onCaptchaError={resetCaptcha}
-                  onCaptchaExpire={resetCaptcha}
+                  onCaptchaReset={resetCaptcha}
                   onForgotPassword={() => setTab("reset")}
                 />
               </TabsContent>
