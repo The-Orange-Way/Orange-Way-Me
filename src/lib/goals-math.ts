@@ -7,6 +7,19 @@
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
+import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
+
+/**
+ * A linked account's balance, normalized to sats when the currency is
+ * Bitcoin-like so it is never summed at face value against a mismatched
+ * unit. Non-Bitcoin currencies pass through unchanged (see the module-level
+ * note on computeCurrent for the FX limitation this does not fix).
+ */
+function normalizedBalance(a: Account): number {
+  const raw = Number(a.balance) || 0;
+  if (!isBitcoinCurrency(a.currency)) return raw;
+  return normalizeBitcoinToSats(raw, a.currency, { unitIsExact: unitIsExact(a.format_version) });
+}
 
 export interface GoalProgress {
   current: number;
@@ -81,12 +94,12 @@ export function computeCurrent(goal: Goal, accounts: Account[]): number {
     if (goal.strategy === "specific_amount") {
       return Number(goal.manual_allocation ?? "0") || 0;
     }
-    return linked.reduce((sum, a) => sum + Math.max(0, Number(a.balance) || 0), 0);
+    return linked.reduce((sum, a) => sum + Math.max(0, normalizedBalance(a)), 0);
   }
 
   // pay_down: amount paid off = starting - |current|
   const start = Number(goal.starting_balance ?? goal.target_amount) || 0;
-  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a)), 0);
   return Math.max(0, start - currentDebt);
 }
 
