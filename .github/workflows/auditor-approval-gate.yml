@@ -63,7 +63,7 @@ jobs:
               pull_number: pr.number,
             });
 
-            const { approved, reason } = evaluateAuditorApproval(reviews, author, auditorLogin);
+            const { approved, reason } = evaluateAuditorApproval(reviews, author, auditorLogin, headSha);
             console.log(reason);
 
             await github.rest.checks.create({
