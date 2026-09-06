@@ -46,7 +46,7 @@ interface Env {
 
 const FROM_NAME = "OrangeWay";
 const FROM_ADDR = "support@send.orangeway.app"; // verified Resend sending domain
-const REPLY_TO = "support@orangeway.app";
+const REPLY_TO = "hello@orangeway.app"; // DEC-0304: settled contact/sender identity
 
 const RATE_LIMIT_WINDOW_SEC = 20;
 
