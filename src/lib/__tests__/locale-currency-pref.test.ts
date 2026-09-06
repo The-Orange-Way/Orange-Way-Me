@@ -44,6 +44,24 @@ describe("formatCurrencyPref — Bitcoin honours btcDisplayMode", () => {
   it("currency=sats normalizes the same way currency=BTC does", () => {
     expect(formatCurrencyPref(5_000_000, "sats", "us", "sats")).toBe("5,000,000 sats");
   });
+
+  it("a whole-number BTC balance with no unit stamp is misread by the magnitude heuristic (the bug)", () => {
+    // amount=1 has no fractional part, so the heuristic in
+    // normalizeBitcoinToSats reads it as "already sats" when nobody tells
+    // it otherwise. This is the defect OWM-T0751 fixed at the call sites
+    // (GoalDetailPage, GoalFormDialog): they now pass unitIsExact.
+    expect(formatCurrencyPref(1, "BTC", "us", "btc")).toBe("0.00000001 BTC");
+  });
+
+  it("unitIsExact stops a whole-number BTC balance being read as 1 satoshi (OWM-T0751)", () => {
+    const out = formatCurrencyPref(1, "BTC", "us", "btc", { unitIsExact: true });
+    expect(out).toBe("1.00000000 BTC");
+  });
+
+  it("unitIsExact also holds for a multi-BTC whole-number balance", () => {
+    const out = formatCurrencyPref(3, "BTC", "us", "btc", { unitIsExact: true });
+    expect(out).toBe("3.00000000 BTC");
+  });
 });
 
 describe("formatCurrencyPref — non-Bitcoin currencies are unaffected", () => {
