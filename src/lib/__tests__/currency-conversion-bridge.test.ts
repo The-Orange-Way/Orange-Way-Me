@@ -62,11 +62,27 @@ describe("convertToHouseholdCurrencies native equals a selection", () => {
     expect(result.selection1).toEqual({ value: 100 });
     expect(result.selection2).toEqual({ value: 50 });
 
-    const calledCurrencies = mockGetRate.mock.calls.map((call) => call[0]);
+    // The GBP leg legitimately needs getRate("USD", ...) to build its own BTC
+    // bridge, so "getRate was never called with USD" is not the property to
+    // check. The property is that the matching (USD) leg added ZERO extra
+    // lookups on top of what the GBP leg alone required: one call for the
+    // native rate, one for GBP's own rate, and nothing more.
     expect(
-      calledCurrencies.includes("USD"),
-      "getRate was called for USD even though the USD selection matched the native " +
-        "currency and should have skipped every rate lookup.",
-    ).toBe(false);
+      mockGetRate.mock.calls.length,
+      "getRate was called more than twice. The USD selection matched the native " +
+        "currency and should not have added any lookup of its own on top of what " +
+        "the GBP leg's bridge already needed.",
+    ).toBe(2);
+  });
+
+  it("makes zero rate lookups when BOTH selections match the native currency", async () => {
+    const result = await convertToHouseholdCurrencies(100, "USD", DATE, "USD", "USD");
+    expect(result.selection1).toEqual({ value: 100 });
+    expect(result.selection2).toEqual({ value: 100 });
+    expect(
+      mockGetRate.mock.calls.length,
+      "getRate was called even though both selections matched the native currency; " +
+        "neither leg needs a bridge.",
+    ).toBe(0);
   });
 });
