@@ -33,6 +33,15 @@ export interface BankSyncOutcome {
   total: number;
   unmapped: number;
   errored: number;
+  /** Balance credits the DL-1424 unit guard refused because the transaction's
+   *  unit did not match the destination account's currency. Present so the
+   *  dialog can warn instead of reporting silent success (OWM-T0740). */
+  unitMismatch: number;
+}
+
+/** True when the outcome must not be shown as a plain success (OWM-T0740). */
+export function bankSyncHasWarning(outcome: Pick<BankSyncOutcome, "unitMismatch">): boolean {
+  return outcome.unitMismatch > 0;
 }
 
 interface BankSyncDialogProps {
@@ -50,6 +59,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
   const [imported, setImported] = useState(0);
+  const [unitMismatch, setUnitMismatch] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Refs so the run-once effect depends only on `open` (callbacks recreated
@@ -81,6 +91,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
       setDone(0);
       setTotal(0);
       setImported(0);
+      setUnitMismatch(0);
       setError(null);
       try {
         const outcome = await runSyncRef.current((p) => {
@@ -92,6 +103,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
         if (cancelled) return;
         setImported(outcome.imported);
         setTotal(outcome.total);
+        setUnitMismatch(outcome.unitMismatch);
         setPhase("done");
         onDoneRef.current?.(outcome);
         setTimeout(() => {
@@ -156,7 +168,11 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
 
         {phase === "done" && (
           <div className="flex flex-col items-center gap-3 py-8">
-            <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
+            {bankSyncHasWarning({ unitMismatch }) ? (
+              <AlertCircle className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+            ) : (
+              <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
+            )}
             <p className="text-sm">
               {total === 0
                 ? "No transactions returned."
@@ -164,6 +180,14 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
                   ? `Imported ${imported} ${imported === 1 ? "transaction" : "transactions"}.`
                   : `Imported ${imported} of ${total} ${total === 1 ? "transaction" : "transactions"}.`}
             </p>
+            {bankSyncHasWarning({ unitMismatch }) && (
+              <p className="text-center text-sm text-amber-600 dark:text-amber-400">
+                {unitMismatch} {unitMismatch === 1 ? "balance was" : "balances were"} not updated because
+                the account&apos;s currency does not match. Your bitcoin is unaffected; set the
+                account&apos;s currency correctly and sync again to apply{" "}
+                {unitMismatch === 1 ? "it" : "them"}.
+              </p>
+            )}
           </div>
         )}
 
