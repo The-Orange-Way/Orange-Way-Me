@@ -99,7 +99,9 @@ export function ThisMonthSummary() {
             <StatRow
               label="Income"
               value={summary.income}
-              formatted={fmt.formatCurrency(summary.income, prefs.primaryCurrency, { unitIsExact: true })}
+              formatted={fmt.formatCurrency(summary.income, prefs.primaryCurrency, {
+                unitIsExact: true,
+              })}
               deltaPct={summary.incomeDeltaPct}
               positiveIsGood
             />
