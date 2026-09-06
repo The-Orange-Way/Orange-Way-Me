@@ -9,7 +9,7 @@
 // own merge gate uses): a later CHANGES_REQUESTED or a dismissal
 // supersedes an earlier APPROVED from the same person. `reviews` must
 // be in the order the GitHub API returns them (oldest first).
-function evaluateAuditorApproval(reviews, prAuthorLogin, auditorLogin) {
+function evaluateAuditorApproval(reviews, prAuthorLogin, auditorLogin, headSha) {
   const latestByUser = new Map();
   for (const r of reviews || []) {
     if (!r || !r.user) continue;
@@ -32,6 +32,10 @@ function evaluateAuditorApproval(reviews, prAuthorLogin, auditorLogin) {
     }
     if (u.login !== auditorLogin) {
       reason = `rejected: ${u.login} is not the Auditor identity (${auditorLogin})`;
+      continue;
+    }
+    if (headSha && r.commit_id && r.commit_id !== headSha) {
+      reason = `rejected: ${u.login}'s approval was filed against commit ${r.commit_id}, not the current head ${headSha} (stale approval, new commits were pushed since)`;
       continue;
     }
 
