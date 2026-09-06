@@ -196,10 +196,12 @@ export function sumByCurrency(
  * carries no stamp. The absence there is correct rather than an omission,
  * because normalizeBitcoinToSats never consults the stamp for a sats amount.
  */
+export type BalanceEntry = { amount: string; currency: string; format_version?: number };
+
 export function toBalanceEntry(
   account: { balance: string; currency: string; format_version?: number },
   txnSum?: number,
-): { amount: string; currency: string; format_version?: number } {
+): BalanceEntry {
   const stored = Number(account.balance);
   const useTxnLive =
     Number.isFinite(stored) &&
@@ -217,6 +219,23 @@ export function toBalanceEntry(
     amount: String(txnSum),
     currency: isBitcoinCurrency(account.currency) ? "sats" : account.currency,
   };
+}
+
+/**
+ * Build the Accounts-page group subtotal entries.
+ *
+ * The per account lookup lives here, not at the call site, because the call site
+ * is an expression inside JSX and an expression inside JSX cannot be tested. The
+ * subtotal line previously called toBalanceEntry with no txnSum at all, so an
+ * account with a zero stored balance and live transactions counted as zero in
+ * its group while counting correctly in the net worth line built from the same
+ * data. Balance semantics stay in toBalanceEntry; this only supplies the sum.
+ */
+export function toAccountSubtotalEntries(
+  accounts: { id: string; balance: string; currency: string; format_version?: number }[],
+  txnSumByAccount: ReadonlyMap<string, number>,
+): BalanceEntry[] {
+  return accounts.map((account) => toBalanceEntry(account, txnSumByAccount.get(account.id)));
 }
 
 /**
