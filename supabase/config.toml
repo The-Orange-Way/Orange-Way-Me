@@ -13,7 +13,7 @@ project_id = "bogmoovbjpvcvdqrmjgt"
 
 # sweep-expired-household-roles is called by an external cron job
 # every minute with a shared `x-cron-secret` header. It is NOT called
-# by a logged-in user, so the Supabase gateway should not enforce JWT —
+# by a logged-in user, so the Supabase gateway should not enforce JWT,
 # the function itself checks the cron secret. Without this override,
 # the gateway 401s before the function runs.
 [functions.sweep-expired-household-roles]
