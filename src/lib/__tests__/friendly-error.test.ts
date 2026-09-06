@@ -98,4 +98,23 @@ describe("humanizeError", () => {
     expect(msg).not.toMatch(/try again/i);
     expect(msg).not.toBe("Something went wrong. Please try again.");
   });
+
+  // OWM-T0535. ow-or-proxy returns this exact shape (supabase/functions/ow-or-proxy/index.ts:244)
+  // when the private wallet kill switch is off. Before the fix, this fell through to the
+  // generic "owm-or/or- failed" strip and rendered the raw JSON body as the toast.
+  it("renders the stealth kill switch refusal as a sentence, not the raw JSON body", () => {
+    const body = JSON.stringify({
+      error: "stealth_sync_disabled",
+      message: "Private wallet sync is temporarily unavailable. Please try again later.",
+    });
+    const msg = humanizeError(new Error(`or-link-mint-token failed (503): ${body}`));
+    expect(msg).toBe("Private wallet sync is temporarily unavailable. Please try again later.");
+    expect(msg).not.toContain("{");
+    expect(msg).not.toContain("error");
+  });
+
+  it("falls back to the known copy if the stealth_sync_disabled body has no parseable message", () => {
+    const msg = humanizeError(new Error("or-link-mint-token failed (503): stealth_sync_disabled"));
+    expect(msg).toBe("Private wallet sync is temporarily unavailable. Please try again later.");
+  });
 });
