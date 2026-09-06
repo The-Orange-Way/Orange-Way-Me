@@ -52,9 +52,8 @@ export interface ParsedExtendedKey {
 /**
  * Rewrites an SLIP-132 extended public key's version bytes to standard
  * xpub bytes so @scure/bip32 can parse it, and reports the script type
- * implied by the ORIGINAL prefix (or the override, if the caller passes
- * one, matching how a caller can force p2wpkh on an xpub-prefixed BIP84
- * key, same as Orange Rails' widget lets a human do).
+ * implied by the ORIGINAL prefix (or the override, if the caller wants
+ * to force p2wpkh on an xpub-prefixed BIP84 key).
  */
 export function parseExtendedKey(extendedKey: string, scriptTypeOverride?: ScriptType): ParsedExtendedKey {
   const decoded = bs58check.decode(extendedKey);
