@@ -1,0 +1,84 @@
+name: Auditor approval gate
+
+# Fails a PR unless it carries a real APPROVED review from the Auditor
+# identity (Making-the-World-Orange), filed by someone who is not the
+# PR author. Explicitly rejects an approval from github-actions[bot]
+# or any Bot/App actor, so a repository setting that lets Actions
+# approve PRs cannot manufacture the one review branch protection
+# requires.
+#
+# Zero reviews is a FAILURE here, not a pass: this also runs on every
+# pull_request push so a PR with no reviews yet is red from the start,
+# and re-evaluates on every review event so a later dismissal or
+# CHANGES_REQUESTED takes the check back to red.
+#
+# The decision logic lives in scripts/auditor-approval-gate-logic.cjs
+# and is unit tested at src/lib/ci/__tests__/auditor-approval-gate.test.ts.
+# This workflow only fetches the reviews and reports the result.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  auditor-approval-gate:
+    name: Auditor approval gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Evaluate reviews and report a check run
+        uses: actions/github-script@v7
+        env:
+          AUDITOR_LOGIN: Making-the-World-Orange
+        with:
+          script: |
+            const { evaluateAuditorApproval } = require('./scripts/auditor-approval-gate-logic.cjs');
+            const auditorLogin = process.env.AUDITOR_LOGIN;
+
+            const pr =
+              context.payload.pull_request ||
+              (
+                await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.payload.number,
+                })
+              ).data;
+
+            const headSha = pr.head.sha;
+            const author = pr.user.login;
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const { approved, reason } = evaluateAuditorApproval(reviews, author, auditorLogin);
+            console.log(reason);
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Auditor approval gate',
+              head_sha: headSha,
+              status: 'completed',
+              conclusion: approved ? 'success' : 'failure',
+              output: {
+                title: approved ? 'Auditor approval present' : 'No qualifying Auditor approval',
+                summary: reason,
+              },
+            });
+
+            if (!approved) {
+              core.setFailed(reason);
+            }
