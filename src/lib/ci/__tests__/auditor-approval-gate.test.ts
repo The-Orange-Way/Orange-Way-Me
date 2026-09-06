@@ -5,6 +5,8 @@ import { evaluateAuditorApproval } from "../../../../scripts/auditor-approval-ga
 
 const AUDITOR = "Making-the-World-Orange";
 const BUILDER = "the-Orange-Juicer";
+const HEAD_SHA = "c3ff6bbe0000000000000000000000000000000a";
+const OLD_SHA = "1037e85c157e00000000000000000000000000ff";
 
 describe("evaluateAuditorApproval", () => {
   it("fails when there are zero reviews, so the check can fail and not just pass", () => {
