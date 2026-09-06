@@ -7,6 +7,7 @@ export interface AuditorReviewUser {
 export interface AuditorReview {
   state?: string;
   user?: AuditorReviewUser | null;
+  commit_id?: string;
 }
 
 export interface AuditorApprovalResult {
@@ -18,4 +19,5 @@ export function evaluateAuditorApproval(
   reviews: Array<AuditorReview | null | undefined> | null | undefined,
   prAuthorLogin: string,
   auditorLogin: string,
+  headSha?: string,
 ): AuditorApprovalResult;
