@@ -84,7 +84,9 @@ export async function fetchBTCRateRange(
     .order("bucket_ts", { ascending: true });
 
   if (error || !data) return [];
-  return data.map((row) => ({ rate: Number(row.rate), bucketTs: row.bucket_ts as string }));
+  return data.map((row) => {
+    return { rate: Number(row.rate), bucketTs: row.bucket_ts as string };
+  });
 }
 
 export async function fetchBTCRate(target: string, effectiveAt: Date): Promise<ORBIRate | null> {
