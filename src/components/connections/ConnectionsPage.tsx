@@ -60,18 +60,15 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { openOrConnect, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
 import { requestOrSync } from "@/lib/or/or-sync-request";
-import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
-  startStealthSync,
   describeStealthProgress,
   shouldShowScanProgress,
-  describeStealthFailure,
   type StealthSyncProgress,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
