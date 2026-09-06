@@ -256,6 +256,39 @@ jobs:
           fi
           exit $FAILED
 
+      - name: Refuse duplicate migration descriptive names
+        # Ported from Orange-Way-Books (OWB-T0179 / PR #319), which added this
+        # check after two files at DIFFERENT timestamps but the SAME
+        # descriptive name (the part after the timestamp) both landed on dev,
+        # both defining the same three columns on one table. The version-
+        # prefix check above only catches two files sharing the SAME
+        # timestamp; it would not have caught that case, because it never
+        # looks at the name. supabase_migrations.schema_migrations keys on
+        # the timestamp, so two differently-timestamped files with identical
+        # intent are each free to apply, and if they diverge even slightly
+        # the org ends up with whichever one applied last, invisible until
+        # something depending on the dropped shape breaks.
+        run: |
+          set -uo pipefail
+          MIG_DIR="supabase/migrations"
+
+          NAME_DUPES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | grep -E '^[0-9]+_' | sed -E 's/^[0-9]+_//' | sort | uniq -d)
+
+          if [ -z "$NAME_DUPES" ]; then
+            echo "no duplicate migration descriptive names"
+            exit 0
+          fi
+
+          FAILED=0
+          while IFS= read -r NAME; do
+            [ -z "$NAME" ] && continue
+            MATCHES=$(ls "$MIG_DIR"/*.sql 2>/dev/null | sed 's|.*/||' | grep -E "_${NAME}\$" | sort | tr '\n' ' ' | sed 's/ $//')
+            echo "::error::duplicate migration descriptive name '${NAME}' used by more than one file at different timestamps: ${MATCHES}"
+            FAILED=1
+          done <<< "$NAME_DUPES"
+
+          exit $FAILED
+
   deno-typecheck:
     name: Typecheck edge functions (Deno)
     runs-on: ubuntu-latest
