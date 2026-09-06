@@ -2,9 +2,9 @@
  * OWM-E0008 acceptance 1a, staged DEV proof (OWM-T0617).
  *
  * Compares the distinct on-chain transaction count for a deliberately
- * staged watch-only wallet against the rows OWM actually imported for
- * that account, using mempool.space as the independent source of truth
- * (never our own ledger).
+ * staged watch-only wallet against the rows Orange Way Me actually
+ * imported for that account, using mempool.space as the independent
+ * source of truth (never our own ledger).
  *
  * THIS IS A STAGED DEV OBSERVATION. It must never be reported as a
  * production observation, and its result must say so explicitly
@@ -43,7 +43,7 @@ import { parseExtendedKey, scanWalletTxids, type ScriptType } from "./lib/stealt
 
 const OWM_DEV_PROJECT_HOST = "bogmoovbjpvcvdqrmjgt.supabase.co";
 
-test.describe("OWM-E0008 acceptance 1a: chain-to-import completeness (staged dev wallet)", () => {
+test.describe("OWM-T0617 acceptance 1a: chain-to-import completeness (staged dev wallet)", () => {
   test("every on-chain txid has a matching imported row, and every imported row has a matching on-chain txid", async () => {
     const xpub = process.env.E2E_STEALTH_TEST_XPUB;
     const scriptTypeOverride = process.env.E2E_STEALTH_TEST_SCRIPT_TYPE as ScriptType | undefined;
@@ -65,7 +65,7 @@ test.describe("OWM-E0008 acceptance 1a: chain-to-import completeness (staged dev
       throw new Error(
         `OWM_DEV_SUPABASE_URL host is ${host}, expected ${OWM_DEV_PROJECT_HOST}. ` +
           `Refusing to run a chain-completeness comparison against any project that ` +
-          `is not the OWM DEV project.`,
+          `is not the Orange Way Me DEV project.`,
       );
     }
 
