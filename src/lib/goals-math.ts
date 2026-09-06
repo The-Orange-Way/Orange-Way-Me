@@ -94,12 +94,12 @@ export function computeCurrent(goal: Goal, accounts: Account[]): number {
     if (goal.strategy === "specific_amount") {
       return Number(goal.manual_allocation ?? "0") || 0;
     }
-    return linked.reduce((sum, a) => sum + Math.max(0, Number(a.balance) || 0), 0);
+    return linked.reduce((sum, a) => sum + Math.max(0, normalizedBalance(a)), 0);
   }
 
   // pay_down: amount paid off = starting - |current|
   const start = Number(goal.starting_balance ?? goal.target_amount) || 0;
-  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a)), 0);
   return Math.max(0, start - currentDebt);
 }
 
