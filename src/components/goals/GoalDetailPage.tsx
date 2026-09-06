@@ -349,9 +349,17 @@ export function GoalDetailPage({ id }: { id: string }) {
                     </div>
                   </div>
                   <div className="font-mono tabular-nums text-sm">
-                    {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {isBitcoinCurrency(a.currency)
+                      ? formatCurrencyWithMode(
+                          a.balance,
+                          a.currency,
+                          prefs.btcDisplayMode,
+                          numberLocale(prefs.numberFormat),
+                          { unitIsExact: unitIsExact(a.format_version) },
+                        )
+                      : fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
+                          maximumFractionDigits: 2,
+                        })}
                   </div>
                 </div>
               ))}
