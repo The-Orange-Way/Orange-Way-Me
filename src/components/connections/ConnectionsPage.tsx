@@ -1253,7 +1253,7 @@ export function ConnectionsPage() {
       onProgress: (p: BankSyncProgress) => void,
     ): Promise<BankSyncOutcome> => {
       if (!user || !subaccountId || !orConnectionId) {
-        return { imported: 0, total: 0, unmapped: 0, errored: 0 };
+        return { imported: 0, total: 0, unmapped: 0, errored: 0, unitMismatch: 0 };
       }
       const keypair = await getOpkKeypair();
       // Ensure the OPK is registered before pulling (covers the race where
@@ -1298,6 +1298,10 @@ export function ConnectionsPage() {
         total: result.total,
         unmapped: result.unmapped,
         errored: result.errored,
+        // OWM-T0740: the DL-1424 unit guard refuses a mismatched balance
+        // credit on this path exactly as it does on the other import path.
+        // Without this the refusal was silent to the customer.
+        unitMismatch: result.unitMismatch,
       };
     },
     [
