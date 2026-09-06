@@ -1,0 +1,26 @@
+# Test files that must always appear in vitest's collected suite.
+#
+# The pre/post-test guards in ci.yml (Test-file inventory / Test-collection
+# verify) compare COUNTS of test files on disk vs suites vitest collected.
+# A count catches an include-glob regression but not a specific file being
+# deleted while the total count still looks plausible, because both sides
+# derive their number from the same disk state (OWM-T0359).
+#
+# This manifest is checked by IDENTITY: every path listed here must be
+# present in the set of suite paths vitest actually collected, or the
+# post-test guard fails the build. One path per line, relative to the repo
+# root, no leading ./. Blank lines and lines starting with # are ignored.
+
+# DL-1506 / DEV-0070. Proves the Orange Rails key-material planner refuses
+# to derive-and-pin when nothing is pinned and the salt has just rotated
+# (the recovery data-loss bug).
+src/lib/or/__tests__/or-key-material.test.ts
+
+# DEV-0070. Proves the resolveOrKeyMaterial CALLER writes none of the three
+# Orange Rails key-material columns on that same refuse path.
+src/context/__tests__/resolveOrKeyMaterial.test.ts
+
+# OWM-T0263 adds a third entry here (recoverWithCode-salt-flag.test.ts)
+# once that PR merges to dev. Not listed yet: it does not exist on this
+# branch's tree, and listing a file the tree does not have would fail
+# every PR with a false "missing from collection" error.
