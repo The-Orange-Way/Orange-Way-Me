@@ -1112,7 +1112,10 @@ export function ConnectionsPage() {
     } catch (err) {
       console.error("[Connections] sync failed", err);
       try {
-        captureException(err, { tags: { area: "connections-sync" }, extra: { connectionId: conn.id } });
+        captureException(err, {
+          tags: { area: "connections-sync" },
+          extra: { connectionId: conn.id },
+        });
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
