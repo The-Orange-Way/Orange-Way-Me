@@ -59,4 +59,21 @@ describe("evaluateAuditorApproval", () => {
     const result = evaluateAuditorApproval(reviews, BUILDER, AUDITOR);
     expect(result.approved).toBe(false);
   });
+
+  it("rejects a stale Auditor approval filed against a commit that is no longer the PR's head", () => {
+    const reviews = [
+      { state: "APPROVED", user: { id: 7, login: AUDITOR, type: "User" }, commit_id: OLD_SHA },
+    ];
+    const result = evaluateAuditorApproval(reviews, BUILDER, AUDITOR, HEAD_SHA);
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("stale approval");
+  });
+
+  it("approves when the Auditor's review commit_id matches the PR's current head sha", () => {
+    const reviews = [
+      { state: "APPROVED", user: { id: 8, login: AUDITOR, type: "User" }, commit_id: HEAD_SHA },
+    ];
+    const result = evaluateAuditorApproval(reviews, BUILDER, AUDITOR, HEAD_SHA);
+    expect(result.approved).toBe(true);
+  });
 });
