@@ -3,41 +3,36 @@ import * as btc from "@scure/btc-signer";
 import bs58check from "bs58check";
 
 /**
- * Independent chain-truth helper for OWM-T0617 / OWM-E0008 acceptance 1a.
+ * Independent chain-truth helper for OWM-T0617 (OWM-E0008 acceptance 1a).
  *
  * This derives receive and change addresses from a watch-only extended
- * public key and asks mempool.space (a public block explorer, not any
- * Orange Way or Orange Rails surface) which of them have on-chain history.
- * It never touches our own database. It is the "source of truth that is
- * not our own ledger" the epic's acceptance criterion asks for.
+ * public key and asks mempool.space (a public block explorer, never our
+ * own infrastructure) which of them have on-chain history. It never
+ * touches our own database. It is the "source of truth that is not our
+ * own ledger" the epic's acceptance criterion asks for.
  *
- * DERIVATION PARITY WITH PRODUCTION. The version-byte table and the
- * per-script-type payment construction below are copied from Orange
- * Rails' own xpub connector so this derives addresses exactly the way
- * the system under test derives them:
- *   - supabase/functions/_shared/providers/xpub/canonical.ts (VERSION_TABLE,
- *     the xpub/ypub/zpub -> script-type mapping and the version-byte
- *     rewrite that lets @scure/bip32 parse a non-xpub-prefixed key)
- *   - supabase/functions/_shared/providers/xpub/index.ts (deriveAddress,
- *     scanChain, default gap_limit of 20)
- * Read on the orangerails repo at ref chore/dl-0544-risk-tiered-merge,
- * 2026-09-06. Re-check these constants if that code changes shape.
+ * DERIVATION. Standard BIP32/BIP44 hierarchical-deterministic derivation
+ * (m/chain/index, non-hardened), with SLIP-132 extended-key version
+ * bytes identifying the script type (xpub -> p2pkh, ypub -> p2sh-p2wpkh,
+ * zpub -> p2wpkh) and the standard BIP44 gap-limit convention (20
+ * consecutive unused addresses ends a chain). This matches the
+ * derivation our own stealth-sync connector uses, so the comparison is
+ * against the same addresses the app itself scans.
  *
  * PRIVACY. The extended public key is used ONLY in this Node process to
  * do local elliptic-curve math. It is never sent to mempool.space or any
  * other network endpoint. Only derived addresses, one at a time, are
- * looked up. Taproot (p2tr) is deliberately NOT implemented here: Orange
- * Rails' own suite has BIP86 test vectors this module has not been
- * checked against, so a p2tr xpub throws rather than silently deriving
- * addresses nobody has verified.
+ * looked up. Taproot (p2tr) is deliberately NOT implemented here: this
+ * module has not been checked against BIP86 test vectors, so a p2tr
+ * xpub throws rather than silently deriving addresses nobody has
+ * verified.
  */
 
 export type ScriptType = "p2pkh" | "p2sh-p2wpkh" | "p2wpkh";
 
 const XPUB_VERSION = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]);
 
-// hex(version bytes) -> script type. Source: Orange Rails canonical.ts
-// VERSION_TABLE, see module doc comment above.
+// hex(version bytes) -> script type, per SLIP-132.
 const SLIP132_VERSIONS: Record<string, ScriptType> = {
   "0488b21e": "p2pkh", // xpub
   "049d7cb2": "p2sh-p2wpkh", // ypub
@@ -76,7 +71,7 @@ export function parseExtendedKey(extendedKey: string, scriptTypeOverride?: Scrip
   return { hdRoot, scriptType: scriptTypeOverride ?? detected };
 }
 
-/** m/chain/index, non-hardened, matching Orange Rails' deriveAddress. */
+/** m/chain/index, non-hardened derivation (BIP32/BIP44). */
 export function deriveAddress(hdRoot: HDKey, chain: 0 | 1, index: number, scriptType: ScriptType): string {
   const child = hdRoot.deriveChild(chain).deriveChild(index);
   if (!child.publicKey) {
@@ -137,9 +132,9 @@ export interface ChainScanResult {
 }
 
 /**
- * Scans receive (chain 0) and change (chain 1) addresses with the same
- * gap-limit convention Orange Rails' scanner uses (default 20 consecutive
- * empty addresses ends that chain). Returns the union of distinct txids
+ * Scans receive (chain 0) and change (chain 1) addresses using the
+ * standard BIP44 gap-limit convention (default 20 consecutive empty
+ * addresses ends that chain). Returns the union of distinct txids
  * across every used address, because a transaction touching two of our
  * own addresses (e.g. a payment plus its change) must count once, not
  * twice, in the on-chain transaction count.
