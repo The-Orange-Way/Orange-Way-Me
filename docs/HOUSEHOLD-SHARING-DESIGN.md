@@ -1,7 +1,7 @@
 # Phase 4 Design: Household Sharing with Zero-Knowledge Architecture
 
 > **Status:** Implemented (Phases 4.1 through 4.5).
-> **Companion:** [Competitive Analysis](https://wiki.orangeway.dev/doc/owm-competitive-analysis-household-sharing-privacy-advisor-e2ee-revocation-s8hsNsaxEp) (maintainer wiki) — research against 10 personal-finance apps.
+> **Companion:** competitive analysis of 10 personal-finance apps (maintainer notes).
 
 ---
 
@@ -279,6 +279,6 @@ Orange Way with household ZKA + cryptographic revocation is a clean market gap. 
 
 ## 12. References
 
-- **Competitive analysis**: [maintainer wiki](https://wiki.orangeway.dev/doc/owm-competitive-analysis-household-sharing-privacy-advisor-e2ee-revocation-s8hsNsaxEp) — 10 platforms, patterns, market gaps, cited URLs.
+- **Competitive analysis** (maintainer notes): 10 platforms, patterns, market gaps, cited URLs.
 - **Post-quantum design reference**: maintainer notes.
 - **@noble/post-quantum** (ML-KEM-768, ML-DSA-65), **@noble/curves** (X25519), **@noble/hashes** (HKDF-SHA-256).
