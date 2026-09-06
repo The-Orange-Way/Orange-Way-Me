@@ -136,7 +136,9 @@ export function NetWorthCard() {
             >
               {isUp ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
               <span className="tabular-nums">
-                {fmt.formatCurrency(Math.abs(delta.abs), prefs.primaryCurrency, { unitIsExact: true })}
+                {fmt.formatCurrency(Math.abs(delta.abs), prefs.primaryCurrency, {
+                  unitIsExact: true,
+                })}
               </span>
               <span className="text-xs text-muted-foreground">
                 ({delta.pct >= 0 ? "+" : ""}
