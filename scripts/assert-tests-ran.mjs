@@ -21,9 +21,17 @@
  *      file-scope skip on one suite cannot hide behind the other suites in
  *      the run.
  *   3. the two P0 recovery-guard suites named below are present in the
- *      report AND executed. Named explicitly so deleting either file, or a
- *      glob change that silently excludes it, is a loud named failure
- *      rather than a quiet drop in a suite count.
+ *      report, fully executed, AND carry zero skipped/pending/todo tests.
+ *      Named explicitly so deleting either file, or a glob change that
+ *      silently excludes it, is a loud named failure rather than a quiet
+ *      drop in a suite count. The zero-skip bar (not just "executed > 0")
+ *      exists because these files can contain more than one describe
+ *      block: skipping only the P0 block still leaves the file's aggregate
+ *      executed count above zero if another block in the same file runs,
+ *      which let a real describe.skip on or-key-material.test.ts's
+ *      planOrKeyMaterial suite pass CI green (PR #781, run 34051780292)
+ *      before this fix, because that file also has an unrelated
+ *      OrNamespaceDisabledError describe block.
  *
  * Usage: node scripts/assert-tests-ran.mjs <vitest-results.json>
  *
@@ -79,8 +87,16 @@ for (const suite of suites) {
   const executed = assertions.filter(
     (a) => a && (a.status === "passed" || a.status === "failed"),
   ).length;
+  const skipped = assertions.filter(
+    (a) => a && (a.status === "skipped" || a.status === "pending" || a.status === "todo"),
+  ).length;
   totalExecuted += executed;
-  bySuite.push({ name: suite.name || "(unnamed suite)", total: assertions.length, executed });
+  bySuite.push({
+    name: suite.name || "(unnamed suite)",
+    total: assertions.length,
+    executed,
+    skipped,
+  });
 }
 
 if (totalExecuted === 0) {
@@ -113,6 +129,13 @@ for (const required of REQUIRED_SUITES) {
   }
   if (hit.executed === 0) {
     problems.push(`${required} was collected but all ${hit.total} of its test(s) skipped`);
+  } else if (hit.skipped > 0) {
+    problems.push(
+      `${required} had ${hit.skipped} of its ${hit.total} test(s) skipped while ${hit.executed} ` +
+        `still executed. A describe.skip on part of a P0 file can hide behind another describe ` +
+        `block in the SAME FILE that still runs, which keeps the file's aggregate executed count ` +
+        `above zero. These two P0 suites must run with zero skips.`,
+    );
   }
 }
 if (problems.length > 0) {
