@@ -104,13 +104,22 @@ import {
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
-// Gate the Orange Rails stealth-sync connector to environments where it is
-// actually provisioned. Branch-derived in .github/workflows/deploy.yml
-// (VITE_OR_CONNECT_ENABLED), exactly like VITE_ONBOARDING_V2: "true" on the
-// dev build, empty on prod. Empty folds the compare to a constant false, so
-// the prod bundle never renders the "+ Connect a Bitcoin source" button and
-// no route can reach the OR connect widget (DL-0393). `=== "true"` so an
-// absent or empty value reads as OFF.
+// Gate the Orange Rails stealth-sync connector to the environments where it
+// is actually provisioned. Branch-derived in .github/workflows/deploy.yml
+// (VITE_OR_CONNECT_ENABLED), same shape as VITE_ONBOARDING_V2, but NOT the
+// same arms: it is "true" on BOTH the dev and prod branches, and empty only
+// for a build off some other branch or a local build that does not set it.
+//
+// So this is not a prod kill switch, and an earlier version of this comment
+// said it was ("empty on prod", so the button is never rendered there). On
+// prod the "+ Connect a Bitcoin source" button IS rendered and the connect
+// widget IS reachable. The prod arm is deliberate and the requirements it
+// rests on are written beside the line in that workflow: read them there
+// before changing it (OWM-T0501).
+//
+// `=== "true"` so an absent or empty value reads as OFF. That is still
+// load-bearing: it folds the compare to a constant false, so a build that
+// forgets the variable ships dark rather than half-wired.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
