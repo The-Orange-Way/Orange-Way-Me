@@ -94,6 +94,95 @@ jobs:
           fi
           echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
+  e2e:
+    name: E2E (Playwright smoke)
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+    # Bind to the dev environment scope so vars.VITE_SUPABASE_URL etc.
+    # resolve to the dev values, same as deploy.yml's Build step. This job
+    # builds the app from the triggering ref and serves it on loopback, so
+    # the specs exercise the code under review, not the live deployed site.
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Only the vars a build actually needs to not throw (see
+      # src/integrations/supabase client init). No secret, no OR/Sentry/
+      # PostHog var: this job only exercises the unauthenticated chromium
+      # project, which touches none of those paths.
+      - name: Build app under test
+        run: bun run build
+        env:
+          VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+
+      # Serve the freshly built bundle on loopback and block until the port
+      # answers, so a preview that has not finished starting fails loudly
+      # here instead of stranding every spec at a connection error.
+      - name: Serve built app on 127.0.0.1:4173
+        run: |
+          nohup bunx vite preview --host 127.0.0.1 --port 4173 > /tmp/vite-preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173 > /dev/null 2>&1; then
+              echo "preview is up on 127.0.0.1:4173"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::vite preview did not answer on 127.0.0.1:4173 within 30s"
+          cat /tmp/vite-preview.log || true
+          exit 1
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package.json', 'bun.lockb') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bun run test:e2e:install
+
+      # Chromium project only: page loads, no console errors, key routes
+      # 200, plus marketing-forms.spec.ts (stubs /api/signup, no live
+      # network). testIgnore in playwright.config.ts already excludes
+      # auth.setup.ts and authenticated-routes.spec.ts from this project,
+      # so this cannot accidentally pick up the authenticated fixture.
+      - name: Run Playwright (chromium smoke)
+        run: bunx playwright test --project=chromium --reporter=list,json
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173
+          PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
+
+      # DL-0779 shape: a Playwright run that collects and skips every spec
+      # still exits 0, so this reads the JSON report and fails the job
+      # unless at least one spec actually EXECUTED. A missing or
+      # unparseable report is itself a failure, never scored as a pass.
+      - name: Guard against zero-spec execution
+        run: |
+          set -euo pipefail
+          if [ ! -f playwright-report/results.json ]; then
+            echo "::error::playwright-report/results.json not found -- the run step did not write it"
+            exit 1
+          fi
+          EXPECTED=$(node -e "const r=require('./playwright-report/results.json'); console.log((r.stats && r.stats.expected) || 0)")
+          if [ "$EXPECTED" -lt 1 ]; then
+            echo "::error::Playwright executed 0 specs. A green job that ran nothing proves nothing."
+            exit 1
+          fi
+          echo "Playwright executed $EXPECTED spec(s)."
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
