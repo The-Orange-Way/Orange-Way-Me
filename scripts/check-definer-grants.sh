@@ -15,9 +15,8 @@
 # CREATE FUNCTION defaults EXECUTE to PUBLIC, and a later CREATE OR REPLACE
 # resets it to PUBLIC even after a clean revoke. So the grant arrives with no
 # migration file anywhere asking for it, and a scan of the files reads green
-# over a wide open database. Measured on the production project on 2026-08-27:
-# 10 SECURITY DEFINER functions in public carried anon EXECUTE, 8 also carried
-# the PUBLIC grant, and no migration file asks for any of them.
+# over a wide open database even when every migration looks correct. That is
+# why this gate reads the live grants instead of trusting the files.
 #
 # TWO SUBTLETIES THIS QUERY HANDLES, AND A NAIVE ONE DOES NOT
 # 1. `pg_proc.proacl` is NULL when nobody has touched the grants, and NULL means
