@@ -437,6 +437,24 @@ jobs:
           fi
 
           if [ "$FAIL" -ne 0 ]; then
+            {
+              echo "### :rotating_light: Seat trailer check cannot be cleared by pushing another commit"
+              echo ""
+              echo "This check reads every commit already on \`$BASE..$HEAD\`, not just the"
+              echo "tip. If an OLDER commit on this branch lacks a valid \`Seat: <name>\`"
+              echo "trailer, pushing a new commit CANNOT clear it: a commit message cannot"
+              echo "be changed without rewriting the commit, and a seat that authors only"
+              echo "through the GitHub contents API (\`gh_edit_file\` / \`gh_put_file\`) can"
+              echo "only ever ADD a commit at the tip, never amend, rebase or force-push."
+              echo ""
+              echo "THE REMEDY: re-cut this branch fresh off \`dev\` with the final file"
+              echo "contents in ONE properly trailered commit, open a new PR, and close"
+              echo "this one with a pointer to the new PR. Do not keep pushing fixes here."
+              echo ""
+              echo "To see the changed files without a local diff tool, fetch the raw diff:"
+              echo "\`https://patch-diff.githubusercontent.com/raw/<owner>/<repo>/pull/<number>.diff\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::This check cannot be cleared by pushing another commit -- it reads every commit already on the branch. Re-cut the branch fresh off dev with one properly trailered commit and open a new PR. See the job summary for details."
             exit 1
           fi
           echo "All $COUNT non-merge PR commit(s) carry a valid Seat: trailer."
