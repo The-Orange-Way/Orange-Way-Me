@@ -106,11 +106,10 @@ const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
 // Gate the Orange Rails stealth-sync connector to environments where it is
 // actually provisioned. Branch-derived in .github/workflows/deploy.yml
-// (VITE_OR_CONNECT_ENABLED), exactly like VITE_ONBOARDING_V2: "true" on the
-// dev build, empty on prod. Empty folds the compare to a constant false, so
-// the prod bundle never renders the "+ Connect a Bitcoin source" button and
-// no route can reach the OR connect widget (DL-0393). `=== "true"` so an
-// absent or empty value reads as OFF.
+// (VITE_OR_CONNECT_ENABLED). It is set to "true" on BOTH the dev and prod
+// branches (OWM-T0501), so the "+ Connect a Bitcoin source" button and the
+// OR connect widget are reachable on production, not only on dev.
+// `=== "true"` so an absent or empty value reads as OFF.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
