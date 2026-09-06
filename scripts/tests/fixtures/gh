@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Fake `gh` for prod-drift-guard.sh tests (OW-T0272). Never touches the
+# network. The test that puts this on PATH chmods it executable first,
+# since a committed file has no executable bit.
+#
+# Mocked responses are controlled by $FIXTURE_MODE:
+#   null-files     -> ahead-compare's "files" field is JSON null (the
+#                     regression this test exists to pin: a null files
+#                     field on a prod-ahead compare used to read as clean).
+#   missing-files  -> ahead-compare's json has no "files" key at all.
+#   clean-array    -> ahead-compare's "files" is a real empty array, the
+#                     normal content-free promotion-merge-commit case. The
+#                     guard must still pass this one, so the test cannot be
+#                     satisfied by simply making the guard fail always.
+set -euo pipefail
+
+cmd="${1:-}"
+shift || true
+if [ "$cmd" != "api" ]; then
+  echo "fake gh: this fixture only supports 'gh api', got '${cmd}'" >&2
+  exit 1
+fi
+
+path="${1:-}"
+shift || true
+
+case "$path" in
+  */git/ref/heads/*)
+    ref="${path##*/heads/}"
+    echo "sha-for-${ref}"
+    ;;
+  */compare/dev...prod)
+    case "${FIXTURE_MODE:-null-files}" in
+      null-files)
+        echo '{"ahead_by": 1, "files": null, "commits": [{"sha": "deadbeef1234", "commit": {"message": "prod hotfix, no back-merge"}}]}'
+        ;;
+      missing-files)
+        echo '{"ahead_by": 1, "commits": [{"sha": "deadbeef1234", "commit": {"message": "prod hotfix, no back-merge"}}]}'
+        ;;
+      clean-array)
+        echo '{"ahead_by": 1, "files": [], "commits": [{"sha": "c0ffee1234", "commit": {"message": "promotion: dev to prod"}}]}'
+        ;;
+      *)
+        echo "fake gh: unknown FIXTURE_MODE '${FIXTURE_MODE:-}'" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  */compare/prod...dev)
+    # No unpromoted commits: this test is scoped to the prod-ahead condition.
+    echo '{"ahead_by": 0, "commits": []}'
+    ;;
+  *)
+    echo "fake gh: no mock for path '${path}'" >&2
+    exit 1
+    ;;
+esac
