@@ -24,6 +24,7 @@ import { useHousehold, type HouseholdCurrency } from "@/hooks/useHousehold";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { SUPPORTED_CURRENCIES } from "@/lib/fx-rates";
+import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
 
 function dismissKey(userId: string | undefined): string {
   return `orangeway.currencyBannerDismissed.${userId ?? "anon"}`;
