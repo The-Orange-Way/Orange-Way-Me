@@ -24,7 +24,7 @@
  *   E2E_STEALTH_TEST_SCRIPT_TYPE    optional override: p2pkh | p2wpkh |
  *                                   p2sh-p2wpkh (defaults to what the
  *                                   xpub/ypub/zpub prefix implies)
- *   E2E_STEALTH_TEST_ACCOUNT_ID     the OWM accounts.id the wallet was
+ *   E2E_STEALTH_TEST_ACCOUNT_ID     the accounts.id the wallet was
  *                                   staged as (id only, never a customer
  *                                   name or email)
  *   OWM_DEV_SUPABASE_URL            https://bogmoovbjpvcvdqrmjgt.supabase.co
