@@ -150,6 +150,22 @@ jobs:
           node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/healthy.json"
           echo "guard correctly passed on a healthy report"
 
+          # Case 5: partial skip -- the P0 file's own describe block is
+          # skipped but an unrelated describe block in the SAME FILE still
+          # runs, so the file's aggregate executed count stays above zero.
+          # This is the exact shape PR #781 found live: describe.skip on
+          # or-key-material.test.ts's planOrKeyMaterial suite passed CI
+          # green before this fix, because that file also has an unrelated
+          # OrNamespaceDisabledError describe block that kept executing.
+          cat > "$RUNNER_TEMP/partial-skip.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"skipped"},{"status":"skipped"},{"status":"passed"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          if node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/partial-skip.json"; then
+            echo "::error::test-execution guard did NOT fail when the P0 or-key-material suite was PARTIALLY skipped (an unrelated describe block in the same file kept it executed > 0)"
+            exit 1
+          fi
+          echo "guard correctly failed: P0 suite partially skipped, hiding behind another describe block in the same file"
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
