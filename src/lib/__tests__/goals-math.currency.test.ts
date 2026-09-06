@@ -39,7 +39,8 @@ const account = (over: Partial<Account> = {}): Account =>
 
 describe("computeCurrent normalizes Bitcoin balances before summing", () => {
   it("reads an unstamped, mistagged sats-magnitude balance as sats (OWM-T0139 population)", () => {
-    const current = computeCurrent(goal(), [account({ balance: "150000", currency: "BTC" })]);
+    const acct = account({ balance: "150000", currency: "BTC" });
+    const current = computeCurrent(goal(), [acct]);
     expect(current).toBe(150000); // sats, not 150000 "BTC"
   });
 
@@ -48,37 +49,33 @@ describe("computeCurrent normalizes Bitcoin balances before summing", () => {
     // integer of 1 is one whole bitcoin (1e8 sats), not one satoshi. Before
     // this fix computeCurrent ignored the stamp entirely and summed the
     // raw "1".
-    const current = computeCurrent(
-      goal(),
-      [account({ balance: "1", currency: "BTC", format_version: 1 })],
-    );
+    const acct = account({ balance: "1", currency: "BTC", format_version: 1 });
+    const current = computeCurrent(goal(), [acct]);
     expect(current).toBe(1e8);
   });
 
   it("reads an unstamped decimal BTC balance as sats via the shape heuristic", () => {
-    const current = computeCurrent(goal(), [account({ balance: "0.5", currency: "BTC" })]);
+    const acct = account({ balance: "0.5", currency: "BTC" });
+    const current = computeCurrent(goal(), [acct]);
     expect(current).toBe(5e7);
   });
 
   it("sums a sats-currency account as-is", () => {
-    const current = computeCurrent(goal(), [account({ balance: "2500", currency: "sats" })]);
+    const acct = account({ balance: "2500", currency: "sats" });
+    const current = computeCurrent(goal(), [acct]);
     expect(current).toBe(2500);
   });
 
   it("leaves non-Bitcoin balances untouched", () => {
-    const current = computeCurrent(goal(), [account({ balance: "500", currency: "USD" })]);
+    const acct = account({ balance: "500", currency: "USD" });
+    const current = computeCurrent(goal(), [acct]);
     expect(current).toBe(500);
   });
 
   it("applies the same normalization on the pay_down debt side", () => {
-    const current = computeCurrent(
-      goal({
-        type: "pay_down",
-        starting_balance: "200000",
-        target_amount: "200000",
-      }),
-      [account({ balance: "-50000", currency: "BTC" })],
-    );
+    const g = goal({ type: "pay_down", starting_balance: "200000", target_amount: "200000" });
+    const acct = account({ balance: "-50000", currency: "BTC" });
+    const current = computeCurrent(g, [acct]);
     expect(current).toBe(150000); // paid off = 200000 sats - 50000 sats
   });
 });
