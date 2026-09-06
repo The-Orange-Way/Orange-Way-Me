@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-// @ts-ignore - plain CommonJS module, shared with the GitHub Actions workflow via require();
+// Plain CommonJS module, shared with the GitHub Actions workflow via require();
 // see scripts/auditor-approval-gate-logic.d.cts for the type declaration.
 import { evaluateAuditorApproval } from "../../../../scripts/auditor-approval-gate-logic.cjs";
 
