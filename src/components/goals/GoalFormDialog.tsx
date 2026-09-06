@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { PiggyBank, Banknote } from "lucide-react";
 import { useLocaleFormat } from "@/lib/locale";
+import { unitIsExact } from "@/lib/format";
 
 interface Props {
   open: boolean;
@@ -231,6 +232,7 @@ export function GoalFormDialog({ open, onOpenChange, initial, onSave }: Props) {
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {fmt.formatCurrency(Number(a.balance) || 0, a.currency, {
                       maximumFractionDigits: 2,
+                      unitIsExact: unitIsExact(a.format_version),
                     })}
                   </span>
                 </label>
