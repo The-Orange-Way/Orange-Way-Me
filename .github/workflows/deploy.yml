@@ -484,11 +484,21 @@ jobs:
       #
       # Dev only on purpose: tests/e2e/auth.setup.ts refuses to run against
       # orangeway.app, and the fixture user is a non-production identity.
+      #
+      # No password here, and none in auth.setup.ts either. The deployed
+      # dev sign-in screen is OTP-only (Turnstile plus an emailed code)
+      # and has no password field to fill: auth.setup.ts instead mints a
+      # session through the e2e-mint-session Edge Function and injects it
+      # as browser storage state. E2E_MINT_TOKEN is a single-purpose
+      # bearer token that function checks; it can only mint a session for
+      # one hardcoded fixture account and is unrelated to and
+      # independently revocable from the project's service-role key,
+      # which never leaves that function. SUPABASE_URL is not a secret,
+      # it is the same value already baked into the public client bundle.
       - name: Check authenticated E2E credentials are present
         if: github.ref_name == 'dev'
         env:
-          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
-          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_MINT_TOKEN: ${{ secrets.E2E_MINT_TOKEN }}
           E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
         run: |
           set -euo pipefail
@@ -498,25 +508,24 @@ jobs:
           # it produces a green job that proves nothing about unlock. Fail
           # loudly instead, and name the secret that is missing.
           missing=""
-          [ -n "$E2E_USER_EMAIL" ] || missing="$missing E2E_USER_EMAIL"
-          [ -n "$E2E_USER_PASSWORD" ] || missing="$missing E2E_USER_PASSWORD"
+          [ -n "$E2E_MINT_TOKEN" ] || missing="$missing E2E_MINT_TOKEN"
           [ -n "$E2E_VAULT_PASSWORD" ] || missing="$missing E2E_VAULT_PASSWORD"
           if [ -n "$missing" ]; then
             echo "::error::Authenticated Playwright run cannot start. Missing secret(s) on the dev environment:$missing"
             exit 1
           fi
-          echo "All three authenticated E2E credentials are present."
+          echo "Both authenticated E2E credentials are present."
 
       - name: Playwright authenticated vault unlock
         if: github.ref_name == 'dev'
         env:
           PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
-          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
-          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          E2E_MINT_TOKEN: ${{ secrets.E2E_MINT_TOKEN }}
           E2E_VAULT_PASSWORD: ${{ secrets.E2E_VAULT_PASSWORD }}
         # --project=authenticated pulls in authenticated-setup through the
-        # project dependency declared in playwright.config.ts, so the sign
-        # in and the vault unlock actually run before the authenticated
-        # specs. --reporter=list keeps the html reporter out of play, per
-        # the ordering note above.
+        # project dependency declared in playwright.config.ts, so the
+        # session mint and the vault unlock actually run before the
+        # authenticated specs. --reporter=list keeps the html reporter out
+        # of play, per the ordering note above.
         run: bunx playwright test --project=authenticated --reporter=list
