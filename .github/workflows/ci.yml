@@ -153,7 +153,7 @@ jobs:
           # Case 5: partial skip -- the P0 file's own describe block is
           # skipped but an unrelated describe block in the SAME FILE still
           # runs, so the file's aggregate executed count stays above zero.
-          # This is the exact shape PR #781 found live: describe.skip on
+          # This is the exact shape a throwaway demo run found live: describe.skip on
           # or-key-material.test.ts's planOrKeyMaterial suite passed CI
           # green before this fix, because that file also has an unrelated
           # OrNamespaceDisabledError describe block that kept executing.
