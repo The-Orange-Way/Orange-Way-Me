@@ -39,10 +39,7 @@ function fakeServiceClient(stealthEnabled: boolean | null): OwOrProxyServiceClie
   };
 }
 
-function fakeDeps(
-  stealthEnabled: boolean | null,
-  fetchImpl: typeof fetch,
-): OwOrProxyDeps {
+function fakeDeps(stealthEnabled: boolean | null, fetchImpl: typeof fetch): OwOrProxyDeps {
   return {
     createUserClient: () => ({
       auth: {
