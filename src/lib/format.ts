@@ -73,13 +73,14 @@ export function formatCurrencyWithMode(
   currency: string,
   mode: BtcDisplayMode = "btc",
   locale?: string,
+  opts?: { unitIsExact?: boolean },
 ): string {
   const n = typeof amount === "string" ? Number(amount) : amount;
   if (!Number.isFinite(n)) return String(amount);
   if (currency !== "BTC" && currency !== "sats") {
     return formatCurrency(String(amount), currency, locale);
   }
-  const sats = normalizeBitcoinToSats(n, currency);
+  const sats = normalizeBitcoinToSats(n, currency, opts);
   switch (mode) {
     case "sats":
       return `${sats.toLocaleString(locale)} sats`;
