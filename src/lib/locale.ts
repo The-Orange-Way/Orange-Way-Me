@@ -81,10 +81,12 @@ export function formatCurrencyPref(
   currency: string,
   numberPref: NumberFormatPref,
   btcDisplayMode: BtcDisplayMode,
-  opts?: { maximumFractionDigits?: number; minimumFractionDigits?: number },
+  opts?: { maximumFractionDigits?: number; minimumFractionDigits?: number; unitIsExact?: boolean },
 ): string {
   if (currency === "BTC" || currency === "sats") {
-    return formatCurrencyWithMode(amount, currency, btcDisplayMode, numberLocale(numberPref));
+    return formatCurrencyWithMode(amount, currency, btcDisplayMode, numberLocale(numberPref), {
+      unitIsExact: opts?.unitIsExact,
+    });
   }
   return formatCurrencyLocale(amount, currency, numberPref, opts);
 }
@@ -171,7 +173,11 @@ export function useLocaleFormat() {
     formatCurrency: (
       amount: number,
       currency: string,
-      opts?: { maximumFractionDigits?: number; minimumFractionDigits?: number },
+      opts?: {
+        maximumFractionDigits?: number;
+        minimumFractionDigits?: number;
+        unitIsExact?: boolean;
+      },
     ) => formatCurrencyPref(amount, currency, prefs.numberFormat, prefs.btcDisplayMode, opts),
     formatDate: (value: Date | string | null | undefined, opts?: Intl.DateTimeFormatOptions) =>
       formatDate(value, prefs.dateFormat, opts),
