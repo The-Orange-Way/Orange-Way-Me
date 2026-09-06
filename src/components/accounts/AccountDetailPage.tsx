@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useAccounts, AccountNotEmptyError } from "@/hooks/useAccounts";
 import { useAccountTransactions } from "@/hooks/useAccountTransactions";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrencyWithMode, unitIsExact } from "@/lib/format";
 import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS } from "@/lib/connectors/constants";
