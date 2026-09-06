@@ -1,6 +1,6 @@
 /**
- * ZKA-safe rate-series cache for OWM's 3-currency transaction display
- * (OWM-T0159, this ticket OWM-T0746).
+ * ZKA-safe rate-series cache for Orange Way Me's 3-currency transaction
+ * display (OWM-T0159, this ticket OWM-T0746).
  *
  * Serves getRate(currency, date) from an in-memory cache fed by
  * fetchRateMatrix (src/lib/orbi-rates.ts), which reads every supported
