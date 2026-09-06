@@ -29,7 +29,7 @@
  *      block: skipping only the P0 block still leaves the file's aggregate
  *      executed count above zero if another block in the same file runs,
  *      which let a real describe.skip on or-key-material.test.ts's
- *      planOrKeyMaterial suite pass CI green (PR #781, run 34051780292)
+ *      planOrKeyMaterial suite pass CI green (a throwaway demo run, see OWM-T0353)
  *      before this fix, because that file also has an unrelated
  *      OrNamespaceDisabledError describe block.
  *
