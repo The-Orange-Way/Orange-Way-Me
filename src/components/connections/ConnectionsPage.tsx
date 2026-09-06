@@ -89,12 +89,17 @@ import {
   type StealthSealedRow,
 } from "@/lib/stealth/ledger";
 import type { StealthChannel } from "@/lib/stealth/channel";
+import { nextTransactionsPage, type TransactionRow } from "@/lib/or/transactions-page";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
 import { registerOpk, syncQuilttConnection } from "@/lib/or/bank-sync-opk";
 import { opkSealOpen } from "@/lib/or/opk";
 import { humanizeError, humanizeOrDisabledReason, toastError } from "@/lib/friendly-error";
-import { CallProxyError, isSubaccountNotFound } from "@/lib/or/proxy-errors";
+import {
+  CallProxyError,
+  isSubaccountNotFound,
+  proxyErrorMessageFromBody,
+} from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
@@ -181,16 +186,25 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
         }
       }
     }
-    const message =
-      (body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : null) ||
-      res.error.message ||
-      `${endpoint} failed`;
+    // The message goes through the SAME rule as the body, not merely the same
+    // length cap. proxyErrorMessageFromBody refuses a non-scalar under `error`,
+    // so a list the body drops cannot ride out in the message beside it. The
+    // raw String(body.error) that used to be here was the second door: the
+    // constructor cap bounded that content at 200 characters rather than
+    // refusing it. Both fallbacks are unchanged.
+    const message = proxyErrorMessageFromBody(body) || res.error.message || `${endpoint} failed`;
     throw new CallProxyError(message, status, body);
   }
   if (res.data && typeof res.data === "object" && "error" in res.data && res.data.error) {
-    throw new CallProxyError(String((res.data as { error: unknown }).error), 200, res.data);
+    // Same rule as the non-2xx branch above. There is no transport message to
+    // fall back to on a 200, so when `error` is not a short scalar the endpoint
+    // name is the honest answer: it says which call failed without repeating
+    // the content we just refused to carry.
+    throw new CallProxyError(
+      proxyErrorMessageFromBody(res.data) ?? `${endpoint} failed`,
+      200,
+      res.data,
+    );
   }
   return res.data;
 }
@@ -1086,7 +1100,22 @@ export function ConnectionsPage() {
         );
       }
 
-      if (user && res.synced > 0) {
+      // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
+      // itself just fetched, so a connection whose rows were fetched on an
+      // EARLIER press reports 0 forever and never gets imported. That is not
+      // hypothetical: one tester's 146 transactions were fetched five minutes
+      // before her account and wallet mapping existed, so the first press had
+      // nowhere to file them, and every press since has honestly answered 0.
+      //
+      // This is the same defect DL-1116 already fixed on the stealth path, one
+      // path over, and for the same reason: a sync that finds nothing new
+      // still has to reconcile what is already stored.
+      //
+      // Safe to run unconditionally. We only reach here when `attempted` is
+      // set, so the connection really was processed, and the import helper is
+      // not delta based: it reads what is held for the connection and dedupes,
+      // returning immediately when there is nothing to import.
+      if (user) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
@@ -1180,7 +1209,11 @@ export function ConnectionsPage() {
       }
 
       if (user) {
-        const succeeded = returned.filter((c) => !c.error && c.synced > 0);
+        // OWM-T0717, same reasoning as the single-connection path above: a
+        // connection that synced cleanly with 0 new rows may still be holding
+        // rows that were never imported, so `synced > 0` is not the condition.
+        // Error-free is.
+        const succeeded = returned.filter((c) => !c.error);
         for (const succ of succeeded) {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
@@ -1334,14 +1367,52 @@ export function ConnectionsPage() {
     return out;
   }
 
+  /**
+   * Page through `or-transactions-list` for the whole subaccount (OWM-T0722).
+   *
+   * One call with `limit: 500` treated whatever came back as everything the
+   * store held: no error, no counter, and a customer whose history ran past
+   * 500 rows got a ledger that looked complete and silently was not.
+   *
+   * `nextTransactionsPage` is the one place that knows how to tell "may be
+   * more" from "store exhausted" on this endpoint (see that module for why
+   * its own `truncated` flag does not settle it alone). This loop just
+   * drives it, same idiom as `fetchStealthRows` above: walk pages, stop on
+   * `!hasMore`, cap at `MAX_PAGES` so a pathological response cannot spin
+   * forever.
+   */
+  async function fetchAllTransactionRows(forSubaccountId: string): Promise<TransactionRow[]> {
+    const PAGE_LIMIT = 500;
+    const MAX_PAGES = 25;
+    const out: TransactionRow[] = [];
+    let before: string | undefined;
+
+    for (let i = 0; i < MAX_PAGES; i += 1) {
+      let res: unknown;
+      try {
+        res = await callProxy("or-transactions-list", {
+          subaccount_id: forSubaccountId,
+          limit: PAGE_LIMIT,
+          ...(before ? { before } : {}),
+        });
+      } catch (err) {
+        console.warn("[Connections] transaction list read failed", err);
+        break;
+      }
+      const page = nextTransactionsPage(res, PAGE_LIMIT);
+      out.push(...page.rows);
+      if (!page.hasMore || !page.nextBefore) break;
+      before = page.nextBefore;
+    }
+    return out;
+  }
+
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
-    const listRes = await callProxy("or-transactions-list", {
-      subaccount_id: subaccountId,
-      limit: 500,
-    });
+    const allRows = await fetchAllTransactionRows(subaccountId);
+    const listRes = { transactions: allRows };
     // Shape lives in one place. Orange Rails has not finalised how stealth
     // rows come back (their DL-1174) and has ruled they will NOT be extra
     // entries in `transactions`, so nothing here may assume that array is the
@@ -1498,6 +1569,7 @@ export function ConnectionsPage() {
       untagged: result.untagged,
       errored: result.errored,
       unreadable: decryptFailures,
+      unitMismatch: result.unitMismatch,
     });
     if (outcome.silent) {
       return { unmapped: 0, unmappedWalletIds: [] };
@@ -1529,13 +1601,16 @@ export function ConnectionsPage() {
   /**
    * DL-1116. Read back and import what the widget just sealed.
    *
-   * Deliberately NOT gated on the widget's transaction count. The or-sync path
-   * guards its import on `res.synced > 0` because or-sync reports what it
-   * itself just wrote, but the stealth widget's count is what it stored on the
-   * Orange Rails side, and rows stored by an earlier scan may never have been
-   * imported here at all. That is exactly the state this ticket was filed
-   * from: fourteen rows sealed and stored, zero of them in the ledger. A scan
-   * that finds nothing new still has to reconcile.
+   * Deliberately NOT gated on the widget's transaction count, because rows
+   * stored by an earlier scan may never have been imported here at all. That
+   * is exactly the state this ticket was filed from: fourteen rows sealed and
+   * stored, zero of them in the ledger. A scan that finds nothing new still
+   * has to reconcile.
+   *
+   * This paragraph used to note that the or-sync path took the opposite
+   * approach and guarded on `res.synced > 0`. It no longer does. That guard
+   * had the identical defect this comment describes and cost a tester her
+   * whole history (OWM-T0717), so both paths now reconcile unconditionally.
    *
    * Failure is reported rather than swallowed. A scan that succeeded and an
    * import that failed is a different situation from a failed scan, and the
