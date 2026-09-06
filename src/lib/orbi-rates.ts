@@ -136,3 +136,50 @@ export async function refreshLiveBTCRate(target: string): Promise<LiveRateSnapsh
   liveBTCRates.set(target.toUpperCase(), snap);
   return snap;
 }
+
+// ── Bulk range read for the client-side rate-series cache (OWM-T0746). See
+// src/lib/rate-series-cache.ts for the cache that consumes this.
+
+export interface ORBIMatrixRow {
+  targetCurrency: string;
+  rate: number;
+  bucketTs: string;
+}
+
+/**
+ * Every supported BTC/fiat rate for [startDate, endDate], in ONE request.
+ *
+ * No target_currency filter: this always asks for the full matrix, never a
+ * subset. See OWM-T0159's ZKA section for why a narrower request is a leak
+ * even though no amount or plaintext is disclosed. No account, household,
+ * transaction or user identifier appears anywhere in this call; the request
+ * shape depends only on the date range, so it is identical for every OWM
+ * client asking about the same range.
+ */
+export async function fetchRateMatrix(
+  startDate: Date,
+  endDate: Date,
+  granularity: string = "1d",
+): Promise<ORBIMatrixRow[]> {
+  let client: SupabaseClient;
+  try {
+    client = getORBIClient();
+  } catch {
+    return [];
+  }
+  const { data, error } = await client
+    .from("exchange_rates")
+    .select("target_currency, rate, bucket_ts")
+    .eq("source_currency", "BTC")
+    .eq("product", "ORBI-M")
+    .eq("granularity", granularity)
+    .eq("status", "CONFIRMED")
+    .gte("bucket_ts", startDate.toISOString())
+    .lte("bucket_ts", endDate.toISOString());
+  if (error || !data) return [];
+  return data.map((row) => ({
+    targetCurrency: String(row.target_currency).toUpperCase(),
+    rate: Number(row.rate),
+    bucketTs: row.bucket_ts as string,
+  }));
+}
