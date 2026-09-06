@@ -99,14 +99,18 @@ export function ThisMonthSummary() {
             <StatRow
               label="Income"
               value={summary.income}
-              formatted={fmt.formatCurrency(summary.income, prefs.primaryCurrency)}
+              formatted={fmt.formatCurrency(summary.income, prefs.primaryCurrency, {
+                unitIsExact: true,
+              })}
               deltaPct={summary.incomeDeltaPct}
               positiveIsGood
             />
             <StatRow
               label="Spending"
               value={summary.spending}
-              formatted={fmt.formatCurrency(summary.spending, prefs.primaryCurrency)}
+              formatted={fmt.formatCurrency(summary.spending, prefs.primaryCurrency, {
+                unitIsExact: true,
+              })}
               deltaPct={summary.spendingDeltaPct}
               positiveIsGood={false}
             />
@@ -119,7 +123,7 @@ export function ThisMonthSummary() {
                   summary.net >= 0 ? "text-emerald-600 dark:text-emerald-500" : "text-destructive"
                 }`}
               >
-                {fmt.formatCurrency(summary.net, prefs.primaryCurrency)}
+                {fmt.formatCurrency(summary.net, prefs.primaryCurrency, { unitIsExact: true })}
               </div>
             </div>
             <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
