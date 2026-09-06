@@ -27,7 +27,9 @@ import type { Goal, GoalDraft, GoalType, PayDownStrategy, SaveUpStrategy } from 
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { PiggyBank, Banknote } from "lucide-react";
-import { useLocaleFormat } from "@/lib/locale";
+import { useLocaleFormat, numberLocale } from "@/lib/locale";
+import { formatCurrencyWithMode, isBitcoinCurrency, unitIsExact } from "@/lib/format";
+import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 
 interface Props {
   open: boolean;
