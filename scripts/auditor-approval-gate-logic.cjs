@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 // Decides whether a PR carries a qualifying approval from the Auditor
 // identity. Kept as a pure function with no GitHub API calls so it can
@@ -16,33 +16,29 @@ function evaluateAuditorApproval(reviews, prAuthorLogin, auditorLogin) {
     latestByUser.set(r.user.id, r);
   }
 
-  let reason = 'no approving review found';
+  let reason = "no approving review found";
 
   for (const r of latestByUser.values()) {
-    if (r.state !== 'APPROVED') continue;
+    if (r.state !== "APPROVED") continue;
     const u = r.user;
 
     if (u.login === prAuthorLogin) {
-      reason = 'rejected: approval from ' + u.login + ' is the PR author';
+      reason = `rejected: ${u.login} is the PR author`;
       continue;
     }
-    if (u.type === 'Bot' || u.login === 'github-actions[bot]') {
-      reason =
-        'rejected: approval from ' +
-        u.login +
-        ' is a Bot/App actor, not a human reviewer identity';
+    if (u.type === "Bot" || u.login === "github-actions[bot]") {
+      reason = `rejected: ${u.login} is a Bot/App actor`;
       continue;
     }
     if (u.login !== auditorLogin) {
-      reason =
-        'rejected: approval from ' + u.login + ' is not the Auditor identity (' + auditorLogin + ')';
+      reason = `rejected: ${u.login} is not the Auditor identity (${auditorLogin})`;
       continue;
     }
 
-    return { approved: true, reason: 'approved by ' + u.login };
+    return { approved: true, reason: `approved by ${u.login}` };
   }
 
-  return { approved: false, reason: reason };
+  return { approved: false, reason };
 }
 
 module.exports = { evaluateAuditorApproval };
