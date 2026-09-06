@@ -437,6 +437,24 @@ jobs:
           fi
 
           if [ "$FAIL" -ne 0 ]; then
+            {
+              echo "### This check cannot be cleared by pushing a new commit"
+              echo
+              echo "This job reads every non-merge commit already on the branch"
+              echo "(BASE..HEAD), not just the tip. If an older commit is missing a"
+              echo "valid \`Seat: <name>\` trailer, no commit you add now can fix that"
+              echo "commit's message, and this check will stay red no matter what you"
+              echo "push next."
+              echo
+              echo "**The remedy:** re-cut the branch fresh off \`dev\` with the final"
+              echo "file contents in one, single, properly trailered commit. Then close"
+              echo "the old PR with a comment pointing to the new one, and open the new"
+              echo "PR from the re-cut branch."
+              echo
+              echo "If your only write surface is the GitHub contents API (no local git,"
+              echo "no diff tool), get the changed-file list from the PR's raw patch diff:"
+              echo "\`https://patch-diff.githubusercontent.com/raw/${{ github.repository }}/pull/${{ github.event.pull_request.number }}.diff\`"
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "All $COUNT non-merge PR commit(s) carry a valid Seat: trailer."
