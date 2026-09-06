@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useAccounts, AccountNotEmptyError } from "@/hooks/useAccounts";
 import { useAccountTransactions } from "@/hooks/useAccountTransactions";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrencyWithMode, unitIsExact } from "@/lib/format";
 import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { ACCOUNT_TYPES, ACCOUNT_TYPE_LABELS } from "@/lib/connectors/constants";
@@ -157,7 +157,9 @@ export function AccountDetailPage() {
               <p className="mt-1 text-sm text-muted-foreground">{account.institution}</p>
             )}
             <div className="mt-4 font-mono text-4xl font-semibold tabular-nums">
-              {formatCurrency(account.balance, account.currency, loc)}
+              {formatCurrencyWithMode(account.balance, account.currency, prefs.btcDisplayMode, loc, {
+                unitIsExact: unitIsExact(account.format_version),
+              })}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Last updated {fmt.formatDate(new Date(account.updated_at))}
