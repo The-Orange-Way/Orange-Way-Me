@@ -158,13 +158,26 @@ jobs:
           # "non-fast-forward" -- a message that points the reader at prod
           # history rather than at the automation branch. This guard checks
           # ancestry first and prints the actionable fix instead.
-          # Fetch the automation branch explicitly so the rev-parse below has
-          # a real ref to work from. Without this, a runner whose clone never
-          # saw the branch takes the else path and exits zero -- the same
-          # silent pass the guard exists to prevent. The || true keeps the
-          # genuine first-run case clean.
-          git fetch --no-tags --quiet origin \
-            "+refs/heads/${BACKMERGE_BRANCH}:refs/remotes/origin/${BACKMERGE_BRANCH}" || true
+          # Ask the remote directly whether the automation branch exists,
+          # instead of fetching it and reading a failed fetch as "absent".
+          # git ls-remote --exit-code answers three states a plain fetch
+          # cannot tell apart: 0 (branch exists), 2 (branch genuinely does
+          # not exist yet), and anything else (could not reach the remote --
+          # network, rate limit, token blip). Only 2 is the legitimate
+          # first-run case. Any other non-zero is a hard failure: silently
+          # reading it as "does not exist" is the exact silent pass this
+          # guard exists to prevent.
+          set +e
+          git ls-remote --exit-code --heads origin "${BACKMERGE_BRANCH}" >/dev/null 2>&1
+          ls_remote_status=$?
+          set -e
+          if [ "${ls_remote_status}" -eq 0 ]; then
+            git fetch --no-tags --quiet origin \
+              "+refs/heads/${BACKMERGE_BRANCH}:refs/remotes/origin/${BACKMERGE_BRANCH}"
+          elif [ "${ls_remote_status}" -ne 2 ]; then
+            echo "::error title=Could not determine whether ${BACKMERGE_BRANCH} exists::git ls-remote against origin failed with exit code ${ls_remote_status} (network, rate limit, or token problem), not a confirmed absence of the branch. Refusing to treat this as the first-run case. Re-run once the remote is reachable."
+            exit 1
+          fi
           if git rev-parse --verify "origin/${BACKMERGE_BRANCH}" >/dev/null 2>&1; then
             if ! git merge-base --is-ancestor \
                    "origin/${BACKMERGE_BRANCH}" \
