@@ -268,7 +268,30 @@ fi
 # cannot prevent anything: if it is a real leak it is public already and needs
 # rotation, not a blocked push. Only the first sha was scanned, too, so a
 # multi-branch push checked one branch and waved the rest through.
-if command -v gitleaks >/dev/null; then
+# Resolve the binary directly instead of trusting PATH. command -v gitleaks
+# returns nothing on a shell started without an interactive login profile
+# even when gitleaks is installed and working, because it lives at
+# ~/.local/bin/gitleaks and that directory is not on the default non-login
+# PATH (the same trap this fleet already documents for gh, uv and
+# zulip-fetch). Checking the well-known install path first, then PATH,
+# makes this probe measure "does the scanner exist" instead of "is it on
+# PATH right now".
+resolve_gitleaks() {
+  if [ -x "$HOME/.local/bin/gitleaks" ]; then
+    printf '%s' "$HOME/.local/bin/gitleaks"
+    return 0
+  fi
+  if command -v gitleaks >/dev/null 2>&1; then
+    command -v gitleaks
+    return 0
+  fi
+  return 1
+}
+
+GITLEAKS_BIN=""
+if GITLEAKS_BIN="$(resolve_gitleaks)"; then
+  GITLEAKS_VERSION="$("$GITLEAKS_BIN" version 2>/dev/null | head -1)"
+  green "✓ gitleaks resolved at $GITLEAKS_BIN ($GITLEAKS_VERSION)."
   CFG=""
   [ -f .gitleaks.toml ] && CFG="--config .gitleaks.toml"
   GITLEAKS_FAIL=0
@@ -282,7 +305,7 @@ if command -v gitleaks >/dev/null; then
     # way base..sha would by excluding it.
     if [ -n "$base" ]; then LOGOPTS="$base..$sha"; else LOGOPTS="$sha"; fi
     # shellcheck disable=SC2086 # CFG is a deliberate two-word flag or empty.
-    if ! gitleaks detect $CFG --no-banner --log-opts="$LOGOPTS" >/tmp/.gl.out 2>&1; then
+    if ! "$GITLEAKS_BIN" detect $CFG --no-banner --log-opts="$LOGOPTS" >/tmp/.gl.out 2>&1; then
       red "✗ gitleaks found secrets in $LOGOPTS:"
       tail -10 /tmp/.gl.out
       GITLEAKS_FAIL=1
@@ -294,20 +317,24 @@ if command -v gitleaks >/dev/null; then
     FAIL=1
   fi
 else
-  # An absent scanner is not a clean scan. This branch did not exist: with
-  # gitleaks off PATH nothing ran, nothing printed, FAIL was untouched, and
-  # the gate went on to print PASSED, which reads as "a secret scan covered
-  # these commits". Announce the gap every time instead.
-  #
-  # This warns rather than refusing, unlike check 3, and the difference is
-  # deliberate: canon-terms.sh ships in the repository, so its absence means
-  # a broken tree, while gitleaks is an optional external binary that a
-  # fresh clone will not have. Whether this should also refuse is being
-  # settled on evidence about server-side coverage, not guessed here.
-  yellow "- gitleaks is not installed: NO secret scan ran on the commits being pushed."
-  yellow "  The checks above look for reserved terms and seat trailers. None of them"
-  yellow "  looks for secret-shaped strings such as API keys, tokens or private keys."
-  yellow "  Install gitleaks and push again for that cover: https://github.com/gitleaks/gitleaks"
+  # An absent scanner is not a clean scan, and a warning nobody reads is the
+  # same as no check. GitHub's server-side push protection on this public
+  # repo only catches provider-shaped secrets (secret_scanning_non_provider_patterns
+  # is off), so a generic high-entropy string or an unrecognised service-role
+  # key is not caught unless gitleaks runs here. Refuse, with one named
+  # override for the genuine case of a machine with no scanner installed.
+  if [ "${PR_THIS_ALLOW_NO_GITLEAKS:-}" = "1" ]; then
+    yellow "⚠ gitleaks did not resolve (checked \$HOME/.local/bin/gitleaks and PATH),"
+    yellow "  and PR_THIS_ALLOW_NO_GITLEAKS=1 is set. NO secret scan ran on this push."
+  else
+    red "✗ gitleaks did not resolve (checked \$HOME/.local/bin/gitleaks and PATH)."
+    red "  NO secret scan can run on the commits being pushed, and this check"
+    red "  refuses rather than pass silently unscanned."
+    red "  Install gitleaks: https://github.com/gitleaks/gitleaks"
+    red "  Genuinely no scanner on this machine and pushing anyway (loud warning):"
+    red "    PR_THIS_ALLOW_NO_GITLEAKS=1 git push"
+    FAIL=1
+  fi
 fi
 
 # ---- Check 5: Seat trailer on every pushed non-merge commit ----
