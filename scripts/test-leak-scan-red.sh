@@ -216,6 +216,39 @@ check 'the other-case finding withholds its matched text too' \
   'absent' "$(has "$TERM_OTHER_CASE")"
 
 # ----------------------------------------------------------------------
+# Structural categories redact too (OW-T0339)
+# ----------------------------------------------------------------------
+#
+# Redaction used to be a per-call argument, wired to exactly one of eight
+# scan() call sites: the reserved-term category. The other seven printed
+# matched text in full under CI regardless, on the assumption that a
+# hardcoded pattern's own match text is safe to show. It is not: grep
+# prints the whole matched line, and that line can carry a personal name
+# or an internal codename alongside the pattern that tripped. This plants
+# a match in a structural category (MB / OWM), which reads no secret and
+# needs no list, with an invented marker on the same line, and proves the
+# marker is withheld exactly like a reserved-term match would be.
+
+STRUCTURAL="$(new_fixture structural)"
+printf 'export const zzstructuralmarker = "OWM";\n' > "$STRUCTURAL/src/structural.ts"
+run_scan "$STRUCTURAL" ci ""
+
+check 'a structural-category match makes the scan exit non-zero' \
+  '1' "$LAST_RC"
+
+check 'the structural category is reported failing, with a count' \
+  'present' "$(has 'Internal codename: MB / OWM as acronym (1 findings)')"
+
+check 'the structural finding still names the file and the line' \
+  'present' "$(has './src/structural.ts:1')"
+
+check 'the structural matched text never reaches the log' \
+  'absent' "$(has 'zzstructuralmarker')"
+
+check 'the structural withholding is announced rather than left silent' \
+  'present' "$(has 'matched text withheld')"
+
+# ----------------------------------------------------------------------
 # Evidence, for whoever reads this job log
 # ----------------------------------------------------------------------
 #
