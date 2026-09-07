@@ -106,23 +106,23 @@ const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
 // Gate the Orange Rails stealth-sync connector to environments where it is
 // actually provisioned. Branch-derived in .github/workflows/deploy.yml
-// (VITE_OR_CONNECT_ENABLED), exactly like VITE_ONBOARDING_V2: "true" on the
-// dev build, empty on prod. Empty folds the compare to a constant false, so
-// the prod bundle never renders the "+ Connect a Bitcoin source" button and
-// no route can reach the OR connect widget (DL-0393). `=== "true"` so an
-// absent or empty value reads as OFF.
+// (VITE_OR_CONNECT_ENABLED): deploy.yml sets it to 'true' on both the dev
+// and prod branches, and to '' on anything else, so the compare below folds
+// to OFF only for a build that is neither branch. `=== "true"` so an absent
+// or empty value reads as OFF.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
  *  (no "quiltt"/"orangerails" jargon). Banks read as "Bank" when we don't
  *  have the institution name at hand. */
-function friendlyProviderName(providerType: string): string {
+export function friendlyProviderName(providerType: string): string {
   const map: Record<string, string> = {
     quiltt: "Bank",
     blink: "Blink",
     strike: "Strike",
     sparrow: "Sparrow",
     xpub_stealth: "Private wallet",
+    descriptor_stealth: "Private wallet",
   };
   const key = providerType.toLowerCase();
   return map[key] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
