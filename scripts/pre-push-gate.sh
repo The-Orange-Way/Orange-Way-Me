@@ -9,10 +9,11 @@
 #      being pushed. If absent or stale, the push is refused.
 #   2. The repo's pre-publish leak scanner (`scripts/pre-publish-scan.sh`)
 #      reports clean.
-#   3. No private-host / private-wiki URL leaks in the commits being pushed
+#   3. No reserved-term leaks in the commits being pushed
 #      (commit messages + diff).
-#   4. No secret-shaped strings in the diff that gitleaks would catch.
-#   5. Every non-merge commit body ends with a Seat: <name> trailer.
+#   4. Every commit's author and committer email is a GitHub noreply address.
+#   5. No secret-shaped strings in the diff that gitleaks would catch.
+#   6. Every non-merge commit body ends with a Seat: <name> trailer.
 #
 # Override (escape hatch — emits a loud warning, do not use casually):
 #   PR_THIS_BYPASS=1 git push
