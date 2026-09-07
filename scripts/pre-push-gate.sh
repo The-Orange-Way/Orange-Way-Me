@@ -342,7 +342,7 @@ else
   yellow "  Install gitleaks and push again for that cover: https://github.com/gitleaks/gitleaks"
 fi
 
-# ---- Check 5: Seat trailer on every pushed non-merge commit ----
+# ---- Check 6: Seat trailer on every pushed non-merge commit ----
 # Every non-merge commit body's last non-empty line must name the seat that
 # authored it: "Seat: <seat-name>", matching ^Seat: [a-z0-9-]+$. This keeps
 # public authorship legible without publishing anything internal (a seat name
