@@ -260,7 +260,39 @@ else
   fi
 fi
 
-# ---- Check 4: gitleaks on the prepared commits (if installed) ----
+# ---- Check 4: author + committer identity ----
+# Every commit being pushed must use a *@users.noreply.github.com address.
+# An ad-hoc `git config user.email` (or no config at all, falling back to
+# $USER@$HOSTNAME) is the leak pattern that put a private hostname or
+# reserved-term domain into public history as the commit author email.
+# This catches it before the push, not after the merge.
+#
+# Co-authored-by trailers injected by GitHub at squash/rebase merge time
+# are NOT in scope here: they are added server-side and cannot be caught
+# at push time. They are caught by the post-merge identity-scan workflow
+# (.github/workflows/post-merge-identity-scan.yml). The fix for those is
+# operational: ensure every contributing machine and GitHub account uses a
+# noreply email. This is the belt; the server-side scan is the suspenders.
+#
+# This is the same check as OWB's check 4 in scripts/pre-push-gate.sh,
+# kept in sync to preserve the design-twin property.
+ALLOWED_IDENT_RE='@users\.noreply\.github\.com$'
+for i in "${!LOCAL_SHAS[@]}"; do
+  sha="${LOCAL_SHAS[$i]}"
+  base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
+  if [ -n "$base" ]; then IDENT_RANGE="$base..$sha"; else IDENT_RANGE="$sha"; fi
+  BAD_IDENT=$(git log "$IDENT_RANGE" --format='%H %ae %ce' 2>/dev/null \
+    | awk -v re="$ALLOWED_IDENT_RE" '$2 !~ re || $3 !~ re { print }')
+  if [ -n "$BAD_IDENT" ]; then
+    red "✗ Commit author or committer email is not a GitHub noreply:"
+    echo "$BAD_IDENT" | head -10
+    red "  Fix with: git config user.email '<id>+<handle>@users.noreply.github.com'"
+    FAIL=1
+  fi
+done
+[ "$FAIL" = "0" ] && green "✓ Commit identities look clean."
+
+# ---- Check 5: gitleaks on the prepared commits (if installed) ----
 # Scans only what this push adds, using the same base as check 3. Passing a
 # bare sha to --log-opts scanned every commit reachable from HEAD, so any
 # finding anywhere in history refused every push from every branch, no matter
