@@ -17,6 +17,12 @@ name: prod-drift-guard
 on:
   push:
     branches: [dev, prod]
+  pull_request:
+    paths:
+      - 'scripts/prod-drift-guard.sh'
+      - 'scripts/tests/prod-drift-guard-null-files.test.sh'
+      - 'scripts/tests/fixtures/**'
+      - '.github/workflows/prod-drift-guard.yml'
   workflow_dispatch:
     inputs:
       base_branch:
@@ -95,3 +101,13 @@ jobs:
           fi
 
           echo "negative control PASS: the guard exited ${rc} and refused the proof run."
+
+  drift-guard-null-files-regression:
+    name: Regression test - null/absent files field on prod-ahead compare (OW-T0272)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run regression test (mocked gh, no network, no live branches touched)
+        run: bash scripts/tests/prod-drift-guard-null-files.test.sh
