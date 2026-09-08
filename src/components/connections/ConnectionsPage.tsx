@@ -74,6 +74,7 @@ import {
   shouldShowScanProgress,
   describeStealthFailure,
   type StealthSyncProgress,
+  type StealthSyncOutcome,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
@@ -667,9 +668,11 @@ export function ConnectionsPage() {
       // that had. Refresh first, then say only what the refreshed list shows.
       const rows = await refreshList();
       if (!rows) {
-        // The list itself did not load, so we know the connection was created
-        // and nothing about whether it is listed. Say both halves.
-        toast.success("Connection added. We couldn't refresh the list just now.");
+        // The widget's completion message is not a read-back. Without the
+        // list, this page cannot say whether the connection is present.
+        toast.warning(
+          "We couldn't confirm whether the connection was added because the list couldn't refresh.",
+        );
       } else {
         const report = describeLinkResult({
           result,
@@ -876,37 +879,13 @@ export function ConnectionsPage() {
             completedScanReportedHeight: outcome.lastBlockScanned !== undefined,
             cursorUpdateFailed: outcome.cursorUpdateFailed === true,
           });
-          const found = outcome.txCount;
-          // Report the count when the widget gave one. When it did not, say
-          // that the scan finished and nothing more: inventing "up to date"
-          // from a missing number is how we got here.
-          toast.success(
-            found === undefined
-              ? "Scan finished."
-              : found === 0
-                ? "Scan finished. No new transactions."
-                : `Scan finished. ${found} new ${found === 1 ? "transaction" : "transactions"}.`,
-          );
-          // Two honesty warnings the widget reports and this app would
-          // otherwise swallow when the popup closes. Neither makes the scan a
-          // failure, and neither may be hidden behind the success toast.
-          if (outcome.addressWindowExhausted) {
-            toast.warning(
-              "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
-            );
-          }
-          if (outcome.cursorUpdateFailed) {
-            toast.warning(
-              "This scan finished but its position could not be saved, so the next sync may cover ground this one already scanned.",
-            );
-          }
           // DL-1116. This callback used to end at refreshList(), which is why
           // a scan could report "Sealed and stored 14 transactions" and the
           // user still saw none of them: the row was marked "Synced just now"
           // and nothing ever read the transactions back into the local
           // ledger. Both or-sync paths already call the import bridge here;
           // this one never did.
-          void importAfterStealthScan(conn);
+          void importAfterStealthScan(conn, outcome);
         },
         /**
          * DL-1117. The widget sends `{code, message, retryable}` and this app
@@ -949,18 +928,29 @@ export function ConnectionsPage() {
             console.warn(`[Connections] stealth sync failed: ${failure.code}`);
           }
           const line = describeStealthFailure(failure, cursorKnowledgeRef.current.get(conn.id));
-          toast.error(
-            line.message,
-            line.canRetry
-              ? {
-                  // The caveat rides on the same toast as the button it is
-                  // about. A warning in a separate toast can be dismissed
-                  // first, which would leave the button and lose the sentence.
-                  description: line.retryNote,
-                  action: { label: "Try again", onClick: () => void handleStealthSync(conn) },
-                }
-              : undefined,
-          );
+          // A widget error is an outcome report, not a read-back. Fetch the
+          // row before describing the failed scan, including its retry path.
+          void (async () => {
+            const rows = await refreshList();
+            if (!rows) {
+              toast.error(
+                "We couldn't confirm the connection status after the scan problem because the list couldn't refresh.",
+              );
+              return;
+            }
+            toast.error(
+              line.message,
+              line.canRetry
+                ? {
+                    // The caveat rides on the same toast as the button it is
+                    // about. A warning in a separate toast can be dismissed
+                    // first, which would leave the button and lose the sentence.
+                    description: line.retryNote,
+                    action: { label: "Try again", onClick: () => void handleStealthSync(conn) },
+                  }
+                : undefined,
+            );
+          })();
         },
       });
       channelRef.current = channel;
@@ -972,7 +962,14 @@ export function ConnectionsPage() {
       setStealthScanId(null);
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
-      toast.error(humanizeError(new Error(msg)));
+      const rows = await refreshList();
+      if (rows) {
+        toast.error(humanizeError(new Error(msg)));
+      } else {
+        toast.error(
+          "We couldn't confirm the connection status after the scan could not start because the list couldn't refresh.",
+        );
+      }
       // The started row may still be in flight: this catch is reachable from
       // the key export and the token mint, both of which run before runId is
       // assigned. Resolve the insert before finishing it, or this execution
@@ -1066,43 +1063,45 @@ export function ConnectionsPage() {
       // resumable scan). Absence is the whole signal: do not infer stealth on
       // the client, and do not claim "up to date" for work that never ran.
       const attempted = res.connections.find((c) => c.connection_id === conn.id);
+      let syncToast: { level: "success" | "info" | "warning" | "error"; message: string };
+      let importFailure: string | null = null;
       if (!attempted) {
-        toast.info("Nothing was synced for this connection yet.");
-        await refreshList();
-        setTxRefreshKey((k) => k + 1);
-        return;
-      }
-
-      const errs = res.connections.filter((c) => c.error);
-      if (errs.length > 0) {
-        const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
-        const suffix =
-          errs.length > 1
-            ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
-            : "";
-        if (res.synced > 0) {
-          toast.warning(
-            `Synced ${res.synced}; ${errs.length} connection${errs.length === 1 ? "" : "s"} had trouble: ${firstMsg}${suffix}`,
-          );
-        } else {
-          toast.error(
-            `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
-          );
-        }
-        console.warn(
-          "[Connections] partial sync failures",
-          errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
-        );
-      } else if (res.synced === 0) {
-        toast.info("Up to date. No new transactions.");
+        syncToast = { level: "info", message: "Nothing was synced for this connection yet." };
       } else {
-        toast.success(
-          `Synced ${res.synced} transaction${res.synced === 1 ? "" : "s"} from ${
-            conn.decrypted_label ||
-            institutionByConn.get(conn.id) ||
-            friendlyProviderName(conn.provider_type)
-          }`,
-        );
+        const errs = res.connections.filter((c) => c.error);
+        if (errs.length > 0) {
+          const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
+          const suffix =
+            errs.length > 1
+              ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
+              : "";
+          if (res.synced > 0) {
+            syncToast = {
+              level: "warning",
+              message: `Synced ${res.synced}; ${errs.length} connection${errs.length === 1 ? "" : "s"} had trouble: ${firstMsg}${suffix}`,
+            };
+          } else {
+            syncToast = {
+              level: "error",
+              message: `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
+            };
+          }
+          console.warn(
+            "[Connections] partial sync failures",
+            errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
+          );
+        } else if (res.synced === 0) {
+          syncToast = { level: "info", message: "Up to date. No new transactions." };
+        } else {
+          syncToast = {
+            level: "success",
+            message: `Synced ${res.synced} transaction${res.synced === 1 ? "" : "s"} from ${
+              conn.decrypted_label ||
+              institutionByConn.get(conn.id) ||
+              friendlyProviderName(conn.provider_type)
+            }`,
+          };
+        }
       }
 
       // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
@@ -1120,7 +1119,7 @@ export function ConnectionsPage() {
       // set, so the connection really was processed, and the import helper is
       // not delta based: it reads what is held for the connection and dedupes,
       // returning immediately when there is nothing to import.
-      if (user) {
+      if (attempted && user) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
@@ -1136,11 +1135,19 @@ export function ConnectionsPage() {
           } catch {
             // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
           }
-          toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
+          importFailure = `Couldn't add transactions to your ledger. ${humanizeError(importErr)}`;
         }
       }
 
-      await refreshList();
+      const rows = await refreshList();
+      if (rows) {
+        toast[syncToast.level](syncToast.message);
+        if (importFailure) toast.error(importFailure);
+      } else {
+        toast.warning(
+          "We couldn't confirm the connection status after syncing because the list couldn't refresh.",
+        );
+      }
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
       console.error("[Connections] sync failed", err);
@@ -1152,7 +1159,14 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      toast.error(`Sync failed. ${humanizeError(err)}`);
+      const rows = await refreshList();
+      if (rows) {
+        toast.error(`Sync failed. ${humanizeError(err)}`);
+      } else {
+        toast.error(
+          "We couldn't confirm the connection status after the sync problem because the list couldn't refresh.",
+        );
+      }
     } finally {
       setSyncingId(null);
     }
@@ -1214,8 +1228,6 @@ export function ConnectionsPage() {
             ? humanizeError(errs[0]?.error ?? "", "Something went wrong.")
             : undefined,
       });
-      for (const t of report.toasts) toast[t.level](t.message);
-
       if (errs.length > 0) {
         console.warn(
           "[Connections] sync-all partial failures",
@@ -1257,7 +1269,14 @@ export function ConnectionsPage() {
         }
       }
 
-      await refreshList();
+      const rows = await refreshList();
+      if (rows) {
+        for (const t of report.toasts) toast[t.level](t.message);
+      } else {
+        toast.warning(
+          "We couldn't confirm the connection status after syncing because the list couldn't refresh.",
+        );
+      }
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
       console.error("[Connections] sync all failed", err);
@@ -1266,7 +1285,14 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      toast.error(`Sync failed. ${humanizeError(err)}`);
+      const rows = await refreshList();
+      if (rows) {
+        toast.error(`Sync failed. ${humanizeError(err)}`);
+      } else {
+        toast.error(
+          "We couldn't confirm the connection status after the sync problem because the list couldn't refresh.",
+        );
+      }
     } finally {
       setSyncingAll(false);
     }
@@ -1342,6 +1368,15 @@ export function ConnectionsPage() {
         }
       }
 
+      // BankSyncDialog renders the returned counts as its outcome. Do not let
+      // it do that until this page has performed a post-write read-back.
+      const readback = await refreshList();
+      if (!readback) {
+        throw new Error(
+          "We couldn't confirm the connection status because the connection list couldn't refresh.",
+        );
+      }
+
       return {
         imported: result.imported,
         total: result.total,
@@ -1358,6 +1393,7 @@ export function ConnectionsPage() {
       accountById,
       buildHouseholdSignatureFields,
       updateAccount,
+      refreshList,
     ],
   );
 
@@ -1663,6 +1699,16 @@ export function ConnectionsPage() {
         `[OW Connections] every sealed row for connection ${conn.id} failed to open (${decryptFailures} of ${forThisConn.length + stealthRows.length}). Consistent with a vault key rotation after these rows were sealed (DL-1506).`,
       );
     }
+    // The import and balance writes above are not self-confirming. Read the
+    // connection list after them before showing a ledger outcome; an unreadable
+    // list leaves the page unable to confirm the state it would otherwise name.
+    const readback = await refreshList();
+    if (!readback) {
+      toast.warning(
+        "We couldn't confirm the ledger update because the connection list couldn't refresh.",
+      );
+      return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
+    }
     if (outcome.level === "warning") {
       toast.warning(outcome.message);
     } else if (outcome.level === "info") {
@@ -1692,7 +1738,7 @@ export function ConnectionsPage() {
    * user's next action is the same either way, so say what happened and name
    * the retry.
    */
-  async function importAfterStealthScan(conn: ConnectionRow) {
+  async function importAfterStealthScan(conn: ConnectionRow, outcome: StealthSyncOutcome) {
     try {
       await refreshList();
       const importResult = await importSyncedTransactionsForConnection(conn);
@@ -1704,6 +1750,27 @@ export function ConnectionsPage() {
       if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
         handleEditMapping(conn);
       }
+      // Completion came from the widget, but the read above is the first
+      // point at which this page has read state after its writes. Do not turn
+      // a completion frame into customer-facing state before that boundary.
+      const rows = await refreshList();
+      if (!rows) {
+        toast.warning(
+          "We couldn't confirm the connection status after scanning because the list couldn't refresh.",
+        );
+        return;
+      }
+      toast.success("Scan completed. Connection status refreshed.");
+      if (outcome.addressWindowExhausted) {
+        toast.warning(
+          "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
+        );
+      }
+      if (outcome.cursorUpdateFailed) {
+        toast.warning(
+          "This scan completed but its position could not be saved, so the next sync may cover ground this one already scanned.",
+        );
+      }
     } catch (err) {
       console.error("[Connections] stealth ledger import failed", err);
       try {
@@ -1714,7 +1781,14 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
+      const rows = await refreshList();
+      if (rows) {
+        toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
+      } else {
+        toast.error(
+          "We couldn't confirm the connection status after the scan problem because the list couldn't refresh.",
+        );
+      }
     }
   }
 
@@ -1764,16 +1838,42 @@ export function ConnectionsPage() {
         // exists server-side: restore it and show an error.
         if (!deletedConnectionIdsRef.current.has(conn.id)) {
           console.error("[Connections] delete 404 on unrecognised id", err);
-          setConnections(snapshot);
-          toast.error("Couldn't disconnect. Give it a moment and try again.");
-          return;
+          const rows = await refreshList();
+          const readback = classifyDeleteReadback(rows, conn.id);
+          if (readback === "confirmed-gone") {
+            deletedConnectionIdsRef.current.add(conn.id);
+          } else if (readback === "silent-failure") {
+            toast.error("Couldn't disconnect. Give it a moment and try again.");
+            setTxRefreshKey((k) => k + 1);
+            return;
+          } else {
+            setConnections(snapshot);
+            toast.warning(
+              "We couldn't confirm whether the connection changed because the list couldn't refresh.",
+            );
+            setTxRefreshKey((k) => k + 1);
+            return;
+          }
         }
         // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
       } else {
         console.error("[Connections] delete failed", err);
-        setConnections(snapshot);
-        toast.error("Couldn't disconnect. Give it a moment and try again.");
-        return;
+        const rows = await refreshList();
+        const readback = classifyDeleteReadback(rows, conn.id);
+        if (readback === "confirmed-gone") {
+          deletedConnectionIdsRef.current.add(conn.id);
+        } else if (readback === "silent-failure") {
+          toast.error("Couldn't disconnect. Give it a moment and try again.");
+          setTxRefreshKey((k) => k + 1);
+          return;
+        } else {
+          setConnections(snapshot);
+          toast.warning(
+            "We couldn't confirm whether the connection changed because the list couldn't refresh.",
+          );
+          setTxRefreshKey((k) => k + 1);
+          return;
+        }
       }
     }
 
@@ -1802,13 +1902,15 @@ export function ConnectionsPage() {
     } catch (mapErr) {
       console.warn("[Connections] removeAllForConnection failed", mapErr);
     }
-    // Read-back confirmed the connection is gone. When the list could not be
-    // refreshed, say only what we know, exactly as the add path does.
-    toast.success(
-      readback === "confirmed-gone"
-        ? `${name} disconnected`
-        : `${name} disconnected. We couldn't refresh the list just now.`,
-    );
+    // A 2xx without a readable list is not a confirmed disconnect. Do not
+    // report the row as gone until the post-write read has actually shown it.
+    if (readback === "confirmed-gone") {
+      toast.success(`${name} disconnected`);
+    } else {
+      toast.warning(
+        `We couldn't confirm whether ${name} disconnected because the connection list couldn't refresh.`,
+      );
+    }
     setTxRefreshKey((k) => k + 1);
   }
 
