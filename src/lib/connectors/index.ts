@@ -8,10 +8,6 @@ import { orangeRailsConnector } from "./orange-rails";
 // in deploy.yml). It is set to "true" on BOTH the dev and prod branches. It is
 // empty only for a build off some other branch, or a local build that does not
 // set it.
-//
-// An earlier version of this comment said the flag was "empty on prod". That is
-// not what deploy.yml does, so do not read the filter below as a prod kill
-// switch: on prod the Orange Rails entry is shown.
 const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 
 // Registry is TOTAL and unconditional. Every connector that any stored account
