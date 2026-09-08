@@ -728,9 +728,14 @@ export function ConnectionsPage() {
   }
 
   async function handleDestinationDone(): Promise<boolean> {
+    // Capture before closing: DestState narrows to "closed" once the picker
+    // is dismissed, and that variant carries no connectionId to read back.
+    const connectionId = destPicker.kind === "open" ? destPicker.connectionId : null;
     setDestPicker({ kind: "closed" });
     const readback = await refreshList();
-    return readback?.connections.some((row) => row.id === destPicker.connectionId) === true;
+    return (
+      connectionId !== null && readback?.connections.some((row) => row.id === connectionId) === true
+    );
   }
 
   function handleEditMapping(conn: ConnectionRow) {
@@ -885,6 +890,20 @@ export function ConnectionsPage() {
             completedScanReportedHeight: outcome.lastBlockScanned !== undefined,
             cursorUpdateFailed: outcome.cursorUpdateFailed === true,
           });
+          // Two honesty warnings the widget reports and this app would
+          // otherwise swallow when the popup closes. Neither makes the scan a
+          // failure, and neither may be hidden behind the read-back-confirmed
+          // toast that importAfterStealthScan emits below.
+          if (outcome.addressWindowExhausted) {
+            toast.warning(
+              "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
+            );
+          }
+          if (outcome.cursorUpdateFailed) {
+            toast.warning(
+              "This scan finished but its position could not be saved, so the next sync may cover ground this one already scanned.",
+            );
+          }
           // DL-1116. This callback used to end at refreshList(), which is why
           // a scan could report "Sealed and stored 14 transactions" and the
           // user still saw none of them: the row was marked "Synced just now"
