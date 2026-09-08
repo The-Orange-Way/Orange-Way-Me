@@ -95,3 +95,90 @@ jobs:
           fi
 
           echo "negative control PASS: the guard exited ${rc} and refused the proof run."
+
+  drift-guard-negative-control-null-files:
+    name: Drift guard refuses a files:null compare response
+    runs-on: ubuntu-latest
+    # OW-T0260 fixed a real bug: GitHub's compare API can return files: null
+    # while the key is still present, so the old check (has("files")) read
+    # true and let a null files field fall through as if the compare were
+    # clean. The fix checks `.files | type == "array"` instead. Neither the
+    # scheduled/push run nor the drift-guard-negative-control job above ever
+    # produces a files:null response from the real API, so nothing in CI
+    # actually exercises that fixed line -- a refactor could silently bring
+    # back the presence-check bug and every check here would stay green.
+    #
+    # This job fakes `gh` to force exactly that response shape, then runs the
+    # real, unmodified scripts/prod-drift-guard.sh against it. Faking gh
+    # rather than the guard script keeps this a test of the real code path.
+    env:
+      BASE_BRANCH: dev
+      HEAD_BRANCH: prod
+      BEHIND_COMMIT_LIMIT: '50'
+      BEHIND_HOURS_LIMIT: '72'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: The guard must refuse a compare response with files:null
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          # A fake `gh` ahead of the real one on PATH. It answers only the two
+          # calls prod-drift-guard.sh makes before it can reach the files
+          # check: resolving the two branch refs, then the dev...prod compare.
+          # The compare answers ahead_by:1 with files:null -- present but not
+          # an array -- which is the exact shape OW-T0260 fixed. Any other
+          # call is a hard failure so a change to the guard's call sequence
+          # cannot silently pass this control by accident.
+          FAKE_BIN="$RUNNER_TEMP/fake-gh-bin"
+          mkdir -p "$FAKE_BIN"
+          cat > "$FAKE_BIN/gh" <<'FAKEGH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "$1" = "api" ]; then
+            URL="$2"
+            case "$URL" in
+              */git/ref/heads/*)
+                echo "0000000000000000000000000000000000dead"
+                exit 0
+                ;;
+              */compare/dev...prod)
+                echo '{"ahead_by":1,"files":null,"commits":[{"sha":"0000000000000000000000000000000000dead","commit":{"message":"synthetic commit for OW-T0305 negative control"}}]}'
+                exit 0
+                ;;
+              *)
+                echo "fake gh: unhandled api url for the files:null control: ${URL}" >&2
+                exit 1
+                ;;
+            esac
+          fi
+          echo "fake gh: unhandled command for the files:null control: $*" >&2
+          exit 1
+          FAKEGH
+          chmod +x "$FAKE_BIN/gh"
+          export PATH="$FAKE_BIN:$PATH"
+          export GH_TOKEN="fake-token-not-used-by-fake-gh"
+
+          rc=0
+          bash scripts/prod-drift-guard.sh > proof-run.log 2>&1 || rc=$?
+          echo "--- guard output (exit ${rc}) ---"
+          cat proof-run.log
+          echo "--- end guard output ---"
+
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::negative control FAILED: the guard reported green against a files:null compare response. That is the exact bug OW-T0260 fixed." >&2
+            exit 1
+          fi
+
+          # Require the specific refusal, not just any non-zero exit, so this
+          # control still catches a regression even if the guard starts
+          # failing earlier for an unrelated reason.
+          if ! grep -q "files field was not an array" proof-run.log; then
+            echo "::error::negative control FAILED: the guard exited ${rc}, but not for the files:null reason, so this run does not prove that check still works. See the guard output above." >&2
+            exit 1
+          fi
+
+          echo "negative control PASS: the guard exited ${rc} and refused the files:null compare response for the right reason."
