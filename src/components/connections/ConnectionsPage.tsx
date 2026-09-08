@@ -61,7 +61,7 @@ import { TransactionList, type EncryptedTxRow } from "./TransactionList";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import type { Account } from "@/lib/connectors/types";
 import { importOrTransactions, type OrImportTransaction } from "@/lib/orImportBridge";
-import { openOrConnect, mintWidgetToken, type OrLinkSourceWallet } from "@/lib/or/widget";
+import { openOrConnect, mintWidgetSession, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
@@ -75,6 +75,7 @@ import {
   describeStealthFailure,
   type StealthSyncProgress,
   type StealthCursorKnowledge,
+  type StealthSyncHandle,
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
 import { planCatalogueAdd } from "@/lib/or/add-gate";
@@ -89,7 +90,6 @@ import {
   type StealthPageCursor,
   type StealthSealedRow,
 } from "@/lib/stealth/ledger";
-import type { StealthChannel } from "@/lib/stealth/channel";
 import { nextTransactionsPage, type TransactionRow } from "@/lib/or/transactions-page";
 import { AddBankDialog } from "./AddBankDialog";
 import { BankSyncDialog, type BankSyncProgress, type BankSyncOutcome } from "./BankSyncDialog";
@@ -299,7 +299,7 @@ export function ConnectionsPage() {
   // than state because nothing renders from it and it must be stoppable from
   // the widget's own callbacks. Stopped on unmount so its window message
   // listener can never outlive this page.
-  const channelRef = useRef<StealthChannel | null>(null);
+  const channelRef = useRef<StealthSyncHandle | null>(null);
   /**
    * DL-1171. What we have actually watched happen to each connection's scan
    * position, keyed by connection id.
@@ -835,14 +835,15 @@ export function ConnectionsPage() {
       // a vault that locked while this page sat open fails here rather than
       // part-way through a scan.
       const credKeyB64 = await exportOrCredsKey();
-      const widgetToken = await mintWidgetToken(user.id);
+      const { widgetToken, expiresAtMs } = await mintWidgetSession(user.id);
       runId = await runIdPromise;
 
-      const { channel } = await startStealthSync({
+      const channel = await startStealthSync({
         connectionId: conn.id,
         appUserId: user.id,
         credKeyB64,
         widgetToken,
+        tokenExpiresAtMs: expiresAtMs,
         /**
          * DL-1111. The widget posts roughly one of these per second for the
          * whole scan, and until now nobody passed this callback, so all of it
@@ -865,7 +866,7 @@ export function ConnectionsPage() {
           void finishStealthSyncRun(runId, {
             status: "success",
             rowsAttempted: outcome.txCount,
-            rowsWritten: outcome.txCount,
+            rowsWritten: outcome.savedCount,
           });
           // DL-1171. Record what this frame told us about the scan position
           // BEFORE anything else, because the next failure toast reads it and
@@ -877,15 +878,13 @@ export function ConnectionsPage() {
             cursorUpdateFailed: outcome.cursorUpdateFailed === true,
           });
           const found = outcome.txCount;
-          // Report the count when the widget gave one. When it did not, say
-          // that the scan finished and nothing more: inventing "up to date"
-          // from a missing number is how we got here.
+          // This callback is reachable only after the widget supplied both
+          // counts and they matched. A missing or different saved count takes
+          // the visible failure path instead of producing this toast.
           toast.success(
-            found === undefined
-              ? "Scan finished."
-              : found === 0
-                ? "Scan finished. No new transactions."
-                : `Scan finished. ${found} new ${found === 1 ? "transaction" : "transactions"}.`,
+            found === 0
+              ? "Scan finished. No new transactions."
+              : `Scan finished. ${found} new ${found === 1 ? "transaction" : "transactions"}.`,
           );
           // Two honesty warnings the widget reports and this app would
           // otherwise swallow when the popup closes. Neither makes the scan a
@@ -941,6 +940,8 @@ export function ConnectionsPage() {
           void finishStealthSyncRun(runId, {
             status: "error",
             errorCode: failure.code,
+            rowsAttempted: failure.scannedCount,
+            rowsWritten: failure.savedCount,
           });
           // The code is for us, not for the user: it is the difference between
           // a support conversation that starts with a cause and one that

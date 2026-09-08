@@ -43,7 +43,7 @@ export const OR_CONNECT_BASE = OR_CONNECT_URL_RAW || "https://connect.orangerail
 // platform row that this environment's OR_PLATFORM_API_KEY
 // authenticates as.
 //
-// Why they can drift: mintWidgetToken() below goes through
+// Why they can drift: the token mint below goes through
 // ow-or-proxy, which sends the API key, so OR records the pending
 // session under the platform the KEY maps to. The browser then claims
 // that session by sending this slug and no key, and OR filters the
@@ -88,6 +88,13 @@ export interface OrLinkSuccess {
   connection_id: string;
   subaccount_id: string;
   source_wallets: OrLinkSourceWallet[];
+}
+
+/** Short-lived authorization the hosted widget uses for one session. */
+export interface OrWidgetSession {
+  widgetToken: string;
+  /** Server-issued expiry, parsed once so long-running callers can fail closed. */
+  expiresAtMs: number;
 }
 
 /** Open the OR hosted connect widget; resolves on success, rejects on
@@ -166,10 +173,10 @@ export async function openOrConnect(args: {
   });
 }
 
-// Exported because the stealth sync flow mints its own token: it opens the
-// widget directly rather than through openOrConnect, and that token is the
-// widget's only means of authenticating to OR's edge functions.
-export async function mintWidgetToken(orgId: string): Promise<string> {
+async function requestWidgetToken(orgId: string): Promise<{
+  widgetToken: string;
+  expiresAtMs?: number;
+}> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -205,9 +212,34 @@ export async function mintWidgetToken(orgId: string): Promise<string> {
     const body = await res.text().catch(() => "");
     throw new Error(`or-link-mint-token failed (${res.status}): ${body}`);
   }
-  const json = (await res.json()) as { widget_token?: string; error?: string };
+  const json = (await res.json()) as {
+    widget_token?: string;
+    expires_at?: string;
+    error?: string;
+  };
   if (!json.widget_token) throw new Error(json.error ?? "Mint returned no widget_token");
-  return json.widget_token;
+  const expiresAtMs = Date.parse(json.expires_at ?? "");
+  return {
+    widgetToken: json.widget_token,
+    ...(Number.isFinite(expiresAtMs) ? { expiresAtMs } : {}),
+  };
+}
+
+/** Mint for short link flows, which already have their own 150 second guard. */
+export async function mintWidgetToken(orgId: string): Promise<string> {
+  return (await requestWidgetToken(orgId)).widgetToken;
+}
+
+/**
+ * Mint for wallet scans, which can exceed the token lifetime and therefore
+ * must know the server-issued expiry before they start.
+ */
+export async function mintWidgetSession(orgId: string): Promise<OrWidgetSession> {
+  const session = await requestWidgetToken(orgId);
+  if (session.expiresAtMs === undefined) {
+    throw new Error("Mint returned no valid expires_at");
+  }
+  return { widgetToken: session.widgetToken, expiresAtMs: session.expiresAtMs };
 }
 
 function buildConnectUrl(args: {

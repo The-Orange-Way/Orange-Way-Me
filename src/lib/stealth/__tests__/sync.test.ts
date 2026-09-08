@@ -17,6 +17,7 @@ import {
   shouldShowScanProgress,
   describeStealthFailure,
   STEALTH_WIDGET_PATH,
+  STEALTH_TOKEN_EXPIRY_SAFETY_MS,
   type StealthCursorKnowledge,
 } from "../sync";
 import { STEALTH_MESSAGE } from "../protocol";
@@ -27,6 +28,7 @@ const ARGS = {
   appUserId: "user-abc",
   credKeyB64: "a".repeat(44),
   widgetToken: "widget-tok",
+  tokenExpiresAtMs: Date.now() + 60 * 60 * 1000,
 };
 
 type LaunchFn = NonNullable<Parameters<typeof startStealthSync>[0]["launch"]>;
@@ -37,13 +39,14 @@ function makeLaunch() {
   const captured: { url?: string; init?: Record<string, unknown> } = {};
   let onMessage: ((m: StealthInboundMessage) => void) | undefined;
   const stop = vi.fn();
+  const close = vi.fn();
   const launch: LaunchFn = vi.fn(async (a: LaunchArgs) => {
     captured.url = a.url;
     captured.init = a.init;
     onMessage = a.onMessage;
-    return { channel: { stop } as unknown as StealthChannel };
+    return { channel: { stop } as unknown as StealthChannel, close };
   });
-  return { launch, captured, emit: (m: StealthInboundMessage) => onMessage?.(m), stop };
+  return { launch, captured, emit: (m: StealthInboundMessage) => onMessage?.(m), stop, close };
 }
 
 describe("buildStealthWidgetUrl", () => {
@@ -98,6 +101,19 @@ describe("buildStealthSyncInit", () => {
 });
 
 describe("startStealthSync", () => {
+  it("refuses to launch when the minted session is already inside the expiry margin", async () => {
+    const { launch } = makeLaunch();
+
+    await expect(
+      startStealthSync({
+        ...ARGS,
+        launch,
+        tokenExpiresAtMs: Date.now() + STEALTH_TOKEN_EXPIRY_SAFETY_MS,
+      }),
+    ).rejects.toThrow(/timed out before it could start/i);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
   it("opens the stealth route and sends the sync INIT", async () => {
     const { launch, captured } = makeLaunch();
     await startStealthSync({ ...ARGS, launch, baseUrl: "https://c.example/connect" });
@@ -220,26 +236,65 @@ describe("startStealthSync", () => {
     emit({
       type: STEALTH_MESSAGE.SYNC_COMPLETE,
       tx_count: 3,
+      sealed_transactions: 3,
       last_block_scanned: 840000,
     });
     expect(onComplete).toHaveBeenCalledWith({
       txCount: 3,
+      savedCount: 3,
       lastBlockScanned: 840000,
       cursorUpdateFailed: false,
       addressWindowExhausted: false,
     });
   });
 
-  it("reads tx_count, the name the widget actually sends", async () => {
+  it("reads both count names the widget actually sends", async () => {
     const { launch, emit } = makeLaunch();
     const onComplete = vi.fn();
     await startStealthSync({ ...ARGS, launch, onComplete });
 
-    // The widget's SYNC_COMPLETE has no `stored_transactions`. Reading that
-    // name returned undefined on every real sync and looked exactly like a
-    // widget that declined to say. Pin the real name.
-    emit({ type: STEALTH_MESSAGE.SYNC_COMPLETE, stored_transactions: 7, tx_count: 2 });
-    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ txCount: 2 }));
+    // stored_transactions is not on the real frame. The two observed fields
+    // answer different questions: tx_count is what the scan found and
+    // sealed_transactions is what it says it saved.
+    emit({
+      type: STEALTH_MESSAGE.SYNC_COMPLETE,
+      stored_transactions: 7,
+      tx_count: 2,
+      sealed_transactions: 2,
+    });
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ txCount: 2, savedCount: 2 }));
+  });
+
+  it("counts a list-shaped sealed_transactions field without reading its rows", async () => {
+    const { launch, emit } = makeLaunch();
+    const onComplete = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onComplete });
+
+    emit({
+      type: STEALTH_MESSAGE.SYNC_COMPLETE,
+      tx_count: 2,
+      sealed_transactions: [{}, {}],
+    });
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ txCount: 2, savedCount: 2 }));
+  });
+
+  it("turns a saved-versus-scanned mismatch into a retryable failure", async () => {
+    const { launch, emit, stop } = makeLaunch();
+    const onComplete = vi.fn();
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onComplete, onError });
+
+    emit({ type: STEALTH_MESSAGE.SYNC_COMPLETE, tx_count: 12, sealed_transactions: 5 });
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith({
+      message: expect.stringMatching(/could not confirm.*every transaction was saved/i),
+      code: "INCOMPLETE_SYNC",
+      retryable: true,
+      scannedCount: 12,
+      savedCount: 5,
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it("passes through the widget's two honesty warnings", async () => {
@@ -253,6 +308,7 @@ describe("startStealthSync", () => {
     emit({
       type: STEALTH_MESSAGE.SYNC_COMPLETE,
       tx_count: 1,
+      sealed_transactions: 1,
       cursor_update_failed: true,
       address_window_exhausted: true,
     });
@@ -264,7 +320,8 @@ describe("startStealthSync", () => {
   it("treats a malformed counter as absent rather than coercing it", async () => {
     const { launch, emit } = makeLaunch();
     const onComplete = vi.fn();
-    await startStealthSync({ ...ARGS, launch, onComplete });
+    const onError = vi.fn();
+    await startStealthSync({ ...ARGS, launch, onComplete, onError });
 
     // The widget is another origin. "12" or NaN must read as "did not say",
     // never as a number, so the UI cannot report a count that was never sent.
@@ -273,12 +330,66 @@ describe("startStealthSync", () => {
       tx_count: "12",
       last_block_scanned: Number.NaN,
     });
-    expect(onComplete).toHaveBeenCalledWith({
-      txCount: undefined,
-      lastBlockScanned: undefined,
-      cursorUpdateFailed: false,
-      addressWindowExhausted: false,
-    });
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "INCOMPLETE_SYNC", retryable: true }),
+    );
+  });
+
+  it("fails visibly before the token window closes and ignores a later success frame", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const { launch, emit, stop, close } = makeLaunch();
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      await startStealthSync({
+        ...ARGS,
+        launch,
+        onComplete,
+        onError,
+        tokenExpiresAtMs: now + STEALTH_TOKEN_EXPIRY_SAFETY_MS + 1000,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "TOKEN_EXPIRY_GUARD", retryable: true }),
+      );
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+
+      emit({ type: STEALTH_MESSAGE.SYNC_COMPLETE, tx_count: 1, sealed_transactions: 1 });
+      expect(onComplete).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("checks the absolute expiry when a busy event loop delays the timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      const { launch, emit } = makeLaunch();
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      await startStealthSync({
+        ...ARGS,
+        launch,
+        onComplete,
+        onError,
+        tokenExpiresAtMs: now + STEALTH_TOKEN_EXPIRY_SAFETY_MS + 1000,
+      });
+
+      // Move the clock without running queued timers, then deliver success as
+      // if the main thread handled the frame before its delayed timer task.
+      vi.setSystemTime(now + STEALTH_TOKEN_EXPIRY_SAFETY_MS + 1001);
+      emit({ type: STEALTH_MESSAGE.SYNC_COMPLETE, tx_count: 1, sealed_transactions: 1 });
+
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: "TOKEN_EXPIRY_GUARD" }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**

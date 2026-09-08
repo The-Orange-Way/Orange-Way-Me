@@ -283,6 +283,14 @@ describe("ConnectionsPage handleStealthSync wiring", () => {
         "door into the private scan with no kill switch on it (OWM-T0495).",
     ).toBe(true);
   });
+
+  it("passes the token expiry guard and records scanned and saved counts independently", () => {
+    const code = handlerCode("handleStealthSync");
+    expect(code).toContain("tokenExpiresAtMs: expiresAtMs");
+    expect(code).toMatch(/rowsAttempted:\s*outcome\.txCount/);
+    expect(code).toMatch(/rowsWritten:\s*outcome\.savedCount/);
+    expect(code).not.toMatch(/rowsWritten:\s*outcome\.txCount/);
+  });
 });
 
 /**
