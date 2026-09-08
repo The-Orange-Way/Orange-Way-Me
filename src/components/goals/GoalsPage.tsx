@@ -5,7 +5,7 @@
 import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus, Target } from "lucide-react";
-import { useGoals, type GoalDraft } from "@/hooks/useGoals";
+import { useGoals, type Goal, type GoalDraft } from "@/hooks/useGoals";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useTransactions } from "@/hooks/useTransactions";
 import { summariseGoals } from "@/lib/goals-math";
@@ -27,6 +27,29 @@ function trailing12MonthRange() {
   };
 }
 
+function sharedGoalNames(goals: Goal[]): Map<string, string[]> {
+  const goalsByAccount = new Map<string, Goal[]>();
+  for (const goal of goals) {
+    for (const accountId of new Set(goal.linked_account_ids)) {
+      const linkedGoals = goalsByAccount.get(accountId) ?? [];
+      linkedGoals.push(goal);
+      goalsByAccount.set(accountId, linkedGoals);
+    }
+  }
+
+  return new Map(
+    goals.map((goal) => {
+      const others = new Map<string, Goal>();
+      for (const accountId of new Set(goal.linked_account_ids)) {
+        for (const linkedGoal of goalsByAccount.get(accountId) ?? []) {
+          if (linkedGoal.id !== goal.id) others.set(linkedGoal.id, linkedGoal);
+        }
+      }
+      return [goal.id, [...others.values()].map((other) => other.name)];
+    }),
+  );
+}
+
 export function GoalsPage() {
   const range = useMemo(trailing12MonthRange, []);
   const { goals, loading, createGoal } = useGoals();
@@ -42,6 +65,7 @@ export function GoalsPage() {
   const completed = goals.filter((g) => g.is_completed);
 
   const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
+  const sharedWith = useMemo(() => sharedGoalNames(goals), [goals]);
 
   async function handleCreate(draft: GoalDraft) {
     await createGoal(draft);
@@ -77,10 +101,11 @@ export function GoalsPage() {
             </p>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">
-              You've made {fmtMoney(totals.saved)} of {fmtMoney(totals.target)} progress across{" "}
+              You've saved {fmtMoney(totals.saved)} across{" "}
               {totals.counted < totals.active
                 ? `${totals.counted} of ${totals.active} active goals`
                 : `${totals.counted} active goal${totals.counted === 1 ? "" : "s"}`}{" "}
+              against {fmtMoney(totals.target)} of targets{" "}
               <span className="font-medium text-foreground tabular-nums">
                 ({Math.round(totals.pct * 100)}%)
               </span>
@@ -124,7 +149,13 @@ export function GoalsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {saveUp.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard
+                    key={g.id}
+                    goal={g}
+                    accounts={accounts}
+                    txns={txns}
+                    sharedWith={sharedWith.get(g.id)}
+                  />
                 ))}
               </div>
             </section>
@@ -138,7 +169,13 @@ export function GoalsPage() {
               <PayoffPlanWidget goals={payDown} accounts={accounts} />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {payDown.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard
+                    key={g.id}
+                    goal={g}
+                    accounts={accounts}
+                    txns={txns}
+                    sharedWith={sharedWith.get(g.id)}
+                  />
                 ))}
               </div>
             </section>
@@ -151,7 +188,13 @@ export function GoalsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 opacity-70">
                 {completed.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard
+                    key={g.id}
+                    goal={g}
+                    accounts={accounts}
+                    txns={txns}
+                    sharedWith={sharedWith.get(g.id)}
+                  />
                 ))}
               </div>
             </section>
