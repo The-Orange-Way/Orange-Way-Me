@@ -432,10 +432,15 @@ export async function widenAccountOpeningDates(
  * Build the encrypted row payload the transactions table accepts.
  * Mirrors `useTransactions.buildEncryptedRow` minus the
  * fields that don't apply to imported data:
- *   - `enc_merchant`, `enc_category_id`, `enc_memo`, `enc_tags`:
- *     null on first import. The user can edit afterward; the
- *     unique index makes future re-syncs ignore the row,
- *     so user edits are never overwritten.
+ *   - `enc_merchant`, `enc_category_id`, `enc_tags`: null on first
+ *     import. The user can edit afterward; the unique index makes
+ *     future re-syncs ignore the row, so user edits are never
+ *     overwritten.
+ *   - `enc_memo`: null on first import UNLESS the OR payload carried
+ *     an address or txid (OWM-T0211, see buildReconciliationMemo),
+ *     in which case those are written here once. Same re-sync
+ *     protection applies: a later user edit to memo is never
+ *     overwritten.
  *   - `hmac_*`: null. Computed when the user later sets a
  *     merchant/category via the standard transaction edit flow.
  *   - `is_split_parent`, `split_parent_id`, `transfer_group_id`,
