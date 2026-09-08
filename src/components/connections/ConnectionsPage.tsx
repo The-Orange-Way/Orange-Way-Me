@@ -74,13 +74,11 @@ import {
   shouldShowScanProgress,
   describeStealthFailure,
   type StealthSyncProgress,
-  type StealthSyncOutcome,
   type StealthCursorKnowledge,
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
 import { planCatalogueAdd } from "@/lib/or/add-gate";
 import { describeStealthAvailability, readStealthUnavailable } from "@/lib/stealth/availability";
-import { describeImportOutcome } from "@/lib/stealth/import-outcome";
 import {
   orRowsForConnection,
   sealedRecordToCipherB64,
@@ -161,6 +159,12 @@ interface ConnectionRow {
   decrypted_label?: string | null;
   decrypted_last_error?: string | null;
   decrypted_wallets?: DecryptedWalletForBadges[];
+}
+
+interface ConnectionListReadback {
+  connections: ConnectionRow[];
+  /** A degraded response omits private rows, so their absence is not proof. */
+  stealthUnavailable: boolean;
 }
 
 async function callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -479,7 +483,8 @@ export function ConnectionsPage() {
       };
       // Read before decoding, so a decrypt problem further down cannot leave
       // the page silently pretending the arm is healthy.
-      setStealthUnavailable(readStealthUnavailable(res));
+      const stealthUnavailable = readStealthUnavailable(res);
+      setStealthUnavailable(stealthUnavailable);
       const decoded = await Promise.all(
         (res.connections ?? []).map(async (c): Promise<ConnectionRow> => {
           let decrypted_label: string | null = null;
@@ -548,7 +553,7 @@ export function ConnectionsPage() {
       // Returned so a caller that just created something can check whether it
       // is actually in the list, rather than assuming the refresh it awaited
       // means the row arrived. Every existing caller ignores this.
-      return decoded;
+      return { connections: decoded, stealthUnavailable } satisfies ConnectionListReadback;
     } catch (err) {
       // An id OR does not recognise is recoverable, so fix it rather than
       // report it. Dropping subaccountId re-runs the provision effect, which
@@ -666,8 +671,8 @@ export function ConnectionsPage() {
       // apart in practice: the toast fired while the refresh was still in
       // flight, so a connection that never arrived looked exactly like one
       // that had. Refresh first, then say only what the refreshed list shows.
-      const rows = await refreshList();
-      if (!rows) {
+      const readback = await refreshList();
+      if (!readback) {
         // The widget's completion message is not a read-back. Without the
         // list, this page cannot say whether the connection is present.
         toast.warning(
@@ -677,14 +682,14 @@ export function ConnectionsPage() {
         const report = describeLinkResult({
           result,
           knownConnectionIdsBefore,
-          connectionIdsAfter: rows.map((c) => c.id),
+          connectionIdsAfter: readback.connections.map((c) => c.id),
         });
         if (report.outcome === "unknown") {
           // Created upstream, absent from the list. This is a real defect
           // rather than a slow refresh, and it used to be invisible.
           console.error("[Connections] added connection missing from list", {
             connection_id: result.connection_id,
-            returned: rows.length,
+            returned: readback.connections.length,
           });
         }
         const say =
@@ -722,9 +727,10 @@ export function ConnectionsPage() {
     }
   }
 
-  function handleDestinationDone() {
+  async function handleDestinationDone(): Promise<boolean> {
     setDestPicker({ kind: "closed" });
-    void refreshList();
+    const readback = await refreshList();
+    return readback?.connections.some((row) => row.id === destPicker.connectionId) === true;
   }
 
   function handleEditMapping(conn: ConnectionRow) {
@@ -885,7 +891,7 @@ export function ConnectionsPage() {
           // and nothing ever read the transactions back into the local
           // ledger. Both or-sync paths already call the import bridge here;
           // this one never did.
-          void importAfterStealthScan(conn, outcome);
+          void importAfterStealthScan(conn);
         },
         /**
          * DL-1117. The widget sends `{code, message, retryable}` and this app
@@ -931,8 +937,11 @@ export function ConnectionsPage() {
           // A widget error is an outcome report, not a read-back. Fetch the
           // row before describing the failed scan, including its retry path.
           void (async () => {
-            const rows = await refreshList();
-            if (!rows) {
+            const readback = await refreshList();
+            const connectionReadBack =
+              readback?.connections.some((row) => row.id === conn.id) === true &&
+              !readback.stealthUnavailable;
+            if (!connectionReadBack) {
               toast.error(
                 "We couldn't confirm the connection status after the scan problem because the list couldn't refresh.",
               );
@@ -962,8 +971,8 @@ export function ConnectionsPage() {
       setStealthScanId(null);
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Connections] stealth sync could not start", err);
-      const rows = await refreshList();
-      if (rows) {
+      const readback = await refreshList();
+      if (readback) {
         toast.error(humanizeError(new Error(msg)));
       } else {
         toast.error(
@@ -1063,46 +1072,14 @@ export function ConnectionsPage() {
       // resumable scan). Absence is the whole signal: do not infer stealth on
       // the client, and do not claim "up to date" for work that never ran.
       const attempted = res.connections.find((c) => c.connection_id === conn.id);
-      let syncToast: { level: "success" | "info" | "warning" | "error"; message: string };
-      let importFailure: string | null = null;
-      if (!attempted) {
-        syncToast = { level: "info", message: "Nothing was synced for this connection yet." };
-      } else {
-        const errs = res.connections.filter((c) => c.error);
-        if (errs.length > 0) {
-          const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
-          const suffix =
-            errs.length > 1
-              ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
-              : "";
-          if (res.synced > 0) {
-            syncToast = {
-              level: "warning",
-              message: `Synced ${res.synced}; ${errs.length} connection${errs.length === 1 ? "" : "s"} had trouble: ${firstMsg}${suffix}`,
-            };
-          } else {
-            syncToast = {
-              level: "error",
-              message: `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
-            };
-          }
-          console.warn(
-            "[Connections] partial sync failures",
-            errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
-          );
-        } else if (res.synced === 0) {
-          syncToast = { level: "info", message: "Up to date. No new transactions." };
-        } else {
-          syncToast = {
-            level: "success",
-            message: `Synced ${res.synced} transaction${res.synced === 1 ? "" : "s"} from ${
-              conn.decrypted_label ||
-              institutionByConn.get(conn.id) ||
-              friendlyProviderName(conn.provider_type)
-            }`,
-          };
-        }
+      const requestReportedProblem = !attempted || res.connections.some((entry) => entry.error);
+      if (requestReportedProblem) {
+        console.warn("[Connections] sync response requires attention", {
+          connectionId: conn.id,
+          attempted: Boolean(attempted),
+        });
       }
+      let ledgerReadBack = !attempted;
 
       // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
       // itself just fetched, so a connection whose rows were fetched on an
@@ -1122,6 +1099,7 @@ export function ConnectionsPage() {
       if (attempted && user) {
         try {
           const importResult = await importSyncedTransactionsForConnection(conn);
+          ledgerReadBack = importResult.ledgerReadBack;
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
             handleEditMapping(conn);
           }
@@ -1135,18 +1113,20 @@ export function ConnectionsPage() {
           } catch {
             // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
           }
-          importFailure = `Couldn't add transactions to your ledger. ${humanizeError(importErr)}`;
+          ledgerReadBack = false;
         }
       }
 
-      const rows = await refreshList();
-      if (rows) {
-        toast[syncToast.level](syncToast.message);
-        if (importFailure) toast.error(importFailure);
+      const readback = await refreshList();
+      const connectionReadBack = readback?.connections.some((row) => row.id === conn.id) === true;
+      if (connectionReadBack && ledgerReadBack) {
+        if (requestReportedProblem) {
+          toast.warning("Connection status refreshed. The sync request reported a problem.");
+        } else {
+          toast.success("Connection and ledger refreshed.");
+        }
       } else {
-        toast.warning(
-          "We couldn't confirm the connection status after syncing because the list couldn't refresh.",
-        );
+        toast.warning("We couldn't confirm the connection and ledger state after syncing.");
       }
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
@@ -1159,9 +1139,9 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      const rows = await refreshList();
-      if (rows) {
-        toast.error(`Sync failed. ${humanizeError(err)}`);
+      const readback = await refreshList();
+      if (readback?.connections.some((row) => row.id === conn.id)) {
+        toast.error(`The sync request reported a problem. ${humanizeError(err)}`);
       } else {
         toast.error(
           "We couldn't confirm the connection status after the sync problem because the list couldn't refresh.",
@@ -1241,6 +1221,7 @@ export function ConnectionsPage() {
         console.warn("[Connections] sync-all: requested but never attempted", report.missingIds);
       }
 
+      let ledgerReadBack = true;
       if (user) {
         // OWM-T0717, same reasoning as the single-connection path above: a
         // connection that synced cleanly with 0 new rows may still be holding
@@ -1251,7 +1232,8 @@ export function ConnectionsPage() {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
           try {
-            await importSyncedTransactionsForConnection(conn);
+            const importResult = await importSyncedTransactionsForConnection(conn);
+            ledgerReadBack = ledgerReadBack && importResult.ledgerReadBack;
           } catch (importErr) {
             console.error(
               `[Connections] OR import bridge failed for ${succ.connection_id}`,
@@ -1265,17 +1247,23 @@ export function ConnectionsPage() {
             } catch {
               // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
             }
+            ledgerReadBack = false;
           }
         }
       }
 
-      const rows = await refreshList();
-      if (rows) {
-        for (const t of report.toasts) toast[t.level](t.message);
+      const readback = await refreshList();
+      const connectionsReadBack =
+        readback !== undefined &&
+        plan.syncableIds.every((id) => readback.connections.some((row) => row.id === id));
+      if (connectionsReadBack && ledgerReadBack) {
+        if (errs.length > 0 || report.missingIds.length > 0) {
+          toast.warning("Connection statuses refreshed. The sync request reported a problem.");
+        } else {
+          toast.success("Connection statuses and ledger refreshed.");
+        }
       } else {
-        toast.warning(
-          "We couldn't confirm the connection status after syncing because the list couldn't refresh.",
-        );
+        toast.warning("We couldn't confirm the connection and ledger state after syncing.");
       }
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
@@ -1285,9 +1273,9 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      const rows = await refreshList();
-      if (rows) {
-        toast.error(`Sync failed. ${humanizeError(err)}`);
+      const readback = await refreshList();
+      if (readback) {
+        toast.error(`The sync request reported a problem. ${humanizeError(err)}`);
       } else {
         toast.error(
           "We couldn't confirm the connection status after the sync problem because the list couldn't refresh.",
@@ -1313,7 +1301,7 @@ export function ConnectionsPage() {
       onProgress: (p: BankSyncProgress) => void,
     ): Promise<BankSyncOutcome> => {
       if (!user || !subaccountId || !orConnectionId) {
-        return { imported: 0, total: 0, unmapped: 0, errored: 0 };
+        throw new Error("We couldn't confirm the bank sync because the connection is unavailable.");
       }
       const keypair = await getOpkKeypair();
       // Ensure the OPK is registered before pulling (covers the race where
@@ -1368,21 +1356,18 @@ export function ConnectionsPage() {
         }
       }
 
-      // BankSyncDialog renders the returned counts as its outcome. Do not let
-      // it do that until this page has performed a post-write read-back.
-      const readback = await refreshList();
-      if (!readback) {
+      // The dialog may name its result only after reading the local ledger,
+      // not after an unrelated connection-list fetch or the import response.
+      const ledgerReadBack =
+        result.errored === 0 &&
+        (await readBackLedgerTransactionIds(result.expectedLedgerExternalIds));
+      if (!ledgerReadBack) {
         throw new Error(
-          "We couldn't confirm the connection status because the connection list couldn't refresh.",
+          "We couldn't confirm the bank transactions because the ledger couldn't refresh.",
         );
       }
 
-      return {
-        imported: result.imported,
-        total: result.total,
-        unmapped: result.unmapped,
-        errored: result.errored,
-      };
+      return { ledgerReadBack };
     },
     [
       user,
@@ -1393,7 +1378,7 @@ export function ConnectionsPage() {
       accountById,
       buildHouseholdSignatureFields,
       updateAccount,
-      refreshList,
+      readBackLedgerTransactionIds,
     ],
   );
 
@@ -1492,10 +1477,40 @@ export function ConnectionsPage() {
     return out;
   }
 
+  /**
+   * Read the local ledger after an import. A successful write response is not
+   * enough: this query is the boundary before this page may say the ledger was
+   * refreshed. The ids are the same stable external ids used by the importer.
+   */
+  async function readBackLedgerTransactionIds(externalIds: string[]): Promise<boolean> {
+    if (!user) return false;
+    const ids = Array.from(new Set(externalIds.filter(Boolean)));
+    if (ids.length === 0) return true;
+    // Generated Supabase types lag the external_* migration in this checkout.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from("transactions")
+      .select("external_id")
+      .eq("user_id", user.id)
+      .eq("external_source", "orangerails")
+      .in("external_id", ids);
+    if (error) {
+      console.warn("[Connections] ledger read-back failed", error);
+      return false;
+    }
+    const returnedIds = new Set(
+      (data ?? [])
+        .map((row: { external_id?: string | null }) => row.external_id)
+        .filter((id: string | null | undefined): id is string => Boolean(id)),
+    );
+    return ids.every((id) => returnedIds.has(id));
+  }
+
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
-  ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
-    if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
+  ): Promise<{ unmapped: number; unmappedWalletIds: string[]; ledgerReadBack: boolean }> {
+    if (!user || !subaccountId)
+      return { unmapped: 0, unmappedWalletIds: [], ledgerReadBack: false };
     const allRows = await fetchAllTransactionRows(subaccountId);
     const listRes = { transactions: allRows };
     // Shape lives in one place. Orange Rails has not finalised how stealth
@@ -1512,7 +1527,7 @@ export function ConnectionsPage() {
     const stealthRows = conn.is_stealth ? await fetchStealthRows(conn.id) : [];
 
     if (forThisConn.length === 0 && stealthRows.length === 0) {
-      return { unmapped: 0, unmappedWalletIds: [] };
+      return { unmapped: 0, unmappedWalletIds: [], ledgerReadBack: true };
     }
 
     const decoded: OrImportTransaction[] = [];
@@ -1666,25 +1681,6 @@ export function ConnectionsPage() {
       }
     }
 
-    // What to say lives in describeImportOutcome, which is pure and tested.
-    // The case it exists for (DL-1506): when a vault password is changed or a
-    // vault is recovered, every key derived from the rotated salt changes and
-    // no previously sealed row opens again, for anyone. That used to reach the
-    // customer as "Wallet ledger: 14 undecryptable", which does not say what
-    // happened, whether it is permanent, or whether their money is affected.
-    const outcome = describeImportOutcome({
-      attempted: forThisConn.length + stealthRows.length,
-      opened: decoded.length,
-      imported: result.imported,
-      unmapped: result.unmapped,
-      untagged: result.untagged,
-      errored: result.errored,
-      unreadable: decryptFailures,
-      unitMismatch: result.unitMismatch,
-    });
-    if (outcome.silent) {
-      return { unmapped: 0, unmappedWalletIds: [] };
-    }
     if (result.unmapped > 0 && result.unmappedWalletIds.length > 0) {
       console.warn(
         `[OW Connections] ${result.unmapped} transaction(s) skipped because these source wallets have no destination mapping:`,
@@ -1694,29 +1690,29 @@ export function ConnectionsPage() {
     }
     // Worth a log line of its own: this is the one outcome the customer can do
     // nothing about, and the one we would want to find afterwards.
-    if (outcome.allUnreadable) {
+    if (
+      forThisConn.length + stealthRows.length > 0 &&
+      decoded.length === 0 &&
+      decryptFailures === forThisConn.length + stealthRows.length
+    ) {
       console.warn(
         `[OW Connections] every sealed row for connection ${conn.id} failed to open (${decryptFailures} of ${forThisConn.length + stealthRows.length}). Consistent with a vault key rotation after these rows were sealed (DL-1506).`,
       );
     }
-    // The import and balance writes above are not self-confirming. Read the
-    // connection list after them before showing a ledger outcome; an unreadable
-    // list leaves the page unable to confirm the state it would otherwise name.
-    const readback = await refreshList();
-    if (!readback) {
-      toast.warning(
-        "We couldn't confirm the ledger update because the connection list couldn't refresh.",
-      );
-      return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
-    }
-    if (outcome.level === "warning") {
-      toast.warning(outcome.message);
-    } else if (outcome.level === "info") {
-      toast.info(outcome.message);
-    } else {
-      toast.success(outcome.message);
-    }
-    return { unmapped: result.unmapped, unmappedWalletIds: result.unmappedWalletIds };
+    const expectedLedgerIds = decoded
+      .filter(
+        (tx) =>
+          tx.source_wallet_id !== null &&
+          getActiveAccountIds(conn.id, tx.source_wallet_id).length > 0,
+      )
+      .map((tx) => tx.id);
+    const ledgerReadBack =
+      result.errored === 0 && (await readBackLedgerTransactionIds(expectedLedgerIds));
+    return {
+      unmapped: result.unmapped,
+      unmappedWalletIds: result.unmappedWalletIds,
+      ledgerReadBack,
+    };
   }
 
   /**
@@ -1738,7 +1734,7 @@ export function ConnectionsPage() {
    * user's next action is the same either way, so say what happened and name
    * the retry.
    */
-  async function importAfterStealthScan(conn: ConnectionRow, outcome: StealthSyncOutcome) {
+  async function importAfterStealthScan(conn: ConnectionRow) {
     try {
       await refreshList();
       const importResult = await importSyncedTransactionsForConnection(conn);
@@ -1753,24 +1749,15 @@ export function ConnectionsPage() {
       // Completion came from the widget, but the read above is the first
       // point at which this page has read state after its writes. Do not turn
       // a completion frame into customer-facing state before that boundary.
-      const rows = await refreshList();
-      if (!rows) {
-        toast.warning(
-          "We couldn't confirm the connection status after scanning because the list couldn't refresh.",
-        );
+      const readback = await refreshList();
+      const connectionReadBack =
+        readback?.connections.some((row) => row.id === conn.id) === true &&
+        !readback.stealthUnavailable;
+      if (!connectionReadBack || !importResult.ledgerReadBack) {
+        toast.warning("We couldn't confirm the connection and ledger state after scanning.");
         return;
       }
-      toast.success("Scan completed. Connection status refreshed.");
-      if (outcome.addressWindowExhausted) {
-        toast.warning(
-          "History may be incomplete. Matches reached the edge of the address window; reconnect this wallet with a wider window to recover older transactions.",
-        );
-      }
-      if (outcome.cursorUpdateFailed) {
-        toast.warning(
-          "This scan completed but its position could not be saved, so the next sync may cover ground this one already scanned.",
-        );
-      }
+      toast.success("Connection and ledger refreshed.");
     } catch (err) {
       console.error("[Connections] stealth ledger import failed", err);
       try {
@@ -1781,9 +1768,9 @@ export function ConnectionsPage() {
       } catch {
         // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
       }
-      const rows = await refreshList();
-      if (rows) {
-        toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
+      const readback = await refreshList();
+      if (readback?.connections.some((row) => row.id === conn.id) && !readback.stealthUnavailable) {
+        toast.error(`The ledger refresh reported a problem. ${humanizeError(err)}`);
       } else {
         toast.error(
           "We couldn't confirm the connection status after the scan problem because the list couldn't refresh.",
@@ -1838,8 +1825,12 @@ export function ConnectionsPage() {
         // exists server-side: restore it and show an error.
         if (!deletedConnectionIdsRef.current.has(conn.id)) {
           console.error("[Connections] delete 404 on unrecognised id", err);
-          const rows = await refreshList();
-          const readback = classifyDeleteReadback(rows, conn.id);
+          const listReadback = await refreshList();
+          const readback = classifyDeleteReadback(
+            listReadback?.connections,
+            conn.id,
+            !conn.is_stealth || listReadback?.stealthUnavailable === false,
+          );
           if (readback === "confirmed-gone") {
             deletedConnectionIdsRef.current.add(conn.id);
           } else if (readback === "silent-failure") {
@@ -1858,8 +1849,12 @@ export function ConnectionsPage() {
         // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
       } else {
         console.error("[Connections] delete failed", err);
-        const rows = await refreshList();
-        const readback = classifyDeleteReadback(rows, conn.id);
+        const listReadback = await refreshList();
+        const readback = classifyDeleteReadback(
+          listReadback?.connections,
+          conn.id,
+          !conn.is_stealth || listReadback?.stealthUnavailable === false,
+        );
         if (readback === "confirmed-gone") {
           deletedConnectionIdsRef.current.add(conn.id);
         } else if (readback === "silent-failure") {
@@ -1883,8 +1878,12 @@ export function ConnectionsPage() {
     // absent before saying "disconnected". If it is still present, that is a
     // silent failure: refreshList has already restored the row, so say so
     // rather than claim success.
-    const rows = await refreshList();
-    const readback = classifyDeleteReadback(rows, conn.id);
+    const listReadback = await refreshList();
+    const readback = classifyDeleteReadback(
+      listReadback?.connections,
+      conn.id,
+      !conn.is_stealth || listReadback?.stealthUnavailable === false,
+    );
     if (readback === "silent-failure") {
       console.error("[Connections] delete returned ok but the connection is still listed", {
         connection_id: conn.id,
@@ -2177,9 +2176,12 @@ export function ConnectionsPage() {
           orConnectionId={editMapping.connectionId}
           wallets={editMapping.wallets}
           onCancel={() => setEditMapping({ kind: "closed" })}
-          onDone={() => {
+          onDone={async () => {
             setEditMapping({ kind: "closed" });
-            void refreshList();
+            const readback = await refreshList();
+            return (
+              readback?.connections.some((row) => row.id === editMapping.connectionId) === true
+            );
           }}
         />
       )}
@@ -2212,12 +2214,16 @@ export function ConnectionsPage() {
       <AddBankDialog
         open={showAddBank}
         onOpenChange={setShowAddBank}
-        onConnected={(orConnectionId) => {
-          void refreshList();
+        onConnected={async (orConnectionId) => {
+          const readback = await refreshList();
           // Auto-launch the first sync so the user immediately sees their
           // transactions populate. The OPK is already registered (mount
           // effect), so or-quiltt-sync will have sealed the rows.
-          if (orConnectionId) setBankSyncConnId(orConnectionId);
+          const confirmed =
+            orConnectionId !== null &&
+            readback?.connections.some((row) => row.id === orConnectionId) === true;
+          if (confirmed) setBankSyncConnId(orConnectionId);
+          return confirmed;
         }}
       />
 

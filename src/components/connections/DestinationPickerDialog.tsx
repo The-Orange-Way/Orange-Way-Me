@@ -62,7 +62,8 @@ interface DestinationPickerDialogProps {
   /** Source wallets the user just selected in WalletPickerStep (or wants to remap). */
   wallets: DestinationPickerWallet[];
   onCancel: () => void;
-  onDone: () => void;
+  /** Refreshes the parent connection list after this dialog reads mappings back. */
+  onDone: () => Promise<boolean>;
 }
 
 export function DestinationPickerDialog({
@@ -108,10 +109,33 @@ export function DestinationPickerDialog({
         const desired = accId ? [accId] : [];
         await setMappingForWallet(orConnectionId, w.external_wallet_id, desired);
       }
-      toast.success("Destinations saved");
-      onDone();
+      // setMappingForWallet writes, but its internal refresh can only confirm
+      // that each individual write could be listed. Read the final mapping set
+      // and compare every requested wallet before reporting an outcome.
+      const readback = await refreshMap();
+      const mappingsMatch =
+        readback !== null &&
+        wallets.every((w) => {
+          const desired = selection[w.external_wallet_id] ? [selection[w.external_wallet_id]] : [];
+          const actual = readback
+            .filter(
+              (row) =>
+                row.is_active &&
+                row.or_connection_id === orConnectionId &&
+                row.or_external_wallet_id === w.external_wallet_id,
+            )
+            .map((row) => row.account_id)
+            .sort();
+          return (
+            actual.length === desired.length && actual.every((id, i) => id === desired.sort()[i])
+          );
+        });
+      if (!mappingsMatch || !(await onDone())) {
+        throw new Error("We couldn't confirm the saved destinations.");
+      }
+      toast.success("Destination mappings refreshed.");
     } catch (err) {
-      toastError(err, "We couldn't save your destinations. Try again.");
+      toastError(err, "We couldn't confirm your destinations. Try again.");
       setSubmitting(false);
     }
   }

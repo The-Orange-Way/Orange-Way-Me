@@ -48,7 +48,6 @@ import {
 } from "@/lib/or/bank-connect";
 import { Building2, Loader2, AlertCircle, Check, Lock, EyeOff, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { toast } from "sonner";
 import { humanizeError } from "@/lib/friendly-error";
 
 /** Compact icon-led trust point for the connect intro. */
@@ -116,6 +115,8 @@ interface PendingAccount {
   displayName: string;
   openingBalance: string;
   saved: boolean;
+  /** Database id retained solely for the mandatory post-write read-back. */
+  accountId?: string;
 }
 
 export interface AddBankDialogProps {
@@ -123,11 +124,11 @@ export interface AddBankDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Called after accounts are saved. Receives the OR connection id so the
    *  caller can kick off the first OPK sync for it. */
-  onConnected: (orConnectionId: string | null) => void;
+  onConnected: (orConnectionId: string | null) => Promise<boolean>;
 }
 
 export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialogProps) {
-  const { exportOrCredsKey, exportOrTxnsKey, encryptText, isUnlocked } = useVault();
+  const { exportOrCredsKey, exportOrTxnsKey, encryptText, decryptText, isUnlocked } = useVault();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAccount[]>([]);
@@ -288,27 +289,42 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
           throw new Error(mapErr.message);
         }
 
-        updated[i] = { ...p, saved: true };
+        updated[i] = { ...p, saved: true, accountId: account.id };
         setPending([...updated]);
       }
 
-      setStep("done");
-      toast.success(`Connected ${updated.length} ${updated.length === 1 ? "account" : "accounts"}`);
       const orConnId = linkCtx.orConnectionId ?? linkCtx.quilttConnectionId;
-      // Cache the institution name (e.g. "Mercury") locally keyed by OR
-      // connection id so the Connections card can show the real bank name
-      // Bank name (e.g. "Mercury", "TD") is shown on the Connections card.
-      // We previously cached this in localStorage cleartext, which leaks
-      // exactly the identifier connections.encrypted_label is supposed to
-      // protect to anyone with read access to the browser profile (stolen
-      // laptop, hostile extension). Drop the cache; the Connections page
-      // derives the institution from connection_account_map → accounts on
-      // every mount, which works for every connection that has wallets
-      // discovered (i.e. all of them after a successful Save).
-      void orConnId;
+      // Neither insert is proof. Re-read the exact account ids and decrypt
+      // each corresponding mapping before the dialog names a completed setup.
+      const accountIds = updated.map((p) => p.accountId).filter((id): id is string => Boolean(id));
+      const { data: accountRows, error: accountReadError } = await supabase
+        .from("accounts")
+        .select("id")
+        .in("id", accountIds);
+      if (accountReadError || (accountRows?.length ?? 0) !== accountIds.length) {
+        throw new Error("We couldn't confirm the saved accounts.");
+      }
+      const { data: mapRows, error: mapReadError } = await supabase
+        .from("connection_account_map")
+        .select("or_external_wallet_id, encrypted_account_id, is_active")
+        .eq("or_connection_id", orConnId);
+      if (mapReadError || !mapRows) throw new Error("We couldn't confirm the saved destinations.");
+      const mappingReadBack = await Promise.all(
+        updated.map(async (p) => {
+          const row = mapRows.find(
+            (candidate) => candidate.is_active && candidate.or_external_wallet_id === p.source.id,
+          );
+          return Boolean(
+            row && p.accountId && (await decryptText(row.encrypted_account_id)) === p.accountId,
+          );
+        }),
+      );
+      if (mappingReadBack.some((matched) => !matched) || !(await onConnected(orConnId))) {
+        throw new Error("We couldn't confirm the saved connection and accounts.");
+      }
+      setStep("done");
       // Brief pause so the user sees the success state, then close.
       setTimeout(() => {
-        onConnected(orConnId);
         reset();
         onOpenChange(false);
       }, 1200);
@@ -317,7 +333,7 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
       setError(humanizeError(err));
       setStep("review");
     }
-  }, [linkCtx, isUnlocked, encryptText, pending, onConnected, reset, onOpenChange]);
+  }, [linkCtx, isUnlocked, encryptText, decryptText, pending, onConnected, reset, onOpenChange]);
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -489,16 +505,14 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
         {step === "saving" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">
-              Saved {pending.filter((p) => p.saved).length} of {pending.length} wallets…
-            </p>
+            <p className="text-sm text-muted-foreground">Setting up your accounts…</p>
           </div>
         )}
 
         {step === "done" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
-            <p className="text-sm">Connected!</p>
+            <p className="text-sm">Connection, accounts, and destinations refreshed.</p>
           </div>
         )}
       </DialogContent>

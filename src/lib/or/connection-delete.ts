@@ -65,7 +65,9 @@ export type DeleteReadback = "silent-failure" | "confirmed-gone" | "unconfirmed"
 export function classifyDeleteReadback(
   rows: { id: string }[] | null | undefined,
   connectionId: string,
+  /** False when the response is known to omit the connection's store. */
+  complete = true,
 ): DeleteReadback {
-  if (!rows) return "unconfirmed";
+  if (!rows || !complete) return "unconfirmed";
   return rows.some((c) => c.id === connectionId) ? "silent-failure" : "confirmed-gone";
 }
