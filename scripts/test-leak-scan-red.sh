@@ -216,6 +216,49 @@ check 'the other-case finding withholds its matched text too' \
   'absent' "$(has "$TERM_OTHER_CASE")"
 
 # ----------------------------------------------------------------------
+# Category 4: Tailnet address redaction
+# ----------------------------------------------------------------------
+#
+# Category 4 matches private tailnet addresses (Tailscale CGNAT / .ts.net)
+# without an internal list. The redact flag must still be wired so that a
+# matching address is withheld from the public CI log.
+#
+# Build the planted address in two halves so this file itself stays clean.
+_CAT4_A="100.6"
+_CAT4_B="4.0.1"
+PLANTED_TAILNET="${_CAT4_A}${_CAT4_B}"
+
+TAILNET="$(new_fixture tailnet "$PLANTED_TAILNET")"
+run_scan "$TAILNET" ci ""
+TAILNET_CI_OUT="$LAST_OUT"
+
+check 'category 4: a tailnet address makes the scan exit non-zero' \
+  '1' "$LAST_RC"
+
+check 'category 4: the tailnet category is reported failing' \
+  'present' "$(has 'Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix) (1 findings)')"
+
+check 'category 4: the finding names the file and line' \
+  'present' "$(has './src/planted.ts:1')"
+
+check 'category 4: the matched address is withheld from the CI log' \
+  'absent' "$(has "$PLANTED_TAILNET")"
+
+check 'category 4: the withholding is announced rather than left silent' \
+  'present' "$(has 'matched text withheld')"
+
+run_scan "$TAILNET" local ""
+
+check 'category 4: a local run prints the address so the finding stays fixable' \
+  'present' "$(has "$PLANTED_TAILNET")"
+
+CLEAN_TAILNET="$(new_fixture tailnet_clean)"
+run_scan "$CLEAN_TAILNET" ci ""
+
+check 'category 4: negative control: a clean tree exits 0' \
+  '0' "$LAST_RC"
+
+# ----------------------------------------------------------------------
 # Evidence, for whoever reads this job log
 # ----------------------------------------------------------------------
 #
@@ -226,6 +269,9 @@ check 'the other-case finding withholds its matched text too' \
 
 printf '\nobserved output, planted fixture, CI mode:\n'
 printf '%s\n' "$PLANTED_CI_OUT" | sed 's/^/    | /'
+
+printf '\nobserved output, tailnet fixture, CI mode:\n'
+printf '%s\n' "$TAILNET_CI_OUT" | sed 's/^/    | /'
 
 printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
 
