@@ -390,6 +390,22 @@ scan "Dead PR references" \
      ""
 
 # ----------------------------------------------------------------------
+# Category 4: Private network addresses (structural, needs no secret)
+# ----------------------------------------------------------------------
+#
+# Tailscale's shared address space (100.64.0.0/10, RFC 6598 CGNAT) and its
+# MagicDNS suffix (*.ts.net) only ever resolve on a private tailnet. The
+# pattern names a SHAPE, not a specific host, so publishing it here leaks
+# nothing; it only says "we watch for this shape". Unlike category 1 this
+# needs no internal list, so it also runs on fork and Dependabot pull
+# requests, where category 1 cannot (see leak-check.yml).
+
+scan "Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix)" \
+     "\\b100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.[0-9]{1,3}\\.[0-9]{1,3}\\b|\\.ts\\.net\\b" \
+     "" \
+     ""
+
+# ----------------------------------------------------------------------
 # Summary
 # ----------------------------------------------------------------------
 
