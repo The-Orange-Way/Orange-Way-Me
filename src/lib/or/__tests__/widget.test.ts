@@ -123,7 +123,10 @@ describe("openOrConnect", () => {
     fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        new Response(JSON.stringify({ widget_token: "widget-tok-abc" }), { status: 200 }),
+        new Response(
+          JSON.stringify({ widget_token: "widget-tok-abc", expires_at: "2099-01-01T00:00:00Z" }),
+          { status: 200 },
+        ),
       );
     vi.resetModules();
   });
@@ -228,6 +231,24 @@ describe("openOrConnect", () => {
     await expect(
       openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY }),
     ).rejects.toThrow(/or-link-mint-token failed.*429/);
+  });
+
+  it("returns the server-issued expiry for a long-running widget session", async () => {
+    const { mintWidgetSession } = await import("../widget");
+
+    await expect(mintWidgetSession(ORG_ID)).resolves.toEqual({
+      widgetToken: "widget-tok-abc",
+      expiresAtMs: Date.parse("2099-01-01T00:00:00Z"),
+    });
+  });
+
+  it("requires the server-issued expiry for a long-running widget session", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ widget_token: "widget-tok-abc" }), { status: 200 }),
+    );
+    const { mintWidgetSession } = await import("../widget");
+
+    await expect(mintWidgetSession(ORG_ID)).rejects.toThrow(/expires_at/);
   });
 
   it("ignores postMessage from foreign origins", async () => {
@@ -342,7 +363,10 @@ describe("or-link-success contract, through the consumer (DL-1114)", () => {
     fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        new Response(JSON.stringify({ widget_token: "widget-tok-abc" }), { status: 200 }),
+        new Response(
+          JSON.stringify({ widget_token: "widget-tok-abc", expires_at: "2099-01-01T00:00:00Z" }),
+          { status: 200 },
+        ),
       );
     vi.resetModules();
   });
