@@ -8,16 +8,16 @@ describe("extractMemoTxid (OWM-T0211)", () => {
   it("extracts the txid when both address and txid lines are present", () => {
     const memo =
       "Address: bc1q00xyzexampleaddress0000000w9k2\n" +
-      "Txid: aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899";
+      "Txid: aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
     expect(extractMemoTxid(memo)).toBe(
-      "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899",
+      "aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900",
     );
   });
 
   it("extracts the txid when it is the only line", () => {
-    const memo = "Txid: aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899";
+    const memo = "Txid: aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
     expect(extractMemoTxid(memo)).toBe(
-      "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899",
+      "aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900",
     );
   });
 
@@ -30,7 +30,7 @@ describe("extractMemoTxid (OWM-T0211)", () => {
     // orImportBridge's own test fixtures use short placeholder txids like
     // this one; those must never become a link to a random real transaction.
     expect(extractMemoTxid("Txid: deadbeef00")).toBeNull();
-    const tooLong = "Txid: aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
+    const tooLong = "Txid: aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899001234";
     expect(extractMemoTxid(tooLong)).toBeNull();
   });
 
@@ -40,7 +40,7 @@ describe("extractMemoTxid (OWM-T0211)", () => {
   });
 
   it("builds a mempool.space transaction URL", () => {
-    const txid = "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899";
+    const txid = "aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
     expect(blockExplorerUrl(txid)).toBe(`https://mempool.space/tx/${txid}`);
   });
 });
