@@ -222,7 +222,10 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
     // Immediate pin is fire-and-forget (`void`, not awaited): flush a turn
     // before asserting the write landed.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(wrapOrMekWithVaultMek).toHaveBeenCalledWith(new Uint8Array([9, 9, 9]), expect.anything());
+    expect(wrapOrMekWithVaultMek).toHaveBeenCalledWith(
+      new Uint8Array([9, 9, 9]),
+      expect.anything(),
+    );
     expect(updateMock).toHaveBeenCalledWith({
       enc_or_mek_ciphertext: "wrapped-ciphertext",
       or_subkey_salt: "current-salt",
