@@ -23,6 +23,17 @@
 --
 -- Retry safety: REVOKE is idempotent, so running this twice is a no-op.
 -- A reversal path is written at the foot of this file.
+--
+-- Rename note (OWM-T0733): this migration was originally filed as
+-- 20260812000000_revoke_invite_codes_table_grants.sql, sharing its version
+-- prefix with 20260812000000_reassert_redeem_invite_code_auth_admin_only.sql.
+-- Two files under one version can only ever record one row in
+-- supabase_migrations.schema_migrations, so on a from-scratch rebuild one of
+-- the two never runs. This file is renamed to the next free minute,
+-- 20260812010000, to give it its own ledger row. No SQL below this comment
+-- block changed. The two migrations touch unrelated objects (a function
+-- grant vs a table grant) with no ordering dependency between them, so the
+-- rename is filename bookkeeping only.
 
 REVOKE ALL ON TABLE public.invite_codes FROM anon, authenticated;
 
