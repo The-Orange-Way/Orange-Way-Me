@@ -55,6 +55,20 @@ export interface OrImportTransaction {
   currency?: string;
   description?: string | null;
   counterparty?: string | null;
+  /**
+   * Real on-chain transaction id (OWM-T0211). Present on Bitcoin rows sealed
+   * by the stealth widget's NormalizedTransaction (src/stealth/lib/sync.ts on
+   * the Orange Rails side); absent on non-Bitcoin sources. This is the value
+   * a customer can paste into a public block explorer -- distinct from `id`
+   * above, which is an OR-issued dedup key and, for stealth rows, is backed
+   * by a blinded index rather than the real chain txid.
+   */
+  txid?: string;
+  /**
+   * First matched output address for this transaction (OWM-T0211). Best
+   * effort: Bitcoin only, and may be absent even when `txid` is present.
+   */
+  address?: string;
   /** ISO 8601 timestamp. */
   timestamp: string;
   /**
@@ -262,16 +276,52 @@ function balanceUnitMatches(tx: OrImportTransaction, accountCurrency: string | u
 }
 
 /**
+ * Truncate a Bitcoin address for the one-line description: first 6 and last
+ * 4 characters, e.g. "bc1q00...w9k2". The full address travels separately
+ * into enc_memo (see buildReconciliationMemo) for the detail view.
+ */
+function truncateAddress(address: string): string {
+  const trimmed = address.trim();
+  if (trimmed.length <= 12) return trimmed;
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
+}
+
+/**
  * Build the description that lands in the encrypted column. We
  * prefer the OR description, fall back to counterparty (e.g.
- * "Lightning invoice from alice@example.com"), then to the raw
- * type label so the row is never blank.
+ * "Lightning invoice from alice@example.com"), then -- OWM-T0211,
+ * for a row that has neither but does carry a matched output address --
+ * direction plus a truncated address ("Received to bc1q00...w9k2" /
+ * "Sent from bc1q00...w9k2"), then to the raw type label, so the row
+ * is never blank.
  */
 function pickDescription(tx: OrImportTransaction): string {
   if (tx.description && tx.description.trim().length > 0) return tx.description;
   if (tx.counterparty && tx.counterparty.trim().length > 0) return tx.counterparty;
+  if (tx.address && tx.address.trim().length > 0) {
+    const verb = tx.direction === "out" ? "Sent from" : "Received to";
+    return `${verb} ${truncateAddress(tx.address)}`;
+  }
   if (tx.type) return capitalize(tx.type);
   return "Imported transaction";
+}
+
+/**
+ * OWM-T0211. The full address and real on-chain txid, encrypted into the
+ * existing enc_memo column so the detail view can show what the
+ * (necessarily truncated) description cannot -- no new column, no plaintext.
+ * enc_memo is otherwise always null on first import and is never touched on
+ * a re-sync (the unique index treats it as a duplicate), so this only ever
+ * fires once per row and a customer's own later memo edit is never at risk.
+ * Returns null when neither field is present, leaving enc_memo null exactly
+ * as before this change.
+ */
+function buildReconciliationMemo(tx: OrImportTransaction): string | null {
+  const lines: string[] = [];
+  if (tx.address && tx.address.trim().length > 0) lines.push(`Address: ${tx.address.trim()}`);
+  if (tx.txid && tx.txid.trim().length > 0) lines.push(`Txid: ${tx.txid.trim()}`);
+  if (lines.length === 0) return null;
+  return lines.join("\n");
 }
 
 function capitalize(s: string): string {
@@ -382,10 +432,15 @@ export async function widenAccountOpeningDates(
  * Build the encrypted row payload the transactions table accepts.
  * Mirrors `useTransactions.buildEncryptedRow` minus the
  * fields that don't apply to imported data:
- *   - `enc_merchant`, `enc_category_id`, `enc_memo`, `enc_tags`:
- *     null on first import. The user can edit afterward; the
- *     unique index makes future re-syncs ignore the row,
- *     so user edits are never overwritten.
+ *   - `enc_merchant`, `enc_category_id`, `enc_tags`: null on first
+ *     import. The user can edit afterward; the unique index makes
+ *     future re-syncs ignore the row, so user edits are never
+ *     overwritten.
+ *   - `enc_memo`: null on first import UNLESS the OR payload carried
+ *     an address or txid (OWM-T0211, see buildReconciliationMemo),
+ *     in which case those are written here once. Same re-sync
+ *     protection applies: a later user edit to memo is never
+ *     overwritten.
  *   - `hmac_*`: null. Computed when the user later sets a
  *     merchant/category via the standard transaction edit flow.
  *   - `is_split_parent`, `split_parent_id`, `transfer_group_id`,
@@ -406,6 +461,8 @@ async function buildRow(
   const enc_description = await deps.encryptText(description);
   const enc_currency = currency ? await deps.encryptText(currency) : null;
   const enc_merchant = tx.counterparty ? await deps.encryptText(tx.counterparty) : null;
+  const reconciliation = buildReconciliationMemo(tx);
+  const enc_memo = reconciliation ? await deps.encryptText(reconciliation) : null;
 
   return {
     user_id: deps.userId,
@@ -416,7 +473,7 @@ async function buildRow(
     enc_description,
     enc_merchant,
     enc_category_id: null,
-    enc_memo: null,
+    enc_memo,
     enc_tags: null,
     enc_owner: null,
     hmac_merchant: null,
