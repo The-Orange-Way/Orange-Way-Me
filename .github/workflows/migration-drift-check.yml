@@ -160,7 +160,22 @@ jobs:
           awk -F'|' '
             BEGIN { ri = 0 }
             {
-              for (i = 1; i <= NF; i++) { f = $i; gsub(/^[ \t]+|[ \t]+$/, "", f); c[i] = f }
+              # Trim, strip the backticks the CLI wraps every DATA cell in, then
+              # trim again. Without that strip, every value reaching the tests
+              # below is literally `20260418021640`, backticks included, so no
+              # value can ever match a 14-digit version and the entire ledger
+              # falls through to remote_bad.txt. A blank cell arrives as "` `",
+              # which is why the second trim is needed: without it the blank
+              # reads as an unreadable value instead of as the CLI saying this
+              # version is not applied. Header cells are not backticked, so this
+              # is a no-op on the header row and the column lookup is unchanged.
+              for (i = 1; i <= NF; i++) {
+                f = $i
+                gsub(/^[ \t]+|[ \t]+$/, "", f)
+                gsub(/^`|`$/, "", f)
+                gsub(/^[ \t]+|[ \t]+$/, "", f)
+                c[i] = f
+              }
               if (ri == 0) { for (i = 1; i <= NF; i++) if (toupper(c[i]) == "REMOTE") ri = i; next }
               if (ri > NF) next
               v = c[ri]

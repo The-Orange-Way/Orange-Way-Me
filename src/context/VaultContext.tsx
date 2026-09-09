@@ -60,6 +60,7 @@ import {
   type OrKeyMaterialRow,
 } from "@/lib/or/or-key-material";
 import { computeOrPinColumns } from "@/lib/or/or-pin-columns";
+import { recoveryOrMarking, saltRotatedWhileUnpinned } from "@/lib/or/or-recovery-marking";
 import {
   ensureUserKeypair,
   rewrapUserKeypair,
@@ -1093,14 +1094,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // absent. planOrKeyMaterial refuses that shape unconditionally already
     // (the anyPresent check runs before this flag is read), so this makes
     // the assertion honest rather than changing behaviour for that case.
-    const saltRotatedWhileUnpinned = Boolean(row.or_subkey_salt) && !row.enc_or_mek_ciphertext;
     const orMaterial = await resolveOrKeyMaterial({
       userId: user.id,
       password,
       mek,
       row,
       kdfSalt: row.kdf_salt,
-      saltMatchesExistingRows: !saltRotatedWhileUnpinned,
+      saltMatchesExistingRows: !saltRotatedWhileUnpinned(row),
     });
 
     mekRef.current = mek;
@@ -1382,8 +1382,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // turns that into a half-established row, which planOrKeyMaterial
     // refuses permanently rather than a state that reads as "safe to derive
     // and pin" on the very next unlock.
-    const hadNoOrMaterialBeforeRecovery =
-      !data.enc_or_mek_ciphertext && !data.or_subkey_salt && data.or_key_epoch == null;
+    const orMarking = recoveryOrMarking(data, data.kdf_salt);
 
     const mek = await importMekFromRaw(mekBytes);
     const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
@@ -1450,9 +1449,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       recovery_ciphertext: freshRecovery,
       enc_hmac_key: encHmacKey,
       vault_key_version: CURRENT_VAULT_KEY_VERSION,
-      // See hadNoOrMaterialBeforeRecovery above. Marks the row so the next
-      // unlock refuses instead of silently re-pinning under this salt.
-      ...(hadNoOrMaterialBeforeRecovery ? { or_subkey_salt: data.kdf_salt } : {}),
+      // See orMarking above. Marks the row so the next unlock refuses
+      // instead of silently re-pinning under this salt.
+      ...(orMarking ?? {}),
     };
     // Only include enc_private_key in the payload when we had one to
     // re-wrap. Leaving the key out of the UPDATE preserves the existing

@@ -152,7 +152,7 @@ const COPY = {
       { label: "Terms", to: "/terms" as const },
     ],
   },
-  footerLegalLine: "Orange Way. Built on a Bitcoin standard.",
+  footerLegalLine: "The Orange Way Inc. Built on a Bitcoin standard.",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

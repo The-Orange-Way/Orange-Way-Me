@@ -164,6 +164,21 @@ export function humanizeError(
   if (lower.includes("statement timeout") || lower.includes("canceling statement")) {
     return "We hit a snag on the server. Give it a moment and try again.";
   }
+  // Private wallet (stealth) kill switch refusal from ow-or-proxy. The server
+  // returns a stable machine code, STEALTH_SYNC_DISABLED_ERROR in
+  // supabase/functions/_shared/stealth-flag.ts ("stealth_sync_disabled"), so we
+  // match on that code and not on the HTTP status or the raw JSON body. Without
+  // this, the generic "owm-or/or- failed" handler below strips only the
+  // function-name prefix and shows the customer the raw JSON blob instead of
+  // the human sentence the server already sent. The literal string is
+  // duplicated here rather than imported because this file is bundled by Vite
+  // and stealth-flag.ts is Deno edge-function code; keep the two in sync by
+  // hand if the code ever changes.
+  if (lower.includes("stealth_sync_disabled")) {
+    const m = raw.match(/"message"\s*:\s*"([^"]*)"/);
+    if (m && m[1]) return m[1];
+    return "Private wallet sync is temporarily unavailable. Please try again later.";
+  }
   // OR / Orange Way edge-function failures bubble up as "owm-or-X failed: …" or
   // "or-link-mint-token failed (500): …". Strip the function name so the
   // user sees the underlying problem ("Not signed in.") instead of an
