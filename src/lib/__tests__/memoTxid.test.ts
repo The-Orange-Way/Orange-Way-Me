@@ -30,8 +30,7 @@ describe("extractMemoTxid (OWM-T0211)", () => {
     // orImportBridge's own test fixtures use short placeholder txids like
     // this one; those must never become a link to a random real transaction.
     expect(extractMemoTxid("Txid: deadbeef00")).toBeNull();
-    const tooLong =
-      "Txid: aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
+    const tooLong = "Txid: aaaabbbbccccddddeeeeffff0000111122223333444455556666777788889900";
     expect(extractMemoTxid(tooLong)).toBeNull();
   });
 
