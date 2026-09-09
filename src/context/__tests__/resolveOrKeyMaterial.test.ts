@@ -65,6 +65,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       row: EMPTY_ROW,
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     // (2) no key material at all comes back on the refuse path.
@@ -110,6 +111,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       row: EMPTY_ROW,
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     expect(result.ok).toBe(false);
@@ -142,6 +144,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       },
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     expect(result.ok).toBe(true);
