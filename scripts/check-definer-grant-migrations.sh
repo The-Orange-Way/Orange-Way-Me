@@ -94,7 +94,7 @@
 #
 # CRON CALLING ROLE PROTECTION (OWM-T0635 step 7, added 2026-09-10)
 # pg_cron calls a scheduled job AS THE ROLE NAMED IN cron.job.username, not as
-# whoever authored the migration. Measured live on both OWM dev and prod
+# whoever authored the migration. Measured live on this app's dev and prod databases
 # 2026-09-10: cron.job.username is 'postgres' for every job, including the two
 # household sweeps. So once a function is wired into cron.job, EXECUTE for
 # postgres on that function is load-bearing: a migration that revokes it
