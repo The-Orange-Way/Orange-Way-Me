@@ -199,6 +199,46 @@ check 'negative control: and the skip is stated, not implied by a green tick' \
   'present' "$(has 'Reserved-term scan skipped')"
 
 # ----------------------------------------------------------------------
+# Ticket-id exemption is id-level, not line-level (OWM-T0406)
+# ----------------------------------------------------------------------
+#
+# The exemption for a delivery-board ticket id (category 2, the structural
+# checks) strips the id out of a copy of the matched text and re-tests
+# that copy, rather than dropping any line that merely contains an id.
+# Neither fixture here configures a reserved-term list, so these prove
+# the id-level scope on its own, independent of category 1's coverage.
+
+TICKET_ONLY_DIR="$WORK/ticket-only"
+mkdir -p "$TICKET_ONLY_DIR/scripts" "$TICKET_ONLY_DIR/src"
+cp "$SCAN" "$TICKET_ONLY_DIR/scripts/pre-publish-scan.sh"
+cp "$CANON" "$TICKET_ONLY_DIR/scripts/canon-terms.sh"
+printf 'export const label = "ordinary";\n' > "$TICKET_ONLY_DIR/src/clean.ts"
+printf '// follow-up from OWM-T0406\nexport const label = "ordinary";\n' \
+  > "$TICKET_ONLY_DIR/src/ticket-only.ts"
+run_scan "$TICKET_ONLY_DIR" ci ""
+
+check 'a file whose only match is a ticket id: scan exits 0' \
+  '0' "$LAST_RC"
+check 'a file whose only match is a ticket id: tree reported clean' \
+  'present' "$(has 'Tree is clean')"
+
+TICKET_AND_LEAK_DIR="$WORK/ticket-and-leak"
+mkdir -p "$TICKET_AND_LEAK_DIR/scripts" "$TICKET_AND_LEAK_DIR/src"
+cp "$SCAN" "$TICKET_AND_LEAK_DIR/scripts/pre-publish-scan.sh"
+cp "$CANON" "$TICKET_AND_LEAK_DIR/scripts/canon-terms.sh"
+printf 'export const label = "ordinary";\n' > "$TICKET_AND_LEAK_DIR/src/clean.ts"
+printf '// OWM-T0406: fixes an OWM bug\nexport const label = "ordinary";\n' \
+  > "$TICKET_AND_LEAK_DIR/src/mixed.ts"
+run_scan "$TICKET_AND_LEAK_DIR" ci ""
+
+check 'ticket id plus a separate OWM match: scan exits non-zero' \
+  '1' "$LAST_RC"
+check 'ticket id plus a separate OWM match: category 2 reports the finding' \
+  'present' "$(has 'Internal codename: MB / OWM as acronym')"
+check 'ticket id plus a separate OWM match: the file and line are named' \
+  'present' "$(has './src/mixed.ts:1')"
+
+# ----------------------------------------------------------------------
 # Case folding
 # ----------------------------------------------------------------------
 #
