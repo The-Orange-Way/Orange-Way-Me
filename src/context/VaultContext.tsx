@@ -452,10 +452,8 @@ async function pinOrKeyMaterial(params: {
     attempts: pinAttempts,
   });
   try {
-    captureException(
-      new Error(`Orange Rails key-material pin exhausted retries`),
-      { extra: { errorClass: pinErrorClass, attempts: pinAttempts } },
-    );
+    const pinError = new Error("Orange Rails key-material pin exhausted retries");
+    captureException(pinError, { extra: { errorClass: pinErrorClass, attempts: pinAttempts } });
   } catch {
     // Sentry not initialised (VITE_SENTRY_DSN unset, test environment) --
     // swallow. console.error above is the fallback signal.
