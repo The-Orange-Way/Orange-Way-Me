@@ -84,6 +84,7 @@ import {
 import { householdHasSigningKey, mintSigningKeyForHousehold } from "@/lib/household-osk";
 import { buildHouseholdSignatureFields as buildSigFields } from "@/lib/row-signing";
 import { featureFlags } from "@/lib/feature-flags";
+import { captureException } from "@/lib/observability/sentry";
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -440,9 +441,19 @@ async function pinOrKeyMaterial(params: {
     }
   }
 
-  console.error(
-    "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
-    lastPinError,
+  // Report through the observability wrapper so exhausted retries appear in
+  // the GlitchTip project (OWM-T0233 acceptance item 4). Carry ONLY the error
+  // class name and attempt count -- never key material, salt, ciphertext,
+  // address, txid, xpub or derivation path (ZKA invariant).
+  const pinErrorClass = lastPinError instanceof Error ? lastPinError.constructor.name : "unknown";
+  const pinAttempts = PIN_WRITE_BACKOFF_MS.length;
+  console.error("[vault] could not pin Orange Rails key material after retries", {
+    errorClass: pinErrorClass,
+    attempts: pinAttempts,
+  });
+  captureException(
+    new Error(`Orange Rails key-material pin exhausted retries`),
+    { extra: { errorClass: pinErrorClass, attempts: pinAttempts } },
   );
 }
 
