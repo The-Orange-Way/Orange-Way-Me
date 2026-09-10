@@ -59,14 +59,18 @@
 # Diffs <base-ref>...<head-ref> for files under supabase/migrations, and scans
 # every line added by the PR (not the whole file, so an untouched grant in a
 # migration that already existed is not re-flagged by an unrelated edit to the
-# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC.
+# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, or a
+# REVOKE ... FROM naming postgres on a function pg_cron calls (see CRON
+# CALLING ROLE PROTECTION below).
 #
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
 #           the changed lines grant EXECUTE to anon or PUBLIC outside the
-#           allowlist
+#           allowlist, and none revoke EXECUTE from postgres on a protected
+#           cron-called function
 #   exit 1  VIOLATION                 a changed migration line grants EXECUTE
-#           to anon or PUBLIC on a function not on the allowlist
+#           to anon or PUBLIC on a function not on the allowlist, or revokes
+#           EXECUTE from postgres on a protected cron-called function
 #
 # The allowlist below MUST be kept identical to the one in
 # check-definer-grants.sh. It is duplicated rather than sourced because this
@@ -87,6 +91,38 @@
 # is allowed.
 # PUBLIC is deliberately NOT allowlisted for either of them: PUBLIC is broader
 # than anon, and a migration that grants PUBLIC on either is a violation.
+#
+# CRON CALLING ROLE PROTECTION (OWM-T0635 step 7, added 2026-09-10)
+# pg_cron calls a scheduled job AS THE ROLE NAMED IN cron.job.username, not as
+# whoever authored the migration. Measured live on both OWM dev and prod
+# 2026-09-10: cron.job.username is 'postgres' for every job, including the two
+# household sweeps. So once a function is wired into cron.job, EXECUTE for
+# postgres on that function is load-bearing: a migration that revokes it
+# breaks the schedule on every tick, and the only record of that failure is a
+# row in cron.job_run_details, which nothing here alerts on. That is the same
+# silent-success shape OWM-T0635 itself was filed to close, one layer down.
+#
+# PROTECTED_CRON_FUNCTIONS below names the two functions this applies to
+# today. It is a signature list like the grant allowlist, but it works the
+# opposite direction: matching it REFUSES the statement, it does not exempt
+# it. Add to it only when a function is genuinely wired into cron.job as
+# postgres and losing EXECUTE would silently break that schedule; anything
+# else belongs on the grant allowlist above, not here.
+#
+# A REVOKE naming a role OTHER than postgres (anon, PUBLIC, authenticated) is
+# left alone: none of those roles are cron.job.username, so removing their
+# EXECUTE, if they ever had any, does not touch what pg_cron can call. Only a
+# REVOKE that names postgres by role name is evaluated further.
+#
+# WHAT THIS CANNOT CATCH, ON TOP OF THE FOUR ITEMS ABOVE
+# 5. DROP FUNCTION on a protected cron-called function is not scanned for.
+#    This script's remit is EXECUTE grants; a DROP is a different failure
+#    mode (the pg_cron job would fail with "function does not exist" rather
+#    than a permission error) and is not covered here.
+# 6. ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM postgres is not treated as
+#    a violation here, deliberately: default privilege changes apply only to
+#    objects created AFTER the statement runs, so it cannot retroactively
+#    remove EXECUTE that postgres already holds on an existing function.
 
 set -uo pipefail
 
@@ -99,6 +135,11 @@ BASE_REF="$1"
 HEAD_REF="$2"
 
 ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon'
+
+# Signatures only, one per line, no argument list beyond the empty parens both
+# currently declare. Both are called by pg_cron as role postgres: see CRON
+# CALLING ROLE PROTECTION above.
+PROTECTED_CRON_FUNCTIONS=$'expire_time_boxed_household_roles()\npurge_expired_old_household_key_wraps()'
 
 if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   echo "::error::CANNOT CHECK: base ref '${BASE_REF}' is not resolvable in this checkout. Was fetch-depth set to 0?" >&2
@@ -117,6 +158,7 @@ fi
 
 VIOLATIONS=()
 ALLOWED_HITS=0
+CRON_REVOKE_HITS=0
 
 # Words that begin a TYPE rather than a parameter name. Used to decide whether
 # the first token of an argument is a name to drop or part of the type itself,
@@ -147,6 +189,17 @@ strip_param_names() {
   printf '%s(%s)' "$fname" "$out"
 }
 
+# Is $1 a signature (already reduced to lowercase, no schema prefix, no
+# quoting) that PROTECTED_CRON_FUNCTIONS names? Compares as written and with
+# parameter names stripped, same reasoning as the allowlist comparison below:
+# a migration can legally spell a signature either way.
+is_protected_cron_function() {
+  local sig="$1" stripped
+  stripped=$(strip_param_names "$sig")
+  printf '%s\n' "$PROTECTED_CRON_FUNCTIONS" | grep -Fxq -- "$sig" \
+    || printf '%s\n' "$PROTECTED_CRON_FUNCTIONS" | grep -Fxq -- "$stripped"
+}
+
 while IFS= read -r FILE; do
   [ -n "$FILE" ] || continue
   # Only lines this PR ADDS, so an untouched GRANT already sitting in a file
@@ -163,6 +216,54 @@ while IFS= read -r FILE; do
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
     LOWER=$(printf '%s' "$STMT" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
+
+    # --- CRON CALLING ROLE PROTECTION, checked first and independently -----
+    # A REVOKE statement never also matches the GRANT entry filter below, so
+    # this always runs to completion and `continue`s before the GRANT logic,
+    # rather than falling through into it.
+    if printf '%s' "$LOWER" | grep -Eq 'revoke[[:space:]]+(execute|all)[[:space:]]' \
+      && printf '%s' "$LOWER" | grep -Eq '[[:space:]]from[[:space:]]'; then
+
+      REVOKEES=$(printf '%s' "$LOWER" \
+        | sed -E 's/.*[[:space:]]from[[:space:]]+//; s/[[:space:]]+cascade[[:space:]]*.*//; s/[[:space:]]+restrict[[:space:]]*.*//')
+      TARGETS_POSTGRES=0
+      IFS=',' read -ra REVOKEE_LIST <<< "$REVOKEES"
+      for RAW in ${REVOKEE_LIST[@]+"${REVOKEE_LIST[@]}"}; do
+        R=$(printf '%s' "$RAW" | tr -d '[:space:]' | tr -d '"')
+        [ "$R" = "postgres" ] && TARGETS_POSTGRES=1
+      done
+
+      if [ "$TARGETS_POSTGRES" -eq 1 ]; then
+        if printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+all[[:space:]]+(functions|procedures|routines)[[:space:]]+in[[:space:]]+schema'; then
+          # Schema-wide: cannot name a signature, and by definition covers
+          # both protected functions if they live in the named schema.
+          ROW="REVOKE ON ALL FUNCTIONS IN SCHEMA"$'\t'"postgres (cron calling role)"
+          VIOLATIONS+=("${FILE}"$'\t'"${ROW}")
+          CRON_REVOKE_HITS=$((CRON_REVOKE_HITS + 1))
+          echo "REFUSED (cron): ${FILE}: schema-wide REVOKE strips EXECUTE from postgres, which pg_cron runs jobs as"
+        elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(function|procedure|routine)[[:space:]]'; then
+          R_TARGETS=$(printf '%s' "$LOWER" \
+            | sed -E 's/.*[[:space:]]on[[:space:]]+(function|procedure|routine)[[:space:]]+//' \
+            | grep -Eo '[a-z0-9_.\"]+\([^)]*\)' || true)
+          while IFS= read -r RAWSIG; do
+            [ -n "$RAWSIG" ] || continue
+            SIG=$(printf '%s' "$RAWSIG" | sed -E 's/^public\.//; s/"//g' | tr -s ' ')
+            if is_protected_cron_function "$SIG"; then
+              ROW="${SIG}"$'\t'"postgres (cron calling role)"
+              VIOLATIONS+=("${FILE}"$'\t'"${ROW}")
+              CRON_REVOKE_HITS=$((CRON_REVOKE_HITS + 1))
+              echo "REFUSED (cron): ${FILE}: REVOKE EXECUTE FROM postgres on ${SIG}, which pg_cron calls as job.username=postgres"
+            fi
+          done <<< "$R_TARGETS"
+        fi
+        # A REVOKE naming postgres on an object type this scan does not
+        # classify (a blanket with no signature, an ALTER DEFAULT PRIVILEGES
+        # form) is intentionally left unflagged; see items 5 and 6 in the
+        # header.
+      fi
+      continue
+    fi
+
     # ENTRY FILTER. ALL and ALL PRIVILEGES confer EXECUTE on a function
     # exactly as EXECUTE does, so both spellings come in here. What keeps a
     # table grant written with ALL out of the results is the object-type
@@ -193,7 +294,7 @@ while IFS= read -r FILE; do
     elif printf '%s' "$LOWER" | grep -Eq 'on[[:space:]]+(function|procedure|routine)[[:space:]]'; then
       TARGETS=$(printf '%s' "$LOWER" \
         | sed -E 's/.*[[:space:]]on[[:space:]]+(function|procedure|routine)[[:space:]]+//' \
-        | grep -Eo '[a-z0-9_."]+\([^)]*\)' || true)
+        | grep -Eo '[a-z0-9_.\"]+\([^)]*\)' || true)
       if [ -z "$TARGETS" ]; then
         BLANKET="GRANT EXECUTE ON FUNCTION (no signature written)"
       fi
@@ -243,7 +344,7 @@ done <<< "$CHANGED_FILES"
   echo "## SECURITY DEFINER EXECUTE grants, migration diff scan"
   echo
   echo "Migration files changed: $(printf '%s\n' "$CHANGED_FILES" | grep -c .)."
-  echo "Allowlisted grants added: ${ALLOWED_HITS}. Refused grants added: ${#VIOLATIONS[@]}."
+  echo "Allowlisted grants added: ${ALLOWED_HITS}. Cron-revoke hits: ${CRON_REVOKE_HITS}. Refused: ${#VIOLATIONS[@]}."
   if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
     echo
     echo "| file | function | grantee |"
@@ -256,16 +357,18 @@ done <<< "$CHANGED_FILES"
       printf '| `%s` | `%s` | `%s` |\n' "$F" "$SIG" "$GR"
     done
     echo
-    echo "Each one needs a verified pre-auth callsite added to the allowlist in both"
+    echo "A GRANT row needs a verified pre-auth callsite added to the allowlist in both"
     echo "\`scripts/check-definer-grants.sh\` and \`scripts/check-definer-grant-migrations.sh\`,"
-    echo "or the grant must come out of the migration."
+    echo "or the grant must come out of the migration. A REVOKE row means the migration"
+    echo "removes EXECUTE from postgres on a function pg_cron calls; that breaks the"
+    echo "schedule silently and must come out of the migration."
   fi
 } >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
-  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon or PUBLIC EXECUTE grant(s) added on SECURITY DEFINER functions in this pull request's migrations."
+  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon/PUBLIC EXECUTE grant(s) or protected cron-function EXECUTE revoke(s) added in this pull request's migrations."
   exit 1
 fi
 
-echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE."
+echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE; no cron-calling-role revoke on a protected function."
 exit 0
