@@ -149,7 +149,8 @@ push_base() {
 # carriage return made every branch match nothing while the gate reported
 # no reserved terms found.
 CANON_TERMS_LIB="$REPO_ROOT/scripts/canon-terms.sh"
-PRIVATE_PATTERN=""
+PRIVATE_PATTERN_CI=""
+PRIVATE_PATTERN_CS=""
 # Set when a list WAS supplied and could not be turned into a usable
 # pattern. That is a refusal with a reason already printed, not a skip, and
 # the two must not print the same line.
@@ -164,7 +165,7 @@ else
   # Present is not the same as usable: a file that exists and fails to
   # source leaves its functions undefined. Ask for them.
   #
-  # ALL THREE are named, not only the first. A partial source that defines
+  # ALL FIVE are named, not only the first. A partial source that defines
   # canon_terms and stops leaves canon_terms_usable undefined; bash returns
   # 127 for it, the "! canon_terms_usable" test below reads that as
   # unusable, and the push is refused with a line telling the developer to
@@ -174,15 +175,29 @@ else
   # in front of them.
   if ! declare -f canon_terms >/dev/null 2>&1 \
     || ! declare -f canon_terms_usable >/dev/null 2>&1 \
-    || ! declare -f canon_terms_reason_text >/dev/null 2>&1; then
-    red "✗ scripts/canon-terms.sh was sourced but does not define all of canon_terms, canon_terms_usable and canon_terms_reason_text. The library is broken, not the reserved-term list, and the reserved-term check cannot run."
+    || ! declare -f canon_terms_reason_text >/dev/null 2>&1 \
+    || ! declare -f canon_terms_ci >/dev/null 2>&1 \
+    || ! declare -f canon_terms_cs >/dev/null 2>&1; then
+    red "✗ scripts/canon-terms.sh was sourced but does not define all of canon_terms, canon_terms_ci, canon_terms_cs, canon_terms_usable and canon_terms_reason_text. The library is broken, not the reserved-term list, and the reserved-term check cannot run."
     FAIL=1
   else
-    if [ -n "${OW_RESERVED_TERMS:-}" ]; then
-      PRIVATE_PATTERN="$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)"
+    # Which source to read (env var, else .reserved-terms) is one decision
+    # made ONCE against the whole list; a single line's CS: marker must not
+    # change which source is in play.
+    RESERVED_SOURCE=""
+    RESERVED_SOURCE_SET=0
+    if [ -n "${OW_RESERVED_TERMS:-}" ] \
+      && [ -n "$(printf '%s\n' "$OW_RESERVED_TERMS" | canon_terms)" ]; then
+      RESERVED_SOURCE="$OW_RESERVED_TERMS"
+      RESERVED_SOURCE_SET=1
+    elif [ -f "$REPO_ROOT/.reserved-terms" ] \
+      && [ -n "$(canon_terms < "$REPO_ROOT/.reserved-terms")" ]; then
+      RESERVED_SOURCE="$(cat "$REPO_ROOT/.reserved-terms")"
+      RESERVED_SOURCE_SET=1
     fi
-    if [ -z "$PRIVATE_PATTERN" ] && [ -f "$REPO_ROOT/.reserved-terms" ]; then
-      PRIVATE_PATTERN="$(canon_terms < "$REPO_ROOT/.reserved-terms")"
+    if [ "$RESERVED_SOURCE_SET" = 1 ]; then
+      PRIVATE_PATTERN_CI="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_ci)"
+      PRIVATE_PATTERN_CS="$(printf '%s\n' "$RESERVED_SOURCE" | canon_terms_cs)"
     fi
     # A pattern this check cannot scan with fails in three different ways:
     # grep refuses it (one typo in a fragment, an unbalanced parenthesis
@@ -190,14 +205,24 @@ else
     # the empty string so it hits every line of every file, or it is empty.
     # Both scans read all three as "no match" and the gate prints that no
     # reserved terms were found. Refuse instead, with the reason that
-    # actually applies, and without printing any part of the list.
-    if [ -n "$PRIVATE_PATTERN" ] && ! canon_terms_usable "$PRIVATE_PATTERN"; then
+    # actually applies, and without printing any part of the list. Checked
+    # separately for the CI and CS halves, because a broken CS: fragment
+    # must not be hidden by a healthy default half.
+    if [ -n "$PRIVATE_PATTERN_CI" ] && ! canon_terms_usable "$PRIVATE_PATTERN_CI"; then
       red "✗ $(canon_terms_reason_text)"
       red "  Fix the offending fragment in OW_RESERVED_TERMS or .reserved-terms (one regex fragment per line)."
       red "  No part of the list is printed here."
       FAIL=1
       RESERVED_UNUSABLE=1
-      PRIVATE_PATTERN=""
+      PRIVATE_PATTERN_CI=""
+    fi
+    if [ -n "$PRIVATE_PATTERN_CS" ] && ! canon_terms_usable "$PRIVATE_PATTERN_CS"; then
+      red "✗ $(canon_terms_reason_text)"
+      red "  Fix the offending CS:-marked fragment in OW_RESERVED_TERMS or .reserved-terms."
+      red "  No part of the list is printed here."
+      FAIL=1
+      RESERVED_UNUSABLE=1
+      PRIVATE_PATTERN_CS=""
     fi
   fi
 fi
@@ -205,7 +230,7 @@ fi
 if [ "$RESERVED_UNUSABLE" != "0" ]; then
   # Already refused above, with the reason. Do not also claim it was skipped.
   :
-elif [ -z "$PRIVATE_PATTERN" ]; then
+elif [ -z "$PRIVATE_PATTERN_CI" ] && [ -z "$PRIVATE_PATTERN_CS" ]; then
   # Says which of the two real causes this is. "Not configured" and
   # "configured, but every line is a comment or blank" look identical from
   # here and send a contributor looking in different places.
@@ -213,7 +238,9 @@ elif [ -z "$PRIVATE_PATTERN" ]; then
   yellow "  OW_RESERVED_TERMS and .reserved-terms are unset, or hold only comments and blank lines."
   yellow "  The server-side post-merge identity scan still enforces the list."
 else
-  # Scan commits being pushed: messages + diff
+  # Scan commits being pushed: messages + diff, once for the default
+  # case-insensitive terms and once for CS:-marked terms matched exactly as
+  # written (no -i on that pass).
   for i in "${!LOCAL_SHAS[@]}"; do
     sha="${LOCAL_SHAS[$i]}"
     base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
@@ -237,18 +264,32 @@ else
     # commit time. This mirrors the server post-merge identity scan so the two
     # cannot drift. Only this exact trailer line is dropped.
     COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:[[:space:]]*Claude[[:space:]]+[A-Za-z]+[[:space:]]+[0-9.]+[[:space:]]*<noreply@anthropic\.com>[[:space:]]*$'
-    if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-      red "✗ Reserved-term leak in commit messages:"
-      git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi --color=always "$PRIVATE_PATTERN"
-      FAIL=1
+    if [ -n "$PRIVATE_PATTERN_CI" ]; then
+      if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi "$PRIVATE_PATTERN_CI" >/dev/null; then
+        red "✗ Reserved-term leak in commit messages:"
+        git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nEi --color=always "$PRIVATE_PATTERN_CI"
+        FAIL=1
+      fi
+      # Diff content: ADDED lines only. Deletions are how leaks get removed;
+      # blocking a push because its diff deletes a reserved term would make
+      # cleanups impossible.
+      if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN_CI" >/dev/null; then
+        red "✗ Reserved-term leak in added diff lines:"
+        git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN_CI" | head -20
+        FAIL=1
+      fi
     fi
-    # Diff content: ADDED lines only. Deletions are how leaks get removed;
-    # blocking a push because its diff deletes a reserved term would make
-    # cleanups impossible.
-    if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nEi "$PRIVATE_PATTERN" >/dev/null; then
-      red "✗ Reserved-term leak in added diff lines:"
-      git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nEi --color=always "$PRIVATE_PATTERN" | head -20
-      FAIL=1
+    if [ -n "$PRIVATE_PATTERN_CS" ]; then
+      if git log --format='%H%n%s%n%b' "$LOG_RANGE" 2>/dev/null | grep -viE "$COAUTHOR_EXEMPT" | grep -nE "$PRIVATE_PATTERN_CS" >/dev/null; then
+        red "✗ Reserved-term leak in commit messages:"
+        git log --format='%H%n%s%n%b' "$LOG_RANGE" | grep -viE "$COAUTHOR_EXEMPT" | grep -nE --color=always "$PRIVATE_PATTERN_CS"
+        FAIL=1
+      fi
+      if git diff "${DIFF_ARGS[@]}" 2>/dev/null | grep -E '^\+' | grep -nE "$PRIVATE_PATTERN_CS" >/dev/null; then
+        red "✗ Reserved-term leak in added diff lines:"
+        git diff "${DIFF_ARGS[@]}" | grep -E '^\+' | grep -nE --color=always "$PRIVATE_PATTERN_CS" | head -20
+        FAIL=1
+      fi
     fi
   done
   # Not a short-circuit AND: under set -e, an AND-list whose final status is

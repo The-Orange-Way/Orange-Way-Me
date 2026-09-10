@@ -88,6 +88,42 @@ canon_terms() {
     | sed -e 's/||*/|/g' -e 's/^|*//' -e 's/|*$//'
 }
 
+# canon_terms_ci / canon_terms_cs: per-term case-sensitivity marker.
+#
+# Every consumer has always compared the reserved-term list case
+# insensitively. That is right for most terms and wrong for a term that
+# collides with unrelated tree content only under case folding: the fix so
+# far has been to exempt a whole matched LINE (EXEMPT_RESERVED_CI in
+# pre-publish-scan.sh), which is broader than the one term it exists for,
+# and has no counterpart in pre-push-gate.sh, so the local hook and CI can
+# disagree on the same line.
+#
+# A line whose first non-whitespace content is the literal "CS:" opts that
+# one term out of case folding: it must then be matched WITHOUT -i (no
+# grep -i, no grep -qEi). Every other line keeps the case-insensitive
+# behaviour this file has always had.
+#
+# The marker is checked BEFORE canon_terms' own comment/blank handling, so
+# a marked line still gets the same trim and canonicalization as any other
+# line; only the CS: prefix is different, and it is stripped before the
+# line reaches canon_terms. A comment line (leading #) is never mistaken
+# for a marker: the two prefixes are checked independently and CS: is
+# anchored to the start of the line, so a term that merely contains the
+# substring "CS:" partway through does not mark.
+#
+# Feed the SAME raw input to both functions. A caller must not decide which
+# one to use based on the source (env var vs .reserved-terms): a single
+# list can carry both marked and unmarked lines together.
+CS_MARKER_RE='^[[:space:]]*CS:'
+
+canon_terms_ci() {
+  grep -vE "$CS_MARKER_RE" | canon_terms
+}
+
+canon_terms_cs() {
+  grep -E "$CS_MARKER_RE" | sed -E 's/^[[:space:]]*CS://' | canon_terms
+}
+
 # canon_terms_usable PATTERN
 #
 # True when PATTERN can actually be scanned with, false when it cannot, and
