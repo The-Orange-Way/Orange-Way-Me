@@ -122,6 +122,7 @@ describe("launchStealthConnect", () => {
     postReady(shim.popup);
     const result = await pending;
     expect(result.channel).toBeDefined();
+    expect(result.close).toBeTypeOf("function");
 
     // INIT went to the exact widget origin, never "*", and carries the origin.
     expect(shim.posted).toHaveLength(1);
@@ -131,6 +132,9 @@ describe("launchStealthConnect", () => {
       protocol_version: 1,
       return_callback_origin: OWN_ORIGIN,
     });
+
+    result.close();
+    expect(shim.popup.close).toHaveBeenCalledTimes(1);
   });
 
   it("merges the caller's INIT fields and keeps ownership of the origin and version", async () => {

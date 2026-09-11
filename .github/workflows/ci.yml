@@ -398,7 +398,11 @@ jobs:
     # fire on commits authored through the GitHub API, so this job catches the
     # exact path the hook cannot: API-authored commits and commits pushed via
     # tooling that bypasses local hooks.
-    if: github.event_name == 'pull_request'
+    # Promotion PRs (dev -> prod) are exempt: those commits were already in dev
+    # history and should have been checked when they entered dev. Checking them
+    # again on promotion creates a permanent blocker if any historical commit
+    # lacks the trailer (no path to fix without rewriting a protected branch).
+    if: github.event_name == 'pull_request' && github.base_ref != 'prod'
     steps:
       - name: Checkout
         uses: actions/checkout@v6

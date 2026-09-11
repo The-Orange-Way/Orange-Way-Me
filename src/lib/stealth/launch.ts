@@ -32,6 +32,8 @@ export const STEALTH_READY_TIMEOUT_MS = 30000;
 export interface StealthLaunchResult {
   /** The live transport, already past INIT. The caller attaches later handling. */
   channel: StealthChannel;
+  /** Close the popup when the owning flow reaches any terminal state. */
+  close: () => void;
 }
 
 /**
@@ -122,7 +124,16 @@ export async function launchStealthConnect(args: {
           ...(args.init ?? {}),
           return_callback_origin: window.location.origin,
         });
-        resolve({ channel });
+        resolve({
+          channel,
+          close: () => {
+            try {
+              popupRef.close();
+            } catch {
+              /* already closed */
+            }
+          },
+        });
       }
       args.onMessage?.(message);
     };
