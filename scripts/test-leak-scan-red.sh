@@ -216,16 +216,61 @@ check 'the other-case finding withholds its matched text too' \
   'absent' "$(has "$TERM_OTHER_CASE")"
 
 # ----------------------------------------------------------------------
+# Category 4: Tailnet address redaction
+# ----------------------------------------------------------------------
+#
+# Category 4 scans for Tailscale CGNAT addresses and MagicDNS hostnames.
+# The planted address is built from two halves at runtime so this file
+# does not itself match the CGNAT pattern when the scan runs against the
+# repository tree. (This file is in EXEMPT_GENERIC as belt-and-suspenders.)
+_CAT4_A="100.6"
+_CAT4_B="4.0.1"
+PLANTED_TAILNET="${_CAT4_A}${_CAT4_B}"
+
+TAILNET="$(new_fixture tailnet "$PLANTED_TAILNET")"
+run_scan "$TAILNET" ci ""
+TAILNET_CI_OUT="$LAST_OUT"
+
+check 'category 4: a tailnet address makes the scan exit non-zero' \
+  '1' "$LAST_RC"
+
+check 'category 4: the tailnet category is reported failing' \
+  'present' "$(has 'Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix) (1 findings)')"
+
+check 'category 4: the finding names the file and line' \
+  'present' "$(has './src/planted.ts:1')"
+
+check 'category 4: the matched address is withheld from the CI log' \
+  'absent' "$(has "$PLANTED_TAILNET")"
+
+check 'category 4: the withholding is announced rather than left silent' \
+  'present' "$(has 'matched text withheld')"
+
+run_scan "$TAILNET" local ""
+
+check 'category 4: a local run prints the address so the finding stays fixable' \
+  'present' "$(has "$PLANTED_TAILNET")"
+
+CLEAN_TAILNET="$(new_fixture tailnet_clean)"
+run_scan "$CLEAN_TAILNET" ci ""
+
+check 'category 4: negative control: a clean tree exits 0' \
+  '0' "$LAST_RC"
+
+# ----------------------------------------------------------------------
 # Evidence, for whoever reads this job log
 # ----------------------------------------------------------------------
 #
 # The pass and fail lines above say the assertions held. This prints what
-# the scanner actually produced for the planted tree under CI, so the log
-# itself carries the quotable artifact rather than a claim about one. It is
-# fixture output: an invented term in a temporary directory.
+# the scanner actually produced for the planted trees under CI, so the log
+# itself carries the quotable artifacts rather than claims about them. It is
+# fixture output: invented terms in temporary directories.
 
 printf '\nobserved output, planted fixture, CI mode:\n'
 printf '%s\n' "$PLANTED_CI_OUT" | sed 's/^/    | /'
+
+printf '\nobserved output, tailnet fixture, CI mode:\n'
+printf '%s\n' "$TAILNET_CI_OUT" | sed 's/^/    | /'
 
 printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
 

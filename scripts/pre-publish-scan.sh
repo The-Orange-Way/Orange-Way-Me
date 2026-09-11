@@ -81,6 +81,10 @@ EXEMPT_GENERIC=(
   # This script and the PR template document the forbidden patterns
   # as examples; they intentionally contain the strings they scan for.
   "scripts/pre-publish-scan.sh"
+  # The red-run self-test documents what each category scans for in its
+  # comments; exempt it so the new category 4 check does not flag its
+  # own documentation.
+  "scripts/test-leak-scan-red.sh"
   # The pre-push gate's private-host regex contains the literal strings
   # it scans for; install-hooks.sh references it.
   "scripts/pre-push-gate.sh"
@@ -388,6 +392,23 @@ scan "Dead PR references" \
      "PR #[0-9]+|V[23] PR\\b|OR PR #" \
      "" \
      ""
+
+# ----------------------------------------------------------------------
+# Category 4: Private network addresses (structural, needs no secret)
+# ----------------------------------------------------------------------
+#
+# Tailscale's shared address space (100.64.0.0/10, RFC 6598 CGNAT) and its
+# MagicDNS suffix (*.ts.net) only ever resolve on a private tailnet. The
+# pattern names a SHAPE, not a specific host, so publishing it here leaks
+# nothing; it only says "we watch for this shape". Unlike category 1 this
+# needs no internal list, so it also runs on fork and Dependabot pull
+# requests, where category 1 cannot (see leak-check.yml).
+
+scan "Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix)" \
+     "\\b100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.[0-9]{1,3}\\.[0-9]{1,3}\\b|\\.ts\\.net\\b" \
+     "" \
+     "" \
+     "$REDACT_MATCHES"
 
 # ----------------------------------------------------------------------
 # Summary
