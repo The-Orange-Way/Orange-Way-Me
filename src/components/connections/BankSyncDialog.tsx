@@ -29,10 +29,8 @@ export interface BankSyncProgress {
 }
 
 export interface BankSyncOutcome {
-  imported: number;
-  total: number;
-  unmapped: number;
-  errored: number;
+  /** True only after the local transaction table has been read after import. */
+  ledgerReadBack: boolean;
 }
 
 interface BankSyncDialogProps {
@@ -49,7 +47,6 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
   const [phase, setPhase] = useState<Phase>("idle");
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
-  const [imported, setImported] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Refs so the run-once effect depends only on `open` (callbacks recreated
@@ -80,7 +77,6 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
       setPhase("fetching");
       setDone(0);
       setTotal(0);
-      setImported(0);
       setError(null);
       try {
         const outcome = await runSyncRef.current((p) => {
@@ -90,8 +86,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
           setTotal(p.total);
         });
         if (cancelled) return;
-        setImported(outcome.imported);
-        setTotal(outcome.total);
+        setTotal(0);
         setPhase("done");
         onDoneRef.current?.(outcome);
         setTimeout(() => {
@@ -157,13 +152,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
         {phase === "done" && (
           <div className="flex flex-col items-center gap-3 py-8">
             <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
-            <p className="text-sm">
-              {total === 0
-                ? "No transactions returned."
-                : imported === total
-                  ? `Imported ${imported} ${imported === 1 ? "transaction" : "transactions"}.`
-                  : `Imported ${imported} of ${total} ${total === 1 ? "transaction" : "transactions"}.`}
-            </p>
+            <p className="text-sm">{"Your transaction list was refreshed."}</p>
           </div>
         )}
 

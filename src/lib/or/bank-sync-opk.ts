@@ -154,6 +154,8 @@ export interface SyncQuilttArgs {
 export interface SyncQuilttResult extends OrImportResult {
   /** Rows that failed to unseal (wrong key, tampered, non-OPK). */
   unsealFailures: number;
+  /** Mapped transaction ids that must be present in the local ledger. */
+  expectedLedgerExternalIds: string[];
 }
 
 /**
@@ -184,6 +186,13 @@ export async function syncQuilttConnection(args: SyncQuilttArgs): Promise<SyncQu
     onProgress?.(i + 1, total);
   }
 
+  const expectedLedgerExternalIds = decoded
+    .filter(
+      (transaction) =>
+        transaction.source_wallet_id !== null &&
+        deps.resolveAccountIds(connectionId, transaction.source_wallet_id).length > 0,
+    )
+    .map((transaction) => transaction.id);
   const result = await importOrTransactions(connectionId, decoded, deps);
-  return { ...result, unsealFailures };
+  return { ...result, unsealFailures, expectedLedgerExternalIds };
 }
