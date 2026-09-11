@@ -33,6 +33,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
+import { proxyErrorMessageFromBody } from "@/lib/or/proxy-errors";
 
 const SUBACCOUNT_LS_PREFIX = "or_subaccount_id_for_user_";
 
@@ -86,7 +87,11 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
   });
   if (res.error) throw new Error(res.error.message || `${endpoint} failed`);
   if (res.data && typeof res.data === "object" && "error" in res.data && res.data.error) {
-    throw new Error(String((res.data as { error: unknown }).error));
+    // Only a short scalar under `error` can become the message, same rule
+    // and same reason as ConnectionsPage.tsx's callProxy (PR #553): an
+    // array or long string under `error` must not ride out unbounded to
+    // the console.warn sink this throw eventually reaches.
+    throw new Error(proxyErrorMessageFromBody(res.data) ?? `${endpoint} failed`);
   }
   return res.data;
 }
