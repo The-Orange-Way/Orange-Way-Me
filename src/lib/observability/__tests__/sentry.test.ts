@@ -255,6 +255,29 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.logentry.params[0]).toContain("[redacted-key-shape]");
   });
 
+  /**
+   * logentry.params is typed as an array of arbitrary values by the Sentry
+   * event protocol, not just strings. Before this fix, a non-string element
+   * (an object, for instance) passed through scrubEventLoose untouched,
+   * unlike every other unknown-shape value in this file which goes through
+   * scrubValue. Nothing calls captureMessage with params today, so this
+   * pins a latent gap shut rather than closing a live leak.
+   */
+  it("redacts a secret-looking key inside an object element of logentry.params", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      logentry: {
+        params: [{ or_stealth_key_b64: "secret-a", label: "safe context" }, "safe value"],
+      },
+    }) as { logentry: { params: [Record<string, unknown>, string] } };
+
+    expect(scrubbed.logentry.params[0].or_stealth_key_b64).toBe("[redacted]");
+    expect(scrubbed.logentry.params[0].label).toBe("safe context");
+    expect(scrubbed.logentry.params[1]).toBe("safe value");
+  });
+
   it("caps a breadcrumb message at 4000, consistent with every other free-form string", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();
