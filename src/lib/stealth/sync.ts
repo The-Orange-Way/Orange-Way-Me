@@ -102,9 +102,12 @@ export interface StealthSyncOutcome {
    * The field name is `tx_count` on the wire and nothing else: the widget's
    * SYNC_COMPLETE has no `stored_transactions`. Reading a name the widget does
    * not send yields undefined forever, which reads as "the widget did not say"
-   * and quietly hides every count. Verified against the canonical contract.
+   * and quietly hides every count. A completion without this count no longer
+   * reaches the success callback. Verified against the canonical contract.
    */
-  txCount?: number;
+  txCount: number;
+  /** Transactions the completion frame says were saved during this run. */
+  savedCount: number;
   /** Height the widget scanned to, written back as `last_block_scanned`. */
   lastBlockScanned?: number;
   /**
@@ -163,7 +166,7 @@ export function buildStealthSyncInit(args: {
 }
 
 /**
- * A failure the widget reported, as the widget described it.
+ * A failure reported by the widget or raised by this host's completion guards.
  *
  * DL-1117. The widget has always sent three fields on OR_STEALTH_ERROR and
  * this app read one of them. `code` and `retryable` were parsed away, so no
@@ -173,7 +176,7 @@ export function buildStealthSyncInit(args: {
  * input was being discarded here, not because nobody drew it.
  */
 export interface StealthSyncFailure {
-  /** The widget's own sentence. Displayed as-is; never rewritten. */
+  /** A customer-safe sentence from the widget or a fixed local guard message. */
   message: string;
   /**
    * The widget's machine-readable cause, when it sent one we can read.
@@ -183,13 +186,16 @@ export interface StealthSyncFailure {
    */
   code?: string;
   /**
-   * The widget's own verdict on whether trying again could help.
+   * The widget's verdict, or the local guard's retry decision.
    *
    * Optional because this crosses an origin boundary: a frame that omits it,
    * or sends a non-boolean, must read as "the widget did not say" rather than
    * as a false we invented.
    */
   retryable?: boolean;
+  /** Counts are present only when a completion frame exposed a mismatch. */
+  scannedCount?: number;
+  savedCount?: number;
 }
 
 /** What the connection row should show while a stealth scan is running. */
@@ -393,8 +399,29 @@ function retryNoteFor(knowledge?: StealthCursorKnowledge): { retryNote?: string 
 }
 
 export interface StealthSyncHandle {
-  /** The live transport. The caller stops it when the flow ends. */
-  channel: StealthChannel;
+  /** Stop the transport and its token-expiry guard. Idempotent. */
+  stop: () => void;
+}
+
+/**
+ * Stop accepting terminal success shortly before the server-issued expiry.
+ * The margin keeps a completion frame racing the token boundary on the safe
+ * side: an early visible retry is preferable to a complete-looking short
+ * ledger.
+ */
+export const STEALTH_TOKEN_EXPIRY_SAFETY_MS = 5000;
+
+const INCOMPLETE_SYNC_MESSAGE =
+  "The wallet scan could not confirm that every transaction was saved. Try the sync again.";
+const TOKEN_WINDOW_MESSAGE =
+  "The wallet scan did not finish within its secure session. It was stopped without reporting success. Try the sync again.";
+
+function tokenWindowFailure(): StealthSyncFailure {
+  return {
+    message: TOKEN_WINDOW_MESSAGE,
+    code: "TOKEN_EXPIRY_GUARD",
+    retryable: true,
+  };
 }
 
 /**
@@ -414,10 +441,13 @@ export async function startStealthSync(args: {
   appUserId: string;
   credKeyB64: string;
   widgetToken: string;
+  /** Absolute server-issued widget-token expiry. */
+  tokenExpiresAtMs: number;
   onProgress?: (progress: StealthSyncProgress) => void;
   onComplete?: (outcome: StealthSyncOutcome) => void;
   /**
-   * Called with the widget's own account of a failure.
+   * Called for the widget's failure or when a local completion guard refuses
+   * to treat an expired or count-mismatched run as successful.
    *
    * DL-1117 changed this from a bare string. The string was everything the
    * caller could know, so every failure looked identical to every other one
@@ -431,7 +461,46 @@ export async function startStealthSync(args: {
 }): Promise<StealthSyncHandle> {
   const launch = args.launch ?? launchStealthConnect;
 
-  const { channel } = await launch({
+  if (!Number.isFinite(args.tokenExpiresAtMs)) {
+    throw new Error("Wallet scan refused: the widget session has no valid expiry");
+  }
+  if (args.tokenExpiresAtMs - STEALTH_TOKEN_EXPIRY_SAFETY_MS <= Date.now()) {
+    throw new Error("Wallet scan timed out before it could start");
+  }
+
+  let channel: StealthChannel | null = null;
+  let closePopup: (() => void) | null = null;
+  let expiryGuard: ReturnType<typeof setTimeout> | null = null;
+  let terminal = false;
+
+  function clearExpiryGuard(): void {
+    if (expiryGuard !== null) {
+      globalThis.clearTimeout(expiryGuard);
+      expiryGuard = null;
+    }
+  }
+
+  function stop(): void {
+    if (terminal) return;
+    terminal = true;
+    clearExpiryGuard();
+    channel?.stop();
+    closePopup?.();
+  }
+
+  function finishWithFailure(failure: StealthSyncFailure): void {
+    if (terminal) return;
+    stop();
+    args.onError?.(failure);
+  }
+
+  function finishWithSuccess(outcome: StealthSyncOutcome): void {
+    if (terminal) return;
+    stop();
+    args.onComplete?.(outcome);
+  }
+
+  const launched = await launch({
     url: buildStealthWidgetUrl(args.baseUrl),
     init: buildStealthSyncInit({
       connectionId: args.connectionId,
@@ -456,12 +525,34 @@ export async function startStealthSync(args: {
           });
           break;
         case STEALTH_MESSAGE.SYNC_COMPLETE:
-          args.onComplete?.({
-            txCount: numberOrUndefined(message.tx_count),
-            lastBlockScanned: numberOrUndefined(message.last_block_scanned),
-            cursorUpdateFailed: message.cursor_update_failed === true,
-            addressWindowExhausted: message.address_window_exhausted === true,
-          });
+          {
+            // Do not rely only on the timer. A busy browser can delay timer
+            // callbacks, so check the absolute boundary again at the exact
+            // moment a success frame asks to be believed.
+            if (Date.now() >= args.tokenExpiresAtMs - STEALTH_TOKEN_EXPIRY_SAFETY_MS) {
+              finishWithFailure(tokenWindowFailure());
+              break;
+            }
+            const txCount = countOrUndefined(message.tx_count);
+            const savedCount = savedTransactionsCount(message.sealed_transactions);
+            if (txCount === undefined || savedCount === undefined || savedCount !== txCount) {
+              finishWithFailure({
+                message: INCOMPLETE_SYNC_MESSAGE,
+                code: "INCOMPLETE_SYNC",
+                retryable: true,
+                scannedCount: txCount,
+                savedCount,
+              });
+              break;
+            }
+            finishWithSuccess({
+              txCount,
+              savedCount,
+              lastBlockScanned: numberOrUndefined(message.last_block_scanned),
+              cursorUpdateFailed: message.cursor_update_failed === true,
+              addressWindowExhausted: message.address_window_exhausted === true,
+            });
+          }
           break;
         case STEALTH_MESSAGE.ERROR:
           // The widget's own text, never a string we invent. An error we
@@ -473,7 +564,7 @@ export async function startStealthSync(args: {
           // and a retryable that is not a boolean both arrive as undefined,
           // which reads as "the widget did not say" and never as a value we
           // decided on its behalf.
-          args.onError?.({
+          finishWithFailure({
             message: stringOrUndefined(message.message) ?? "The connect widget reported an error.",
             code: stringOrUndefined(message.code),
             retryable: booleanOrUndefined(message.retryable),
@@ -485,7 +576,41 @@ export async function startStealthSync(args: {
     },
   });
 
-  return { channel };
+  channel = launched.channel;
+  closePopup = launched.close;
+  // Defensive against a terminal frame arriving in the narrow interval
+  // between the launch promise resolving and this continuation assigning the
+  // handle. postMessage normally cannot interleave there, but cleanup must not
+  // depend on that scheduler detail.
+  if (terminal) {
+    channel.stop();
+    closePopup();
+    return { stop };
+  }
+  const expiryGuardDelay = args.tokenExpiresAtMs - STEALTH_TOKEN_EXPIRY_SAFETY_MS - Date.now();
+  if (expiryGuardDelay <= 0) {
+    finishWithFailure(tokenWindowFailure());
+  } else {
+    expiryGuard = globalThis.setTimeout(() => {
+      finishWithFailure(tokenWindowFailure());
+    }, expiryGuardDelay);
+  }
+
+  return { stop };
+}
+
+/** A transaction count must be a finite, non-negative integer. */
+function countOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * The captured frame established this field's name but not its value shape.
+ * A count and a list both carry the needed cardinality; every other shape is
+ * refused, and list contents are never inspected or retained.
+ */
+function savedTransactionsCount(value: unknown): number | undefined {
+  return Array.isArray(value) ? value.length : countOrUndefined(value);
 }
 
 /**
