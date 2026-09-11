@@ -146,6 +146,27 @@ describe("Sentry init no-PII contract", () => {
     expect(scrubbed.extra.label).toBe("safe context");
   });
 
+  it("redacts entropy, salt, xpriv, and xprv key names (OWM-T0738)", async () => {
+    const mod = await freshSentryModule();
+    mod.initSentry();
+    const cfg = initMock.mock.calls[0][0];
+    const scrubbed = cfg.beforeSend({
+      extra: {
+        entropy: "deadbeefcafe1234deadbeefcafe1234",
+        kdf_salt: "aabbccdd11223344",
+        wallet_xpriv: "xprv9s21ZrQH143K...",
+        xprv: "xprv9s21ZrQH143K...",
+        label: "safe context",
+      },
+    }) as { extra: Record<string, unknown> };
+
+    expect(scrubbed.extra.entropy).toBe("[redacted]");
+    expect(scrubbed.extra.kdf_salt).toBe("[redacted]");
+    expect(scrubbed.extra.wallet_xpriv).toBe("[redacted]");
+    expect(scrubbed.extra.xprv).toBe("[redacted]");
+    expect(scrubbed.extra.label).toBe("safe context");
+  });
+
   it("redacts xpub and bare secret key names (DL-1584)", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();

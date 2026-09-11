@@ -11,6 +11,7 @@
  * which does the same job on the error-reporting side.
  */
 
+import type { CaptureResult } from "posthog-js";
 import { redactValueShapes } from "./value-shapes";
 
 /**
@@ -21,7 +22,7 @@ import { redactValueShapes } from "./value-shapes";
  * under an innocuous name; that case is handled by redactValueShapes,
  * which both this scrubber and sentry.ts import from value-shapes.ts.
  */
-const SCRUB_VALUE_KEY_HINTS = [
+export const SCRUB_VALUE_KEY_HINTS = [
   "account",
   "household",
   "transaction",
@@ -256,8 +257,6 @@ function scrubProperties(
   }
   return out;
 }
-
-import type { CaptureResult } from "posthog-js";
 
 // Counts events dropped by the fail-closed catch path below, since page
 // load. Carries no event content and no caught error text by design: a
