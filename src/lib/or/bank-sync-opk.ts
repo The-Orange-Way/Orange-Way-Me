@@ -7,11 +7,12 @@
  *
  *   1. registerOpk      — publish the OPK public key on OR so or-quiltt-sync
  *                         can seal to it (call once per user; idempotent).
- *   2. syncQuilttConnection — fetch the sealed rows via or-transactions-list,
- *                         crypto_box_seal_open each with the OPK private key,
- *                         map the Quiltt cleartext to the import shape, and
- *                         hand off to importOrTransactions (which re-encrypts
- *                         each field under the vault MEK before INSERT).
+ *   2. syncQuilttConnection — page through the sealed rows via
+ *                         or-transactions-list, crypto_box_seal_open each
+ *                         with the OPK private key, map the Quiltt
+ *                         cleartext to the import shape, and hand off to
+ *                         importOrTransactions (which re-encrypts each
+ *                         field under the vault MEK before INSERT).
  *
  * ZKA: the sealed payload is unreadable to OR and Orange Way servers; only
  * this browser (vault unlocked → OPK private key in memory) can open it.
@@ -20,6 +21,7 @@
  */
 
 import { opkSealOpen, OPK_ALG, type OpkKeypair } from "@/lib/or/opk";
+import { nextTransactionsPage, type TransactionRow } from "@/lib/or/transactions-page";
 import {
   importOrTransactions,
   type OrImportTransaction,
@@ -47,6 +49,52 @@ interface EncryptedTxRow {
 }
 
 type CallProxy = (endpoint: string, payload: Record<string, unknown>) => Promise<unknown>;
+
+/** or-transactions-list page size for the Quiltt bank-sync path. Distinct
+ *  from fetchAllTransactionRows' 500 in ConnectionsPage.tsx; nothing ties
+ *  the two together, so no reason to change a value that already works. */
+const PAGE_LIMIT = 1000;
+/** Safety valve so a pathological response (a store that never returns a
+ *  short page) cannot spin this loop forever. Matches
+ *  fetchAllTransactionRows/fetchStealthRows in ConnectionsPage.tsx. */
+const MAX_PAGES = 25;
+
+/**
+ * Fetch every or-transactions-list row for the subaccount (OWM-T0726).
+ *
+ * `nextTransactionsPage` is the one place that knows how to tell "may be
+ * more" from "store exhausted" on this endpoint (see transactions-page.ts
+ * for why its own `truncated` flag does not settle that alone). This walks
+ * pages, stops on `!hasMore`, and caps at `MAX_PAGES`. Rows are not
+ * filtered by connection here; the caller does that, same as
+ * fetchAllTransactionRows + orRowsForConnection in ConnectionsPage.tsx.
+ */
+async function fetchAllQuilttTransactionRows(
+  callProxy: CallProxy,
+  subaccountId: string,
+): Promise<TransactionRow[]> {
+  const out: TransactionRow[] = [];
+  let before: string | undefined;
+
+  for (let i = 0; i < MAX_PAGES; i++) {
+    let res: unknown;
+    try {
+      res = await callProxy("or-transactions-list", {
+        subaccount_id: subaccountId,
+        limit: PAGE_LIMIT,
+        ...(before ? { before } : {}),
+      });
+    } catch (err) {
+      console.warn("[bank-sync] transaction list read failed", err);
+      break;
+    }
+    const page = nextTransactionsPage(res, PAGE_LIMIT);
+    out.push(...page.rows);
+    if (!page.hasMore || !page.nextBefore) break;
+    before = page.nextBefore;
+  }
+  return out;
+}
 
 /**
  * Register the OPK public key on OR for this user. Idempotent — OR returns
@@ -162,12 +210,8 @@ export interface SyncQuilttResult extends OrImportResult {
 export async function syncQuilttConnection(args: SyncQuilttArgs): Promise<SyncQuilttResult> {
   const { callProxy, subaccountId, connectionId, keypair, deps, onProgress } = args;
 
-  const listRes = (await callProxy("or-transactions-list", {
-    subaccount_id: subaccountId,
-    limit: 1000,
-  })) as { transactions?: EncryptedTxRow[] };
-
-  const rows = (listRes.transactions ?? []).filter((t) => t.connection_id === connectionId);
+  const allRows = await fetchAllQuilttTransactionRows(callProxy, subaccountId);
+  const rows = allRows.filter((t) => t.connection_id === connectionId);
   const total = rows.length;
 
   const decoded: OrImportTransaction[] = [];
