@@ -20,11 +20,11 @@ name: Definer grant gate
 #
 # definer-grants-pr-scan is a pull request check. It cannot see the live
 # database and it does not try to; it scans the migration files the PR
-# changes for a GRANT ... EXECUTE ... TO anon or PUBLIC and fails the PR
-# unless the function is on the same allowlist the live jobs use. This is the
-# one moment a human is still looking before the grant ever reaches a
-# database, which the live jobs cannot cover: they only ever report on a
-# grant that is already live.
+# changes for a GRANT that confers EXECUTE (whether written as EXECUTE, ALL,
+# or ALL PRIVILEGES) to anon or PUBLIC and fails the PR unless the function
+# is on the same allowlist the live jobs use. This is the one moment a human
+# is still looking before the grant ever reaches a database, which the live
+# jobs cannot cover: they only ever report on a grant that is already live.
 #
 # The two live-database jobs below are gated with a positive list of their
 # three intended triggers (push to their own branch, schedule, dispatch),
@@ -96,7 +96,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Refuse a new anon or PUBLIC EXECUTE grant in a changed migration
+      - name: Refuse a new anon or PUBLIC function grant in a changed migration
         run: |
           bash scripts/check-definer-grant-migrations.sh \
             "origin/${{ github.event.pull_request.base.ref }}" \

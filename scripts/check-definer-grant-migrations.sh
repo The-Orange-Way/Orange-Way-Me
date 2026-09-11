@@ -59,18 +59,19 @@
 # Diffs <base-ref>...<head-ref> for files under supabase/migrations, and scans
 # every line added by the PR (not the whole file, so an untouched grant in a
 # migration that already existed is not re-flagged by an unrelated edit to the
-# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, or a
+# same file) for a GRANT ... EXECUTE/ALL ... TO naming anon or PUBLIC, or a
 # REVOKE ... FROM naming postgres on a function pg_cron calls (see CRON
 # CALLING ROLE PROTECTION below).
 #
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
-#           the changed lines grant EXECUTE to anon or PUBLIC outside the
-#           allowlist, and none revoke EXECUTE from postgres on a protected
-#           cron-called function
+#           the changed lines grant EXECUTE (including via ALL) to anon or
+#           PUBLIC outside the allowlist, and none revoke EXECUTE from
+#           postgres on a protected cron-called function
 #   exit 1  VIOLATION                 a changed migration line grants EXECUTE
-#           to anon or PUBLIC on a function not on the allowlist, or revokes
-#           EXECUTE from postgres on a protected cron-called function
+#           (including via ALL) to anon or PUBLIC on a function not on the
+#           allowlist, or revokes EXECUTE from postgres on a protected
+#           cron-called function
 #
 # The allowlist below MUST be kept identical to the one in
 # check-definer-grants.sh. It is duplicated rather than sourced because this
@@ -268,7 +269,7 @@ while IFS= read -r FILE; do
     # exactly as EXECUTE does, so both spellings come in here. What keeps a
     # table grant written with ALL out of the results is the object-type
     # classification below, not this line.
-    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+(execute|all)[[:space:]]' || continue
+    printf '%s' "$LOWER" | grep -Eq 'grant[[:space:]]+(execute|all([[:space:]]+privileges)?)[[:space:]]+on[[:space:]]' || continue
     printf '%s' "$LOWER" | grep -Eq '[[:space:]]to[[:space:]]' || continue
 
     # Everything after the LAST " to ", minus a trailing WITH GRANT OPTION.
