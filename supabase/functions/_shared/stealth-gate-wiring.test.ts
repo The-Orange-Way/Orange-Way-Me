@@ -3,28 +3,23 @@
  * or-link-mint-token branch, and every function that mints a widget token is
  * accounted for.
  *
- * WHAT IS ALREADY PROVEN ELSEWHERE, AND WHAT IS NOT. stealth-flag.test.ts
- * proves readStealthSyncEnabled decides correctly: nine cases, every one of
- * them calling the pure function directly with a hand written reader. None of
- * them constructs a request and none of them imports ow-or-proxy. So the
- * decision is proven and its USE is not, and the use is the half that decays.
- * A later edit can invert the condition, move it below the point where the
- * outbound body is assembled, or repoint the reader at a different flag row,
- * and every existing test still passes.
+ * WHAT IS ALREADY PROVEN ELSEWHERE, AND WHAT THIS ADDS. OW-T0231 extracted
+ * the wiring this test audits into handler.ts, which handler.test.ts now
+ * calls directly and drives both directions of the gate behaviourally: flag
+ * true reaches the outbound call, flag false refuses with no token anywhere
+ * in the body. That is stronger than a text scan, but it only covers
+ * ow-or-proxy. This file still does two things handler.test.ts does not: it
+ * pins the FULL set of functions that mint a widget token (MINT_TOKEN_CALLERS)
+ * so a new caller cannot go unnoticed, and it keeps an independent structural
+ * check on the wiring itself, one that does not depend on handler.test.ts
+ * staying correct to catch the same inversion/reorder/repoint regressions.
  *
- * WHY THIS READS SOURCE INSTEAD OF ISSUING A REQUEST. ow-or-proxy/index.ts
- * calls Deno.serve at module scope, reads Deno.env at module scope, and
- * imports supabase-js over an https: URL. Vitest is what actually runs the
- * files under supabase/functions (see vitest.config.ts, and the test-file
- * inventory step in .github/workflows/ci.yml which counts them), and it
- * cannot import that module. CI runs no `deno test` at all. Making the branch
- * callable from a test means extracting the request handler out of index.ts,
- * which is a behaviour change on the self custody surface and belongs in its
- * own PR with its own review. Until that happens this is the strongest check
- * that can actually run, and it is deliberately explicit about its limit: it
- * proves the gate is present, negated, fed by the right row, and positioned
- * before the token is minted. It does not execute it, so it does not prove
- * the allowed direction end to end.
+ * WHY THIS READS SOURCE RATHER THAN IMPORTING. readProxySource() below reads
+ * handler.ts, not index.ts -- index.ts is now a thin Deno.serve wrapper with
+ * no gate logic of its own (see OW-T0231). readFunctionSources() below reads
+ * every non-test .ts file in a function's own directory rather than one
+ * hardcoded filename, so this test does not go blind the next time a
+ * function's implementation is split across more than one file.
  *
  * IT IS PROVEN ABLE TO FAIL. A guard that can only ever report "closed" is
  * indistinguishable from a guard that is stuck closed, and the production flag
@@ -95,7 +90,26 @@ function findMintCallers(): string[] {
 }
 
 function readProxySource(): string {
-  return readFileSync(join(FUNCTIONS_DIR, "ow-or-proxy", "index.ts"), "utf8");
+  // OW-T0231 extracted the mint gate wiring out of index.ts (a thin
+  // Deno.serve wrapper vitest cannot import) into handler.ts, which is
+  // importable and exercised directly by handler.test.ts. The structural
+  // audit below now reads handler.ts, where the wiring actually lives.
+  return readFileSync(join(FUNCTIONS_DIR, "ow-or-proxy", "handler.ts"), "utf8");
+}
+
+/** Every non-test .ts file directly under a function's own directory,
+ *  concatenated. A caller's wiring can live in more than one file (OW-T0231
+ *  split ow-or-proxy into a thin index.ts and an importable handler.ts), so
+ *  a check that reads only index.ts silently stops seeing it the moment a
+ *  function is split. Reading the whole directory keeps this test correct
+ *  regardless of how many files a caller's implementation is split across. */
+function readFunctionSources(fn: string): string {
+  const dir = join(FUNCTIONS_DIR, fn);
+  return readdirSync(dir)
+    .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
+    .filter((entry) => statSync(join(dir, entry)).isFile())
+    .map((entry) => readFileSync(join(dir, entry), "utf8"))
+    .join("\n");
 }
 
 /**
@@ -129,7 +143,7 @@ export function auditMintGate(source: string): string[] {
     "{ error: STEALTH_SYNC_DISABLED_ERROR, message: STEALTH_SYNC_DISABLED_MESSAGE }",
   );
   const mintBody = at(/orBody = \{ app_user_id: user\.id, ttl_seconds/);
-  const outbound = at("await callOr(endpoint, orBody)");
+  const outbound = at("await callOr(deps, endpoint, orBody)");
 
   if (flagRead < 0) problems.push("the mint branch does not call readStealthSyncEnabled");
   if (negatedTest < 0) {
@@ -211,7 +225,7 @@ describe("who can mint a widget token", () => {
   });
 
   it.each(GATED_CALLERS)("%s consults the kill switch before minting", (fn) => {
-    const source = readFileSync(join(FUNCTIONS_DIR, fn, "index.ts"), "utf8");
+    const source = readFunctionSources(fn);
     expect(source).toContain("_shared/stealth-flag.ts");
     expect(source).toContain("readStealthSyncEnabled");
   });
@@ -219,7 +233,7 @@ describe("who can mint a widget token", () => {
   it.each(UNGATED_BASELINE)(
     "%s is still ungated, so the baseline is still telling the truth",
     (fn) => {
-      const source = readFileSync(join(FUNCTIONS_DIR, fn, "index.ts"), "utf8");
+      const source = readFunctionSources(fn);
       expect(
         source.includes("readStealthSyncEnabled"),
         `${fn} now reads the kill switch. Move it from UNGATED_BASELINE to GATED_CALLERS in this file, in the same PR that closed the door.`,
