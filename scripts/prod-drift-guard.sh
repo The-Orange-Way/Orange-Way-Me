@@ -25,6 +25,9 @@
 #   BEHIND_HOURS_LIMIT    max age in hours of the oldest unpromoted commit
 #   GH_TOKEN              token for the gh api calls
 #   REPO                  owner/name
+#   AHEAD_JSON_OVERRIDE   optional, test only. A synthetic compare JSON to
+#                         use instead of a live 'gh api compare' call for
+#                         the prod-ahead check. Unset in every real run.
 #   BEHIND_JSON_OVERRIDE  optional, test only. A synthetic compare JSON to
 #                         use instead of a live 'gh api compare' call for
 #                         the unpromoted-commit check, so a test can drive
@@ -82,7 +85,12 @@ fail=0
 #    every promotion leaves a merge commit on prod that dev never
 #    receives, and those commits change no file. Drive the failure off
 #    the compare's CONTENT instead.
-ahead_json="$(gh api "repos/${REPO}/compare/${BASE_BRANCH}...${HEAD_BRANCH}")"
+if [ -n "${AHEAD_JSON_OVERRIDE:-}" ]; then
+  ahead_json="$AHEAD_JSON_OVERRIDE"
+  echo "::notice::using AHEAD_JSON_OVERRIDE (synthetic compare payload, test only)"
+else
+  ahead_json="$(gh api "repos/${REPO}/compare/${BASE_BRANCH}...${HEAD_BRANCH}")"
+fi
 prod_ahead="$(echo "$ahead_json" | jq -r '.ahead_by')"
 if [ "$prod_ahead" = "null" ] || [ -z "$prod_ahead" ]; then
   echo "::error::compare returned no ahead_by; refusing to pass." >&2
