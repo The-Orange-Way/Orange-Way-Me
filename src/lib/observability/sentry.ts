@@ -50,7 +50,7 @@ import * as Sentry from "@sentry/react";
 import { redactValueShapes } from "./value-shapes";
 
 /** Object keys (case-insensitive) we scrub from event payloads. */
-const SECRET_KEY_PATTERNS = [
+export const SECRET_KEY_PATTERNS = [
   /password/i,
   /passphrase/i,
   /pin/i,
