@@ -104,6 +104,9 @@ const SCRUB_VALUE_KEY_EXACT = new Set(["pin"]);
  */
 function keyTokens(key: string): string[] {
   return key
+    .replace(/([A-Z]+)(?=[a-z])/g, (run) =>
+      SCRUB_VALUE_KEY_EXACT.has(run.toLowerCase()) ? `${run} ` : run,
+    )
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Za-z])(\d)/g, "$1 $2")
