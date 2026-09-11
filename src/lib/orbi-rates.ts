@@ -45,6 +45,50 @@ function partitionBucketTs(effectiveAt: Date): string {
   return new Date(minuteFloor - 60_000).toISOString();
 }
 
+export interface ORBIRatePoint {
+  rate: number;
+  bucketTs: string;
+}
+
+/**
+ * Fetch every CONFIRMED BTC-to-`target` rate bucket in [startAt, endAt] in a
+ * single request. Used by the rate-series cache (OWM-T0746) to pull a whole
+ * date range at once instead of one request per transaction date: a request
+ * for "the full matrix for a date range" is the same request every client
+ * makes, while a request for one exact bucket_ts is a fingerprint of that
+ * one transaction (see OWM-T0159's ZKA constraint section). No account,
+ * household, transaction, amount or user identifier is in this request.
+ */
+export async function fetchBTCRateRange(
+  target: string,
+  startAt: Date,
+  endAt: Date,
+): Promise<ORBIRatePoint[]> {
+  let client: SupabaseClient;
+  try {
+    client = getORBIClient();
+  } catch {
+    return [];
+  }
+
+  const { data, error } = await client
+    .from("exchange_rates")
+    .select("rate, bucket_ts")
+    .eq("source_currency", "BTC")
+    .eq("target_currency", target.toUpperCase())
+    .eq("product", "ORBI-M")
+    .eq("granularity", "1m")
+    .eq("status", "CONFIRMED")
+    .gte("bucket_ts", startAt.toISOString())
+    .lte("bucket_ts", endAt.toISOString())
+    .order("bucket_ts", { ascending: true });
+
+  if (error || !data) return [];
+  return data.map((row) => {
+    return { rate: Number(row.rate), bucketTs: row.bucket_ts as string };
+  });
+}
+
 export async function fetchBTCRate(target: string, effectiveAt: Date): Promise<ORBIRate | null> {
   let client: SupabaseClient;
   try {
