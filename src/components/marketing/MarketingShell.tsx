@@ -98,7 +98,13 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           />
         </div>
         <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Orange Way · Built for sovereignty
+          <p>© {new Date().getFullYear()} Orange Way · Built for sovereignty</p>
+          <address className="mt-2 not-italic">
+            The Orange Way Inc · 620 Veterans Drive Suite 12, Barrie, ON L4N9J4, Canada ·{" "}
+            <a href="mailto:hello@orangeway.app" className="underline">
+              hello@orangeway.app
+            </a>
+          </address>
         </div>
       </footer>
     </div>

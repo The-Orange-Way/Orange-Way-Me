@@ -61,6 +61,19 @@ function AboutPage() {
           Bitcoin, run their own infrastructure when they can, and want their tools to respect that
           worldview.
         </p>
+
+        <h2 className="mt-10 text-xl font-semibold">Company</h2>
+        <p className="mt-2 text-muted-foreground">Orange Way is operated by:</p>
+        <address className="mt-2 not-italic text-muted-foreground">
+          The Orange Way Inc
+          <br />
+          620 Veterans Drive Suite 12
+          <br />
+          Barrie, ON L4N9J4
+          <br />
+          Canada
+        </address>
+        <p className="mt-4 text-muted-foreground">Questions? Email hello@orangeway.app.</p>
       </article>
     </MarketingShell>
   );
