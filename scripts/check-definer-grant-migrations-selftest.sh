@@ -45,7 +45,8 @@
 #      the first filter is what first brings this statement to the default
 #      privileges branch, so that branch has to check the object type or a
 #      legal table grant would be reported as a blanket function grant
-#  17) GRANT ALL ON TABLE t TO anon             -> must exit 0, same reason
+#  17) GRANT ALL and GRANT ALL PRIVILEGES on TABLES
+#                                               -> must exit 0, same reason
 #  18) GRANT ALL ON FUNCTION on an ALLOWLISTED function
 #                                               -> must exit 0. The allowlist
 #      is per function signature, not per keyword, so the same privilege
@@ -269,14 +270,16 @@ git commit -q -m "case16"
 check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES is not refused" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
-# Case 17: a plain table grant written with ALL, same direction as case 16.
+# Case 17: plain table grants written with ALL and ALL PRIVILEGES, same
+# direction as case 16.
 git checkout -q -b case17 main
 cat > supabase/migrations/0002_all_on_table.sql <<'SQL'
 GRANT ALL ON TABLE public.some_table TO anon;
+GRANT ALL PRIVILEGES ON TABLE public.some_other_table TO PUBLIC;
 SQL
 git add -A
 git commit -q -m "case17"
-check_case "GRANT ALL ON TABLE is not refused" 0 "$(git rev-parse HEAD)"
+check_case "GRANT ALL and ALL PRIVILEGES ON TABLE are not refused" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
 # Case 18: the other direction of the widening. An allowlisted function
