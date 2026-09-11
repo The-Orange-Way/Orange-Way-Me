@@ -96,6 +96,49 @@ jobs:
 
           echo "negative control PASS: the guard exited ${rc} and refused the proof run."
 
+  drift-guard-null-files-negative-control:
+    name: Drift guard refuses a null files response
+    runs-on: ubuntu-latest
+    # GitHub's compare API may return files:null while still reporting that
+    # prod is ahead. jq treats null | length as 0, so the guard must require
+    # an array rather than merely checking that the files key is present.
+    env:
+      BASE_BRANCH: dev
+      HEAD_BRANCH: prod
+      BEHIND_COMMIT_LIMIT: '50'
+      BEHIND_HOURS_LIMIT: '72'
+      AHEAD_JSON_OVERRIDE: '{"ahead_by":1,"files":null}'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: The guard must refuse a null files response
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          rc=0
+          bash scripts/prod-drift-guard.sh > null-files.log 2>&1 || rc=$?
+          echo "--- guard output (exit ${rc}) ---"
+          cat null-files.log
+          echo "--- end guard output ---"
+
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::negative control FAILED: the guard reported green when the prod-ahead compare response contained files:null." >&2
+            exit 1
+          fi
+
+          # A red exit caused by an API or ref-resolution failure proves
+          # nothing about files:null. Require the type-check's own diagnostic.
+          if ! grep -q "compare's files field was not an array" null-files.log; then
+            echo "::error::negative control FAILED: the guard exited ${rc}, but not because it rejected files:null. See the guard output above." >&2
+            exit 1
+          fi
+
+          echo "negative control PASS: the guard exited ${rc} and rejected files:null."
+
   drift-guard-age-negative-control:
     name: Drift guard refuses a stale unpromoted commit
     runs-on: ubuntu-latest
