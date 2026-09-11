@@ -235,6 +235,7 @@ export function ConnectionsPage() {
     buildHouseholdSignatureFields,
     getOpkKeypair,
     orNamespaceDisabledReason,
+    confirmOrKeyMaterialProven,
   } = useVault();
   const { accounts, updateAccount } = useAccounts();
 
@@ -544,6 +545,15 @@ export function ConnectionsPage() {
         }),
       );
       setConnections(decoded);
+      // OWM-T0584. Zero connections is proof this account has never synced
+      // any Orange Rails data: there is nothing an ambiguously-derived key
+      // (see resolveOrKeyMaterial's pendingPin in VaultContext) could be
+      // wrong about, so a pin deferred from unlock is safe to commit now
+      // rather than waiting on a decrypt that will never come. A no-op when
+      // nothing is pending.
+      if (decoded.length === 0) {
+        confirmOrKeyMaterialProven();
+      }
       // Returned so a caller that just created something can check whether it
       // is actually in the list, rather than assuming the refresh it awaited
       // means the row arrived. Every existing caller ignores this.
@@ -1489,6 +1499,12 @@ export function ConnectionsPage() {
         // an absent field rather than an ambiguous one. Without this the
         // bridge counts every stealth row `untagged` and skips it.
         decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
+        // OWM-T0584. A real decrypt with the transactions key is direct
+        // evidence the key VaultContext derived is the same one this
+        // account's rows were already sealed under - exactly what an
+        // ambiguously-derived key cannot prove on its own. A no-op once
+        // already committed or when nothing was ever pending.
+        confirmOrKeyMaterialProven();
       } catch {
         decryptFailures += 1;
       }
@@ -1553,6 +1569,11 @@ export function ConnectionsPage() {
         decryptFailures += 1;
         continue;
       }
+      // OWM-T0584. Either key opening a real sealed row is the same proof as
+      // the regular-row case above: this account's Orange Rails data was
+      // sealed under the key VaultContext just derived, so a deferred pin
+      // can be committed. A no-op once committed or never pending.
+      confirmOrKeyMaterialProven();
       try {
         const payload = JSON.parse(json) as OrImportTransaction;
         // The OR stealth widget does not seal a stable `id` into the
