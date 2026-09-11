@@ -18,15 +18,16 @@
  *   3. Map destinations: present DestinationPickerDialog → encrypt
  *      each Personal account.id with the user vault MEK → write to
  *      connection_account_map.
- *   4. Sync: export both OR subkeys as raw base64, hand them to or-sync
- *      for one request (OR holds them in memory only, never persists).
+ *   4. Sync: export the credentials subkey for OR's transient provider call.
+ *      Ask for the orangeway-me response sink, then encrypt returned rows in
+ *      this browser before writing them to the Personal ledger.
  *   5. List / delete: regular proxy calls. Delete also wipes mapping rows.
  *
  * Key handoff:
  *   The vault's MEK is used (via HKDF) to derive a credentials subkey
- *   and a transactions subkey. Those are passed to OR in the /connect
- *   URL fragment so the widget can encrypt the credential under our
- *   key, and to or-sync for in-memory transaction decryption.
+ *   and a transactions subkey. Both still support connection setup and legacy
+ *   row reads. or-sync receives only the credentials subkey; the transactions
+ *   subkey no longer crosses on either sync request path.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -66,7 +67,11 @@ import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
-import { requestOrSync } from "@/lib/or/or-sync-request";
+import {
+  requestOrSync,
+  sinkAndLegacyTransactionsForConnection,
+  type OrSyncResponse,
+} from "@/lib/or/or-sync-request";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -240,19 +245,17 @@ export function ConnectionsPage() {
 
   /**
    * The vault key handover for or-sync, built once and shared by both press
-   * paths. or-sync is the only path in this app that takes these two keys out
-   * of the vault, so there is one object that can do it and one function that
-   * accepts it, and that function checks the route before it uses either
-   * (OWM-T0544). callProxy is module scope and stable, so it is not a
-   * dependency here.
+   * paths. It contains the credentials export only. requestOrSync adds the
+   * sink format and checks the route before it uses that export (OWM-T0544),
+   * while the transactions-key export remains unavailable to the request.
+   * callProxy is module scope and stable, so it is not a dependency here.
    */
-  const orSyncKeys = useMemo(
+  const orSyncHandover = useMemo(
     () => ({
       exportCredentialsKey: exportOrCredsKey,
-      exportTransactionsKey: exportOrTxnsKey,
       callProxy,
     }),
-    [exportOrCredsKey, exportOrTxnsKey],
+    [exportOrCredsKey],
   );
 
   const {
@@ -1056,9 +1059,9 @@ export function ConnectionsPage() {
       // OWM-T0544. No key is exported here any more. requestOrSync asks
       // planSyncRoute itself and refuses above its own export, so deleting the
       // private arm above now stops a press rather than starting a key
-      // handover: it reaches this call and is refused, instead of exporting two
-      // vault keys for a request or-sync answers with a 400.
-      const res = await requestOrSync(subaccount, [conn], orSyncKeys);
+      // handover: it reaches this call and is refused, instead of exporting a
+      // vault key for a request or-sync answers with a 400.
+      const res = await requestOrSync(subaccount, [conn], orSyncHandover);
 
       // DL-1051: a status toast must be driven by positive evidence that this
       // connection was actually processed. or-sync only returns an entry for a
@@ -1123,7 +1126,7 @@ export function ConnectionsPage() {
       // returning immediately when there is nothing to import.
       if (user) {
         try {
-          const importResult = await importSyncedTransactionsForConnection(conn);
+          const importResult = await importSyncedTransactionsForConnection(conn, res);
           if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
             handleEditMapping(conn);
           }
@@ -1199,7 +1202,7 @@ export function ConnectionsPage() {
       // tested; this is the net under it, at the point the keys leave rather
       // than in the caller above it (OWM-T0544).
       const syncable = connections.filter((c) => plan.syncableIds.includes(c.id));
-      const res = await requestOrSync(subaccount, syncable, orSyncKeys);
+      const res = await requestOrSync(subaccount, syncable, orSyncHandover);
       synced = res.synced;
       returned = res.connections;
 
@@ -1240,7 +1243,7 @@ export function ConnectionsPage() {
           const conn = connections.find((c) => c.id === succ.connection_id);
           if (!conn) continue;
           try {
-            await importSyncedTransactionsForConnection(conn);
+            await importSyncedTransactionsForConnection(conn, res);
           } catch (importErr) {
             console.error(
               `[Connections] OR import bridge failed for ${succ.connection_id}`,
@@ -1274,10 +1277,10 @@ export function ConnectionsPage() {
   }
 
   /**
-   * After or-sync finishes, fetch the encrypted transactions for this
-   * connection from OR, decrypt them in the browser with ORT, and hand
-   * them to the bridge so each routed row lands in the local
-   * `transactions` table.
+   * After or-sync finishes, import its verified response-sink drafts and also
+   * fetch any rows left in OR by the former encrypted_transactions scheme.
+   * Legacy rows open in-browser with ORT; both sources then use the same
+   * encrypt-before-upsert bridge into the local `transactions` table.
    */
   // OPK bank sync: fetch OPK-sealed rows for one Quiltt connection, unseal
   // with the vault OPK private key, import (re-encrypt under MEK). Drives
@@ -1459,6 +1462,7 @@ export function ConnectionsPage() {
 
   async function importSyncedTransactionsForConnection(
     conn: ConnectionRow,
+    sinkResponse?: OrSyncResponse,
   ): Promise<{ unmapped: number; unmappedWalletIds: string[] }> {
     if (!user || !subaccountId) return { unmapped: 0, unmappedWalletIds: [] };
     const allRows = await fetchAllTransactionRows(subaccountId);
@@ -1476,24 +1480,29 @@ export function ConnectionsPage() {
     // for as long as it only asked the one above (#305).
     const stealthRows = conn.is_stealth ? await fetchStealthRows(conn.id) : [];
 
-    if (forThisConn.length === 0 && stealthRows.length === 0) {
+    // New rows arrive directly in the verified orangeway-me sink response.
+    // Legacy encrypted_transactions rows are still read above and opened with
+    // ORT, so switching the write path forward does not orphan old history.
+    const sinkDecodedCount = sinkResponse
+      ? (sinkResponse.rows.transactions ?? []).filter(
+          (row) => row._meta?.or_connection_id === conn.id,
+        ).length
+      : 0;
+
+    if (sinkDecodedCount === 0 && forThisConn.length === 0 && stealthRows.length === 0) {
       return { unmapped: 0, unmappedWalletIds: [] };
     }
 
-    const decoded: OrImportTransaction[] = [];
-    let decryptFailures = 0;
-    for (const row of forThisConn) {
-      try {
-        const json = await decryptOrTxnCipher(row.encrypted_payload);
-        const payload = JSON.parse(json) as OrImportTransaction;
-        // A stealth connection has exactly one wallet, so an untagged row is
-        // an absent field rather than an ambiguous one. Without this the
-        // bridge counts every stealth row `untagged` and skips it.
-        decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
-      } catch {
-        decryptFailures += 1;
-      }
-    }
+    const combined = await sinkAndLegacyTransactionsForConnection(
+      sinkResponse,
+      conn.id,
+      forThisConn,
+      decryptOrTxnCipher,
+    );
+    const decoded: OrImportTransaction[] = combined.transactions.map((payload) =>
+      withStealthSourceWalletId(payload, conn.id, conn.is_stealth),
+    );
+    let decryptFailures = combined.legacyFailures;
 
     // NOT the same key. This comment used to say "same key, same decrypt"
     // and that sentence cost a working feature.
@@ -1577,7 +1586,11 @@ export function ConnectionsPage() {
       }
     }
 
-    const result = await importOrTransactions(conn.id, decoded, {
+    // The transition helper already collapses sink + legacy overlap. Stealth
+    // rows join afterward, so make the same stable-id rule cover all stores.
+    const uniqueDecoded = Array.from(new Map(decoded.map((tx) => [tx.id, tx])).values());
+
+    const result = await importOrTransactions(conn.id, uniqueDecoded, {
       supabase,
       userId: user.id,
       encryptText,
@@ -1638,8 +1651,8 @@ export function ConnectionsPage() {
     // customer as "Wallet ledger: 14 undecryptable", which does not say what
     // happened, whether it is permanent, or whether their money is affected.
     const outcome = describeImportOutcome({
-      attempted: forThisConn.length + stealthRows.length,
-      opened: decoded.length,
+      attempted: sinkDecodedCount + forThisConn.length + stealthRows.length,
+      opened: uniqueDecoded.length,
       imported: result.imported,
       unmapped: result.unmapped,
       untagged: result.untagged,

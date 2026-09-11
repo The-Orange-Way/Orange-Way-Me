@@ -1,74 +1,79 @@
 /**
- * The or-sync request, and the one place the vault keys are handed over.
+ * The or-sync request and its Orange Way Me sink response boundary.
  *
- * or-sync is the ONLY path in this app that exports the Orange Rails
- * credentials key and the transactions key out of the vault and puts them in a
- * request body. Everything else about a "Sync" press is a routing decision.
- * So this module owns two things that belong together and used to be apart:
- * the check that says this connection may go to or-sync at all, and the export
- * that hands the keys to it.
+ * or-sync still needs the credentials subkey transiently so it can talk to the
+ * upstream provider. It must not receive the transactions subkey. Passing the
+ * `orangeway-me` format selects Orange Rails' response sink: OR returns
+ * app-shaped plaintext drafts to this browser and does not write them to its
+ * encrypted_transactions store. The browser then routes those drafts through
+ * importOrTransactions, which encrypts every sensitive field under the vault
+ * MEK before the OWM database write.
  *
- * WHY THE CHECK IS IN HERE AND NOT IN THE CALLER (OWM-T0544, OWM-T0511).
- * The rule "a private connection never goes to or-sync" was correct and tested
- * in both callers: planSyncRoute for a single press, planSyncAll for the bulk
- * press. Neither protected the key export, because the export lived in the
- * caller, below the check, inside a click handler that no test renders.
- * Deleting the private arm from that handler restored OWM-T0530 in full, sent
- * both keys for a connection or-sync answers with a 400, and left every test in
- * the repo green.
- *
- * A guard whose call site nothing checks lasts exactly as long as nobody edits
- * the file. So the guard moved to where the keys actually leave. This function
- * asks planSyncRoute itself and refuses before the first export, which means a
- * caller that forgets the check gets a refusal rather than a key handover.
- *
- * WHAT THIS IS NOT. It is not the kill switch and it has no parameter for one.
- * The switch decides refuse-or-scan once a press has arrived at the private
- * path, inside handleStealthSync, above that path's own key export. Routing
- * asks only what the connection IS. Feeding the switch into either decision is
- * the original defect (OWM-T0530): it made an off switch move a private
- * connection ONTO the key-exporting path instead of refusing it.
+ * The response format is checked here rather than inferred from the request.
+ * A server that ignores or changes `format` must fail closed; falling back to
+ * the legacy request would hand over transactions_key again.
  */
 
+import type { OrImportTransaction } from "@/lib/orImportBridge";
 import { planSyncRoute, type SyncRoute, type SyncRouteCandidate } from "./sync-route";
+
+export const OR_SYNC_FORMAT = "orangeway-me";
 
 /** A connection as this request needs it: enough to route it, plus its id. */
 export interface OrSyncConnection extends SyncRouteCandidate {
   id: string;
 }
 
-/** What or-sync answers with. Narrowed to the fields both callers read. */
+interface OwmSinkAmount {
+  value: string;
+  currency: string;
+  direction: "in" | "out";
+}
+
+/** The row draft emitted by Orange Rails' orangeway-me sink adapter. */
+export interface OwmSinkTransactionRow {
+  date: string;
+  enc_amount: string;
+  enc_description: string | null;
+  enc_merchant: string | null;
+  __resolveAccountId: {
+    or_connection_id: string;
+    or_external_wallet_id: string | null;
+  };
+  _meta: {
+    or_connection_id: string;
+    external_id: string;
+    provider_slug: string;
+    schema_version: string;
+  };
+}
+
+/** The sink response fields used by both ConnectionsPage call paths. */
 export interface OrSyncResponse {
   synced: number;
   connections: Array<{ connection_id: string; synced: number; error?: string }>;
+  rows: {
+    transactions?: OwmSinkTransactionRow[];
+    [table: string]: unknown[] | undefined;
+  };
+  metadata: {
+    format: typeof OR_SYNC_FORMAT;
+    requires_encryption: string[];
+  };
 }
 
 /**
- * The key handover, injected rather than imported.
- *
- * The exports come from the vault context, which is a React hook and cannot be
- * reached from a module. Injecting them is what lets a test assert the thing
- * that actually matters: that on a refused route these were NEVER CALLED. An
- * assertion that some other function was called instead would pass just as
- * happily while a key was still being exported alongside it.
+ * The remaining key handover, injected because the vault export is a React
+ * hook. There is deliberately no transactions-key export on this interface.
  */
-export interface OrSyncKeyHandover {
+export interface OrSyncHandover {
   /** Vault export of the Orange Rails credentials subkey, raw base64. */
   exportCredentialsKey(): Promise<string>;
-  /** Vault export of the Orange Rails transactions subkey, raw base64. */
-  exportTransactionsKey(): Promise<string>;
   /** The ow-or-proxy call. Endpoint and payload, exactly as the caller's own. */
   callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown>;
 }
 
-/**
- * Raised when a connection that must not go to or-sync was handed to it.
- *
- * This is a programming error reaching a safety net, not a condition a user
- * can cause: both callers route correctly today. It carries the route and the
- * connection id so the console line names the cause, and its message is
- * plain enough to survive being shown to someone if a caller surfaces it.
- */
+/** Raised when a connection that must not go to or-sync was handed to it. */
 export class OrSyncRouteRefusal extends Error {
   readonly route: SyncRoute;
   readonly connectionId: string;
@@ -82,22 +87,192 @@ export class OrSyncRouteRefusal extends Error {
 }
 
 /**
- * Ask or-sync to sync these connections, exporting the vault keys for the
- * request. Refuses, before exporting anything, if any connection does not
- * belong on this path.
+ * Raised when Orange Rails did not positively identify the response as the
+ * requested OWM sink shape. The response body is intentionally not attached:
+ * sink rows contain plaintext transaction values while they are in memory.
+ */
+export class OrSyncSinkContractError extends Error {
+  constructor(message = "Orange Rails returned an unexpected sync response format.") {
+    super(message);
+    this.name = "OrSyncSinkContractError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Positive response-direction check for sink mode. Sending `format` is only a
+ * request; metadata.format in the response is the evidence that OR took the
+ * non-storing branch.
+ */
+function assertSinkResponse(value: unknown): asserts value is OrSyncResponse {
+  if (!isRecord(value) || !Array.isArray(value.connections) || !isRecord(value.rows)) {
+    throw new OrSyncSinkContractError();
+  }
+  if (
+    !isRecord(value.metadata) ||
+    value.metadata.format !== OR_SYNC_FORMAT ||
+    !Array.isArray(value.metadata.requires_encryption)
+  ) {
+    throw new OrSyncSinkContractError();
+  }
+  if (
+    typeof value.synced !== "number" ||
+    !Number.isFinite(value.synced) ||
+    value.connections.some(
+      (entry) =>
+        !isRecord(entry) ||
+        typeof entry.connection_id !== "string" ||
+        typeof entry.synced !== "number" ||
+        !Number.isFinite(entry.synced) ||
+        (entry.error !== undefined && typeof entry.error !== "string"),
+    )
+  ) {
+    throw new OrSyncSinkContractError();
+  }
+  const transactions = value.rows.transactions;
+  if (transactions !== undefined && !Array.isArray(transactions)) {
+    throw new OrSyncSinkContractError();
+  }
+}
+
+function parseSinkRow(value: unknown): OwmSinkTransactionRow {
+  if (!isRecord(value) || !isRecord(value._meta) || !isRecord(value.__resolveAccountId)) {
+    throw new OrSyncSinkContractError();
+  }
+  if (
+    typeof value.date !== "string" ||
+    typeof value.enc_amount !== "string" ||
+    (typeof value.enc_description !== "string" && value.enc_description !== null) ||
+    (typeof value.enc_merchant !== "string" && value.enc_merchant !== null) ||
+    typeof value._meta.or_connection_id !== "string" ||
+    typeof value._meta.external_id !== "string" ||
+    typeof value._meta.provider_slug !== "string" ||
+    typeof value._meta.schema_version !== "string" ||
+    typeof value.__resolveAccountId.or_connection_id !== "string" ||
+    (typeof value.__resolveAccountId.or_external_wallet_id !== "string" &&
+      value.__resolveAccountId.or_external_wallet_id !== null)
+  ) {
+    throw new OrSyncSinkContractError();
+  }
+  return value as unknown as OwmSinkTransactionRow;
+}
+
+function parseSinkAmount(value: unknown): OwmSinkAmount {
+  if (typeof value !== "string") throw new OrSyncSinkContractError();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new OrSyncSinkContractError();
+  }
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.value !== "string" ||
+    typeof parsed.currency !== "string" ||
+    (parsed.direction !== "in" && parsed.direction !== "out")
+  ) {
+    throw new OrSyncSinkContractError();
+  }
+  return parsed as unknown as OwmSinkAmount;
+}
+
+/**
+ * Convert the sink drafts for one connection into the existing import bridge
+ * shape. The bridge, not this function, owns encryption and persistence.
+ */
+export function sinkTransactionsForConnection(
+  response: OrSyncResponse,
+  connectionId: string,
+): OrImportTransaction[] {
+  // Never dynamically persist the response according to
+  // metadata.requires_encryption. Only this narrow, validated shape is
+  // admitted, and it is converted to the import bridge's plaintext input.
+  // Unknown sink fields are dropped; known sensitive fields are always
+  // encrypted by the bridge before its upsert.
+  const rows = (response.rows.transactions ?? []).map(parseSinkRow);
+  return rows
+    .filter((row) => row?._meta?.or_connection_id === connectionId)
+    .map((row) => {
+      const amount = parseSinkAmount(row.enc_amount);
+      const numericAmount = Number(amount.value);
+      if (
+        !row._meta.external_id ||
+        !row.date ||
+        !row.__resolveAccountId ||
+        !Number.isFinite(numericAmount)
+      ) {
+        throw new OrSyncSinkContractError();
+      }
+
+      const common = {
+        id: row._meta.external_id,
+        direction: amount.direction,
+        type: row._meta.provider_slug || "imported",
+        description: row.enc_description ?? null,
+        counterparty: row.enc_merchant ?? null,
+        timestamp: row.date,
+        source_wallet_id: row.__resolveAccountId.or_external_wallet_id,
+      } satisfies Omit<OrImportTransaction, "amount" | "amount_sats" | "currency">;
+
+      return amount.currency.toLowerCase() === "sats"
+        ? { ...common, amount_sats: numericAmount, currency: "sats" }
+        : { ...common, amount: numericAmount, currency: amount.currency };
+    });
+}
+
+export interface LegacyOrTransactionRow {
+  connection_id: string;
+  encrypted_payload: string;
+}
+
+/**
+ * Join newly returned sink drafts with rows written by the former ORT-backed
+ * scheme. Legacy rows are still opened locally, and stable external ids are
+ * deduplicated across the transition so a row present on both sides is
+ * imported once.
+ */
+export async function sinkAndLegacyTransactionsForConnection(
+  response: OrSyncResponse | undefined,
+  connectionId: string,
+  legacyRows: readonly LegacyOrTransactionRow[],
+  decryptLegacy: (ciphertext: string) => Promise<string>,
+): Promise<{ transactions: OrImportTransaction[]; legacyFailures: number }> {
+  const byId = new Map<string, OrImportTransaction>();
+  for (const tx of response ? sinkTransactionsForConnection(response, connectionId) : []) {
+    byId.set(tx.id, tx);
+  }
+
+  let legacyFailures = 0;
+  for (const row of legacyRows) {
+    if (row.connection_id !== connectionId) continue;
+    try {
+      const plaintext = await decryptLegacy(row.encrypted_payload);
+      const tx = JSON.parse(plaintext) as OrImportTransaction;
+      if (!tx.id) throw new Error("legacy transaction is missing its stable id");
+      if (!byId.has(tx.id)) byId.set(tx.id, tx);
+    } catch {
+      legacyFailures += 1;
+    }
+  }
+
+  return { transactions: Array.from(byId.values()), legacyFailures };
+}
+
+/**
+ * Ask or-sync to sync these connections through the OWM response sink.
+ * Refuses before exporting credentials if any connection belongs elsewhere.
  *
- * The whole list is checked before the first export rather than per item.
- * Exporting a key and then discovering the list was bad would defeat the
- * point: the key is out of the vault by then, and the only question left is
- * whether it also reached the network.
- *
- * @throws OrSyncRouteRefusal before any key export, if a connection routes
- *         anywhere other than or-sync.
+ * There is no legacy fallback. If sink mode is unavailable or its response is
+ * not positively identified, the request fails without ever exporting or
+ * sending transactions_key.
  */
 export async function requestOrSync(
   subaccountId: string,
   connections: readonly OrSyncConnection[],
-  handover: OrSyncKeyHandover,
+  handover: OrSyncHandover,
 ): Promise<OrSyncResponse> {
   for (const conn of connections) {
     const route = planSyncRoute(conn);
@@ -106,21 +281,22 @@ export async function requestOrSync(
     }
   }
 
-  // Nothing to sync is a zero answer, not a request. Falling through here
-  // would take both keys out of the vault to ask or-sync about no connections,
-  // and then leave the caller to interpret the reply to a question we had no
-  // reason to ask.
   if (connections.length === 0) {
-    return { synced: 0, connections: [] };
+    return {
+      synced: 0,
+      connections: [],
+      rows: {},
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    };
   }
 
   const credentials_key = await handover.exportCredentialsKey();
-  const transactions_key = await handover.exportTransactionsKey();
-
-  return (await handover.callProxy("or-sync", {
+  const response = await handover.callProxy("or-sync", {
     subaccount_id: subaccountId,
     connection_ids: connections.map((c) => c.id),
     credentials_key,
-    transactions_key,
-  })) as OrSyncResponse;
+    format: OR_SYNC_FORMAT,
+  });
+  assertSinkResponse(response);
+  return response;
 }
