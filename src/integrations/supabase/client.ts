@@ -20,6 +20,17 @@ function createSupabaseClient() {
       storage: typeof window !== "undefined" ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,
+      // Pinned explicitly (DEV-0478): without this the client falls back to
+      // whatever @supabase/supabase-js defaults to for the current version,
+      // which can change on a dependency bump with nobody noticing. PKCE
+      // keeps the session handoff to a short-lived code in the query string
+      // instead of real access/refresh tokens landing in the URL fragment,
+      // where they would sit in browser history and be readable by anything
+      // that reads location.href. It also protects /join: the referral flow
+      // (DEV-0138) reads and wipes a code from the URL fragment on load, and
+      // a fragment-based auth flow racing that wipe could silently drop a
+      // session mid-establishment.
+      flowType: "pkce",
     },
   });
 }
