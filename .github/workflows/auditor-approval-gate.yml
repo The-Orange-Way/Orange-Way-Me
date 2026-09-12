@@ -66,18 +66,41 @@ jobs:
             const { approved, reason } = evaluateAuditorApproval(reviews, author, auditorLogin, headSha);
             console.log(reason);
 
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+            const checkPayload = {
               name: 'Auditor approval gate',
-              head_sha: headSha,
               status: 'completed',
               conclusion: approved ? 'success' : 'failure',
               output: {
                 title: approved ? 'Auditor approval present' : 'No qualifying Auditor approval',
                 summary: reason,
               },
+            };
+
+            const existingRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha,
+              check_name: 'Auditor approval gate',
             });
+
+            if (existingRuns.length > 0) {
+              // Keep exactly one check-run per commit: update the most recent
+              // one instead of piling on a new one for every re-fire.
+              const latest = existingRuns.sort((a, b) => new Date(b.started_at) - new Date(a.started_at))[0];
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: latest.id,
+                ...checkPayload,
+              });
+            } else {
+              await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head_sha: headSha,
+                ...checkPayload,
+              });
+            }
 
             if (!approved) {
               core.setFailed(reason);
