@@ -105,7 +105,12 @@ export function TransactionsPage() {
     bulkDelete,
     bulkAddTag,
     searchByMerchant,
-  } = useTransactions({ startDate: range.start, endDate: range.end });
+    hasTransactionsOutsideRange,
+  } = useTransactions({
+    startDate: range.start,
+    endDate: range.end,
+    includeOutOfRangeCount: true,
+  });
 
   // Out-of-range HMAC search: when the user types a search term, also run an
   // exact-match HMAC lookup across the user's whole history. Merged with the
@@ -422,13 +427,17 @@ export function TransactionsPage() {
                 </Button>
               </div>
             </>
-          ) : range.preset !== "all_time" ? (
+          ) : range.preset !== "all_time" && hasTransactionsOutsideRange ? (
             <>
-              <p>No transactions in {range.label}.</p>
+              <p>
+                No transactions in {range.label}. Try changing the date filter or view all time.
+              </p>
               <Button variant="outline" size="sm" onClick={() => setRange(presetRange("all_time"))}>
                 View all time
               </Button>
             </>
+          ) : range.preset !== "all_time" ? (
+            <p>No transactions in {range.label}.</p>
           ) : (
             <p>No transactions yet.</p>
           )}

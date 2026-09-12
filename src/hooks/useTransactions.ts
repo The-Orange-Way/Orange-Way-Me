@@ -123,19 +123,22 @@ async function decryptInBatches(
 export function useTransactions(opts: {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
+  includeOutOfRangeCount?: boolean;
 }) {
-  const { startDate, endDate } = opts;
+  const { startDate, endDate, includeOutOfRangeCount = false } = opts;
   const { user } = useAuth();
   const { isUnlocked, encryptText, decryptText, getHmacKey, buildHouseholdSignatureFields } =
     useVault();
   const [items, setItems] = useState<DecryptedTxn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasTransactionsOutsideRange, setHasTransactionsOutsideRange] = useState(false);
   const cacheRef = useRef<Map<string, DecryptedTxn>>(new Map());
 
   const refresh = useCallback(async () => {
     if (!user || !isUnlocked) {
       setItems([]);
+      setHasTransactionsOutsideRange(false);
       setLoading(false);
       return;
     }
@@ -151,6 +154,16 @@ export function useTransactions(opts: {
         .order("date", { ascending: false })
         .limit(10_000);
       if (e) throw e;
+
+      if (includeOutOfRangeCount) {
+        const { count, error: countError } = await txnsTable()
+          .select("id", { count: "exact", head: true })
+          .or(`date.lt.${startDate},date.gt.${endDate}`);
+        if (countError) throw countError;
+        setHasTransactionsOutsideRange((count ?? 0) > 0);
+      } else {
+        setHasTransactionsOutsideRange(false);
+      }
 
       const rows = (data ?? []) as RawRow[];
       // Use cache where updated_at matches.
@@ -175,11 +188,12 @@ export function useTransactions(opts: {
       });
       setItems(interim.filter((x): x is DecryptedTxn => x !== null));
     } catch (err) {
+      setHasTransactionsOutsideRange(false);
       setError(err instanceof Error ? err.message : "Failed to load transactions");
     } finally {
       setLoading(false);
     }
-  }, [user, isUnlocked, decryptText, startDate, endDate]);
+  }, [user, isUnlocked, decryptText, startDate, endDate, includeOutOfRangeCount]);
 
   useEffect(() => {
     void refresh();
@@ -482,6 +496,7 @@ export function useTransactions(opts: {
     items,
     loading,
     error,
+    hasTransactionsOutsideRange,
     refresh,
     totals,
     createTransaction,
