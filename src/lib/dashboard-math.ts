@@ -239,10 +239,12 @@ export function accountsSummary(accounts: Account[], primaryCurrency: string): A
 // ---------------------------------------------------------------------------
 
 export interface RecurringBill {
-  /** Stable opaque key — merchant + rounded amount band. Used for dismissals. */
+  /** Stable opaque key — merchant + rounded amount band + currency. */
   key: string;
   merchant: string;
   category_id: string | null;
+  /** Currency of the transactions that make up this bill. */
+  currency: string;
   /** Average absolute amount (positive). */
   typicalAmount: number;
   /** Last seen date (YYYY-MM-DD). */
@@ -269,7 +271,8 @@ export function detectRecurringBills(
   cutoff.setDate(cutoff.getDate() - lookbackDays);
   cutoff.setHours(0, 0, 0, 0);
 
-  // Group by (merchant lowercased, amount band rounded to 5%).
+  // Group by merchant, amount band, and currency. A fiat bill and a Bitcoin
+  // bill with the same merchant must not be averaged into one amount.
   type Key = string;
   const groups = new Map<Key, DecryptedTxn[]>();
 
@@ -286,7 +289,7 @@ export function detectRecurringBills(
     // Band amounts within ±5% by rounding to nearest 5% bucket.
     const band = Math.round(amt / (amt * 0.05 + 1)) * 1; // simple bucketing
     const bandKey = `${Math.round(amt)}`; // exact-dollar bucket; we'll relax with overlap below
-    const key = `${merchant}::${bandKey}`;
+    const key = `${merchant}::${bandKey}::${t.currency || "USD"}`;
     const arr = groups.get(key) ?? [];
     arr.push(t);
     groups.set(key, arr);
@@ -296,10 +299,11 @@ export function detectRecurringBills(
   // Merge nearby bands for the same merchant within ±5%.
   const merchantGroups = new Map<string, DecryptedTxn[]>();
   for (const [k, arr] of groups) {
-    const merchant = k.split("::")[0];
-    const existing = merchantGroups.get(merchant);
+    const [merchant, , currency] = k.split("::");
+    const merchantKey = `${merchant}::${currency}`;
+    const existing = merchantGroups.get(merchantKey);
     if (!existing) {
-      merchantGroups.set(merchant, [...arr]);
+      merchantGroups.set(merchantKey, [...arr]);
       continue;
     }
     const refAmt = Math.abs(Number(existing[0].amount));
@@ -308,7 +312,7 @@ export function detectRecurringBills(
       existing.push(...arr);
     } else {
       // Different price tier — track separately under merchant+band.
-      merchantGroups.set(`${merchant}::${Math.round(newAmt)}`, [...arr]);
+      merchantGroups.set(`${merchantKey}::${Math.round(newAmt)}`, [...arr]);
     }
   }
 
@@ -344,14 +348,15 @@ export function detectRecurringBills(
     const typicalAmount =
       sorted.reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0) / sorted.length;
 
-    const merchant = key.split("::")[0];
+    const [merchant, currency] = key.split("::");
     const display = last.merchant || merchant;
-    const stable = djb2Hash(`${merchant.toLowerCase()}|${Math.round(typicalAmount)}`);
+    const stable = djb2Hash(`${merchant.toLowerCase()}|${Math.round(typicalAmount)}|${currency}`);
 
     out.push({
       key: stable,
       merchant: display,
       category_id: last.category_id,
+      currency: last.currency || currency,
       typicalAmount,
       lastDate: last.date,
       nextDate: next,

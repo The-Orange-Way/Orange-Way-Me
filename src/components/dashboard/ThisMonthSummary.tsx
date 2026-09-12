@@ -12,7 +12,8 @@ import { useCategories } from "@/hooks/useCategories";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { thisMonthSummary } from "@/lib/dashboard-math";
 import { spentByCategory } from "@/lib/budget-math";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
+import { formatPrimaryCurrencyWithMode } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 
@@ -28,6 +29,7 @@ function monthRange(d: Date) {
 export function ThisMonthSummary() {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
   const anchor = useMemo(() => new Date(), []);
   const range = useMemo(() => monthRange(anchor), [anchor]);
   const { accounts } = useAccounts();
@@ -99,14 +101,24 @@ export function ThisMonthSummary() {
             <StatRow
               label="Income"
               value={summary.income}
-              formatted={fmt.formatCurrency(summary.income, prefs.primaryCurrency)}
+              formatted={formatPrimaryCurrencyWithMode(
+                summary.income,
+                prefs.primaryCurrency,
+                prefs.btcDisplayMode,
+                loc,
+              )}
               deltaPct={summary.incomeDeltaPct}
               positiveIsGood
             />
             <StatRow
               label="Spending"
               value={summary.spending}
-              formatted={fmt.formatCurrency(summary.spending, prefs.primaryCurrency)}
+              formatted={formatPrimaryCurrencyWithMode(
+                summary.spending,
+                prefs.primaryCurrency,
+                prefs.btcDisplayMode,
+                loc,
+              )}
               deltaPct={summary.spendingDeltaPct}
               positiveIsGood={false}
             />
@@ -119,7 +131,12 @@ export function ThisMonthSummary() {
                   summary.net >= 0 ? "text-emerald-600 dark:text-emerald-500" : "text-destructive"
                 }`}
               >
-                {fmt.formatCurrency(summary.net, prefs.primaryCurrency)}
+                {formatPrimaryCurrencyWithMode(
+                  summary.net,
+                  prefs.primaryCurrency,
+                  prefs.btcDisplayMode,
+                  loc,
+                )}
               </div>
             </div>
             <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">

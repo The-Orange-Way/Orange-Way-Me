@@ -19,7 +19,8 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useTransactions } from "@/hooks/useTransactions";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { cashFlowByMonth } from "@/lib/dashboard-math";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
+import { formatPrimaryCurrencyWithMode } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function trailing6() {
@@ -34,6 +35,7 @@ function trailing6() {
 export function CashFlowChart() {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
   const range = useMemo(trailing6, []);
   const { accounts } = useAccounts();
   const { items: txns, loading } = useTransactions(range);
@@ -77,9 +79,13 @@ export function CashFlowChart() {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                 <YAxis
                   tickFormatter={(v) =>
-                    fmt.formatCurrency(Number(v), prefs.primaryCurrency, {
-                      maximumFractionDigits: 0,
-                    })
+                    formatPrimaryCurrencyWithMode(
+                      Number(v),
+                      prefs.primaryCurrency,
+                      prefs.btcDisplayMode,
+                      loc,
+                      { maximumFractionDigits: 0 },
+                    )
                   }
                   tick={{ fontSize: 11 }}
                   width={70}
@@ -87,7 +93,12 @@ export function CashFlowChart() {
                 <Tooltip
                   formatter={
                     ((v: number, name: string) => [
-                      fmt.formatCurrency(v, prefs.primaryCurrency),
+                      formatPrimaryCurrencyWithMode(
+                        v,
+                        prefs.primaryCurrency,
+                        prefs.btcDisplayMode,
+                        loc,
+                      ),
                       name,
                     ]) as never
                   }

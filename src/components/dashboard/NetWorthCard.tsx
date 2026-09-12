@@ -25,7 +25,12 @@ import { useTransactions } from "@/hooks/useTransactions";
 import { netWorthSeries, accountsSummary } from "@/lib/dashboard-math";
 import { useDashboardPrefs, type NetWorthRange } from "@/hooks/useDashboardPrefs";
 import { FX_DISCLAIMER } from "@/lib/fx-rates";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
+import {
+  formatCurrencyWithMode,
+  formatPrimaryCurrencyWithMode,
+  isBitcoinCurrency,
+} from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const RANGE_TO_MONTHS: Record<NetWorthRange, number> = {
@@ -49,6 +54,7 @@ function trailingRange(months: number) {
 export function NetWorthCard() {
   const { prefs, update } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
   const [range, setRange] = useState<NetWorthRange>(prefs.netWorthRange);
   const months = RANGE_TO_MONTHS[range];
   const txnRange = useMemo(() => trailingRange(months), [months]);
@@ -106,7 +112,12 @@ export function NetWorthCard() {
         ) : (
           <div className="flex flex-wrap items-baseline gap-4">
             <div className="font-mono text-3xl font-semibold tabular-nums">
-              {fmt.formatCurrency(summary.net, prefs.primaryCurrency)}
+              {formatPrimaryCurrencyWithMode(
+                summary.net,
+                prefs.primaryCurrency,
+                prefs.btcDisplayMode,
+                loc,
+              )}
               {multiCurrency && (
                 <TooltipProvider>
                   <UiTooltip>
@@ -118,9 +129,10 @@ export function NetWorthCard() {
                       <p className="mt-1 text-xs font-mono">
                         Raw:{" "}
                         {Object.entries(summary.rawByCurrency)
-                          .map(
-                            ([cur, sum]) =>
-                              `${fmt.formatCurrency(sum, cur, { maximumFractionDigits: 2 })}`,
+                          .map(([cur, sum]) =>
+                            isBitcoinCurrency(cur)
+                              ? formatCurrencyWithMode(sum, cur, prefs.btcDisplayMode, loc)
+                              : fmt.formatCurrency(sum, cur, { maximumFractionDigits: 2 }),
                           )
                           .join(" · ")}
                       </p>
@@ -136,7 +148,12 @@ export function NetWorthCard() {
             >
               {isUp ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
               <span className="tabular-nums">
-                {fmt.formatCurrency(Math.abs(delta.abs), prefs.primaryCurrency)}
+                {formatPrimaryCurrencyWithMode(
+                  Math.abs(delta.abs),
+                  prefs.primaryCurrency,
+                  prefs.btcDisplayMode,
+                  loc,
+                )}
               </span>
               <span className="text-xs text-muted-foreground">
                 ({delta.pct >= 0 ? "+" : ""}
@@ -163,9 +180,13 @@ export function NetWorthCard() {
                 />
                 <YAxis
                   tickFormatter={(v) =>
-                    fmt.formatCurrency(Number(v), prefs.primaryCurrency, {
-                      maximumFractionDigits: 0,
-                    })
+                    formatPrimaryCurrencyWithMode(
+                      Number(v),
+                      prefs.primaryCurrency,
+                      prefs.btcDisplayMode,
+                      loc,
+                      { maximumFractionDigits: 0 },
+                    )
                   }
                   className="text-xs"
                   tick={{ fontSize: 11 }}
@@ -182,7 +203,15 @@ export function NetWorthCard() {
                   ]}
                 />
                 <Tooltip
-                  formatter={((v: number) => fmt.formatCurrency(v, prefs.primaryCurrency)) as never}
+                  formatter={
+                    ((v: number) =>
+                      formatPrimaryCurrencyWithMode(
+                        v,
+                        prefs.primaryCurrency,
+                        prefs.btcDisplayMode,
+                        loc,
+                      )) as never
+                  }
                   labelFormatter={(d) =>
                     new Date(d + "T12:00:00").toLocaleDateString(undefined, {
                       month: "long",
