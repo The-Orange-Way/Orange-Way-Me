@@ -15,8 +15,9 @@ import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
 import { PiggyBank, Banknote, Calendar, TrendingUp, AlertCircle } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
+import { formatCurrencyWithMode, isBitcoinCurrency } from "@/lib/format";
 
 // fmtUSD resolved via useLocaleFormat + useDashboardPrefs at runtime
 function fmtMonths(d: number | null): string | null {
@@ -36,7 +37,13 @@ interface Props {
 export function GoalCard({ goal, accounts, txns }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
-  const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
+  const linkedCurrency =
+    accounts.find((a) => goal.linked_account_ids.includes(a.id))?.currency ?? prefs.primaryCurrency;
+  const loc = numberLocale(prefs.numberFormat);
+  const fmtGoalAmount = (n: number) =>
+    isBitcoinCurrency(linkedCurrency)
+      ? formatCurrencyWithMode(n, "sats", prefs.btcDisplayMode, loc)
+      : fmt.formatCurrency(n, linkedCurrency);
   const prog = computeProgress(goal, accounts);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
@@ -84,7 +91,7 @@ export function GoalCard({ goal, accounts, txns }: Props) {
                  * as the bar itself.
                  */}
                 {prog.untrackableReason !== "no_target_set" && (
-                  <span className="text-muted-foreground">target {fmtUSD(prog.target)}</span>
+                  <span className="text-muted-foreground">target {fmtGoalAmount(prog.target)}</span>
                 )}
               </div>
               <div className="flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5 text-xs text-muted-foreground">
@@ -95,15 +102,15 @@ export function GoalCard({ goal, accounts, txns }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
-                <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
+                <span className="font-semibold text-base">{fmtGoalAmount(prog.current)}</span>
+                <span className="text-muted-foreground">of {fmtGoalAmount(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">
                   {goal.type === "save_up"
-                    ? `${fmtUSD(prog.remaining)} to go`
-                    : `${fmtUSD(prog.remaining)} remaining`}
+                    ? `${fmtGoalAmount(prog.remaining)} to go`
+                    : `${fmtGoalAmount(prog.remaining)} remaining`}
                 </span>
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>

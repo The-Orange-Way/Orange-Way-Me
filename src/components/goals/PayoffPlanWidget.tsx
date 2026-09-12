@@ -9,8 +9,9 @@ import { orderPayDown } from "@/lib/goals-math";
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import { Link } from "@tanstack/react-router";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
+import { formatCurrencyWithMode, isBitcoinCurrency } from "@/lib/format";
 
 interface Props {
   goals: Goal[];
@@ -21,7 +22,11 @@ export function PayoffPlanWidget({ goals, accounts }: Props) {
   const [strategy, setStrategy] = useState<"avalanche" | "snowball">("avalanche");
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
-  const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
+  const loc = numberLocale(prefs.numberFormat);
+  const fmtAmount = (n: number, currency: string) =>
+    isBitcoinCurrency(currency)
+      ? formatCurrencyWithMode(n, "sats", prefs.btcDisplayMode, loc)
+      : fmt.formatCurrency(n, currency);
   const ordered = orderPayDown(goals, accounts, strategy);
   if (ordered.length < 2) return null;
 
@@ -45,6 +50,7 @@ export function PayoffPlanWidget({ goals, accounts }: Props) {
           {ordered.map((g, i) => {
             const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
             const debt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+            const currency = linked[0]?.currency ?? prefs.primaryCurrency;
             const apr = Number(g.interest_rate ?? "0") || 0;
             const min = Number(g.minimum_payment ?? "0") || 0;
             return (
@@ -61,10 +67,12 @@ export function PayoffPlanWidget({ goals, accounts }: Props) {
                     <div className="font-medium truncate">{g.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {apr.toFixed(2)}% APR
-                      {min > 0 && ` · min ${fmtUSD(min)}/mo`}
+                      {min > 0 && ` · min ${fmtAmount(min, currency)}/mo`}
                     </div>
                   </div>
-                  <div className="font-mono tabular-nums text-sm font-semibold">{fmtUSD(debt)}</div>
+                  <div className="font-mono tabular-nums text-sm font-semibold">
+                    {fmtAmount(debt, currency)}
+                  </div>
                 </Link>
               </li>
             );

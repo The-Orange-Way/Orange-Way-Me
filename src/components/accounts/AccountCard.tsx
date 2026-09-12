@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Account } from "@/lib/connectors";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/connectors/constants";
-import { formatCurrencyWithMode } from "@/lib/format";
+import { formatCurrencyWithMode, isBitcoinCurrency, unitIsExact } from "@/lib/format";
 import { useLocaleFormat, numberLocale } from "@/lib/locale";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { useNow } from "@/hooks/useNow";
@@ -55,6 +55,8 @@ export function AccountCard({
     typeof txnSum === "number" &&
     Math.abs(txnSum) > 0.005;
   const displayBalance = useTxnLive ? String(txnSum) : account.balance;
+  const displayCurrency =
+    useTxnLive && isBitcoinCurrency(account.currency) ? "sats" : account.currency;
 
   return (
     <Card
@@ -88,7 +90,9 @@ export function AccountCard({
       </div>
       <div className="text-right">
         <div className="font-mono text-lg font-semibold tabular-nums">
-          {formatCurrencyWithMode(displayBalance, account.currency, prefs.btcDisplayMode, loc)}
+          {formatCurrencyWithMode(displayBalance, displayCurrency, prefs.btcDisplayMode, loc, {
+            unitIsExact: !useTxnLive && unitIsExact(account.format_version),
+          })}
         </div>
         <div className="text-[11px] text-muted-foreground">
           {useTxnLive
