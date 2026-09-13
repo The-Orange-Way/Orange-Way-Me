@@ -41,7 +41,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { captureException, captureMessage } from "@/lib/observability/sentry";
+import {
+  captureExceptionWithoutBreadcrumbs as captureException,
+  captureMessageWithoutBreadcrumbs as captureMessage,
+} from "@/lib/observability/sentry";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -222,6 +225,43 @@ async function callProxy(endpoint: string, payload: Record<string, unknown>): Pr
 type DestState =
   | { kind: "closed" }
   | { kind: "open"; connectionId: string; wallets: DestinationPickerWallet[] };
+
+type CapturedFailureCode =
+  | "or_import_bridge_failed"
+  | "connection_sync_failed"
+  | "connection_sync_all_failed"
+  | "stealth_ledger_import_failed";
+
+function safeErrorClass(value: unknown): string {
+  if (value instanceof TypeError) return "TypeError";
+  if (value instanceof RangeError) return "RangeError";
+  if (value instanceof ReferenceError) return "ReferenceError";
+  if (value instanceof SyntaxError) return "SyntaxError";
+  if (value instanceof URIError) return "URIError";
+  if (typeof DOMException !== "undefined" && value instanceof DOMException) return "DOMException";
+  if (value instanceof Error) return "Error";
+  return "UnknownThrownValue";
+}
+
+/** Capture the error class and a fixed code, never the original error message. */
+function captureSafeFailure(
+  area: string,
+  code: CapturedFailureCode,
+  error: unknown,
+  connectionId?: string,
+): void {
+  try {
+    const errorClass = safeErrorClass(error);
+    const report = new Error(code);
+    report.name = errorClass;
+    captureException(report, {
+      tags: { area, failureCode: code, errorClass },
+      ...(connectionId ? { extra: { connectionId } } : {}),
+    });
+  } catch {
+    // Observability must never turn a handled failure into a throw.
+  }
+}
 
 export function ConnectionsPage() {
   const { user } = useAuth();
@@ -1128,15 +1168,9 @@ export function ConnectionsPage() {
             handleEditMapping(conn);
           }
         } catch (importErr) {
-          console.error("[Connections] OR import bridge failed", importErr);
-          try {
-            captureException(importErr, {
-              tags: { area: "or-import-bridge" },
-              extra: { connectionId: conn.id },
-            });
-          } catch {
-            // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-          }
+          console.error("[Connections] OR import bridge failed");
+          console.log("[Connections] OR import bridge failure detail", importErr);
+          captureSafeFailure("or-import-bridge", "or_import_bridge_failed", importErr, conn.id);
           toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
         }
       }
@@ -1144,15 +1178,9 @@ export function ConnectionsPage() {
       await refreshList();
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
-      console.error("[Connections] sync failed", err);
-      try {
-        captureException(err, {
-          tags: { area: "connections-sync" },
-          extra: { connectionId: conn.id },
-        });
-      } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-      }
+      console.error("[Connections] sync failed");
+      console.log("[Connections] sync failure detail", err);
+      captureSafeFailure("connections-sync", "connection_sync_failed", err, conn.id);
       toast.error(`Sync failed. ${humanizeError(err)}`);
     } finally {
       setSyncingId(null);
@@ -1242,18 +1270,14 @@ export function ConnectionsPage() {
           try {
             await importSyncedTransactionsForConnection(conn);
           } catch (importErr) {
-            console.error(
-              `[Connections] OR import bridge failed for ${succ.connection_id}`,
+            console.error("[Connections] OR import bridge failed during sync all");
+            console.log("[Connections] OR import bridge failure detail", importErr);
+            captureSafeFailure(
+              "or-import-bridge",
+              "or_import_bridge_failed",
               importErr,
+              succ.connection_id,
             );
-            try {
-              captureException(importErr, {
-                tags: { area: "or-import-bridge" },
-                extra: { connectionId: succ.connection_id },
-              });
-            } catch {
-              // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-            }
           }
         }
       }
@@ -1261,12 +1285,9 @@ export function ConnectionsPage() {
       await refreshList();
       setTxRefreshKey((k) => k + 1);
     } catch (err) {
-      console.error("[Connections] sync all failed", err);
-      try {
-        captureException(err, { tags: { area: "connections-sync-all" } });
-      } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-      }
+      console.error("[Connections] sync all failed");
+      console.log("[Connections] sync all failure detail", err);
+      captureSafeFailure("connections-sync-all", "connection_sync_all_failed", err);
       toast.error(`Sync failed. ${humanizeError(err)}`);
     } finally {
       setSyncingAll(false);
@@ -1310,25 +1331,13 @@ export function ConnectionsPage() {
           encryptText,
           resolveAccountIds: (cId, sourceWalletId) => getActiveAccountIds(cId, sourceWalletId),
           getAccountCurrency: (accountId) => accountById.get(accountId)?.currency,
-          onError: (orTxId, err) => console.warn(`[bank-sync] tx ${orTxId} failed`, err),
+          onError: (orTxId, err) => {
+            console.warn("[bank-sync] transaction import failed");
+            console.log("[bank-sync] transaction import failure detail", { orTxId, err });
+          },
           buildSignatureFields: buildHouseholdSignatureFields,
         },
       });
-
-      if (result.errored > 0) {
-        try {
-          captureMessage(
-            `bank sync: ${result.errored} of ${result.total} transaction(s) failed to import`,
-            {
-              level: "warning",
-              tags: { area: "bank-sync-import" },
-              extra: { connectionId: orConnectionId, errored: result.errored, total: result.total },
-            },
-          );
-        } catch {
-          // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-        }
-      }
 
       // Apply per-account balance deltas for newly-inserted rows.
       for (const [accountId, net] of Object.entries(result.netByAccount)) {
@@ -1482,16 +1491,23 @@ export function ConnectionsPage() {
 
     const decoded: OrImportTransaction[] = [];
     let decryptFailures = 0;
+    let parseFailures = 0;
     for (const row of forThisConn) {
+      let json: string;
       try {
-        const json = await decryptOrTxnCipher(row.encrypted_payload);
+        json = await decryptOrTxnCipher(row.encrypted_payload);
+      } catch {
+        decryptFailures += 1;
+        continue;
+      }
+      try {
         const payload = JSON.parse(json) as OrImportTransaction;
         // A stealth connection has exactly one wallet, so an untagged row is
         // an absent field rather than an ambiguous one. Without this the
         // bridge counts every stealth row `untagged` and skips it.
         decoded.push(withStealthSourceWalletId(payload, conn.id, conn.is_stealth));
       } catch {
-        decryptFailures += 1;
+        parseFailures += 1;
       }
     }
 
@@ -1572,8 +1588,7 @@ export function ConnectionsPage() {
         decoded.push(withStealthSourceWalletId(payloadWithId, conn.id, true));
       } catch {
         // Opened but not parseable: still a failure, and a different one.
-        // Counted together because the customer-facing outcome is the same.
-        decryptFailures += 1;
+        parseFailures += 1;
       }
     }
 
@@ -1585,34 +1600,32 @@ export function ConnectionsPage() {
         getActiveAccountIds(orConnectionId, sourceWalletId),
       getAccountCurrency: (accountId) => accountById.get(accountId)?.currency,
       onError: (orTxId, err) => {
-        console.warn(`[orImportBridge] tx ${orTxId} failed`, err);
+        console.warn("[orImportBridge] transaction import failed");
+        console.log("[orImportBridge] transaction import failure detail", { orTxId, err });
       },
       buildSignatureFields: buildHouseholdSignatureFields,
     });
 
     if (decryptFailures > 0) {
       try {
-        captureMessage(
-          `OR import: ${decryptFailures} of ${forThisConn.length + stealthRows.length} row(s) failed to open`,
-          {
-            level: "warning",
-            tags: { area: "or-import-decrypt" },
-            extra: { connectionId: conn.id, decryptFailures },
-          },
-        );
-      } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-      }
-    }
-    if (result.errored > 0) {
-      try {
-        captureMessage(`OR import: ${result.errored} of ${result.total} row(s) errored`, {
+        captureMessage("OR import could not decrypt sealed rows", {
           level: "warning",
-          tags: { area: "or-import-bridge" },
-          extra: { connectionId: conn.id, errored: result.errored },
+          tags: { area: "or-import-decrypt", failureCode: "decrypt_failed" },
+          extra: { connectionId: conn.id, failureCount: decryptFailures },
         });
       } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+        // Observability must never turn a handled import failure into a throw.
+      }
+    }
+    if (parseFailures > 0) {
+      try {
+        captureMessage("OR import could not parse decrypted rows", {
+          level: "warning",
+          tags: { area: "or-import-parse", failureCode: "parse_failed" },
+          extra: { connectionId: conn.id, failureCount: parseFailures },
+        });
+      } catch {
+        // Observability must never turn a handled import failure into a throw.
       }
     }
 
@@ -1644,7 +1657,7 @@ export function ConnectionsPage() {
       unmapped: result.unmapped,
       untagged: result.untagged,
       errored: result.errored,
-      unreadable: decryptFailures,
+      unreadable: decryptFailures + parseFailures,
       unitMismatch: result.unitMismatch,
     });
     if (outcome.silent) {
@@ -1661,7 +1674,7 @@ export function ConnectionsPage() {
     // nothing about, and the one we would want to find afterwards.
     if (outcome.allUnreadable) {
       console.warn(
-        `[OW Connections] every sealed row for connection ${conn.id} failed to open (${decryptFailures} of ${forThisConn.length + stealthRows.length}). Consistent with a vault key rotation after these rows were sealed (DL-1506).`,
+        `[OW Connections] every sealed row for connection ${conn.id} failed to open (${decryptFailures + parseFailures} of ${forThisConn.length + stealthRows.length}). Consistent with a vault key rotation after these rows were sealed (DL-1506).`,
       );
     }
     if (outcome.level === "warning") {
@@ -1706,15 +1719,9 @@ export function ConnectionsPage() {
         handleEditMapping(conn);
       }
     } catch (err) {
-      console.error("[Connections] stealth ledger import failed", err);
-      try {
-        captureException(err, {
-          tags: { area: "stealth-ledger-import" },
-          extra: { connectionId: conn.id },
-        });
-      } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-      }
+      console.error("[Connections] stealth ledger import failed");
+      console.log("[Connections] stealth ledger import failure detail", err);
+      captureSafeFailure("stealth-ledger-import", "stealth_ledger_import_failed", err, conn.id);
       toast.error(`Couldn't add the scanned transactions to your ledger. ${humanizeError(err)}`);
     }
   }

@@ -22,11 +22,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const initMock = vi.fn();
 const captureExceptionMock = vi.fn();
 const captureMessageMock = vi.fn();
+const clearBreadcrumbsMock = vi.fn();
+const eventProcessors: Array<(event: Record<string, unknown>) => Record<string, unknown>> = [];
+const addEventProcessorMock = vi.fn(
+  (processor: (event: Record<string, unknown>) => Record<string, unknown>) => {
+    eventProcessors.push(processor);
+  },
+);
+const withScopeMock = vi.fn(
+  (
+    callback: (scope: {
+      clearBreadcrumbs: () => void;
+      addEventProcessor: typeof addEventProcessorMock;
+    }) => unknown,
+  ) =>
+    callback({
+      clearBreadcrumbs: clearBreadcrumbsMock,
+      addEventProcessor: addEventProcessorMock,
+    }),
+);
 
 vi.mock("@sentry/react", () => ({
   init: initMock,
   captureException: captureExceptionMock,
   captureMessage: captureMessageMock,
+  withScope: withScopeMock,
 }));
 
 /**
@@ -49,6 +69,10 @@ describe("Sentry init no-PII contract", () => {
     initMock.mockClear();
     captureExceptionMock.mockClear();
     captureMessageMock.mockClear();
+    clearBreadcrumbsMock.mockClear();
+    addEventProcessorMock.mockClear();
+    eventProcessors.length = 0;
+    withScopeMock.mockClear();
     vi.stubEnv("VITE_SENTRY_DSN", "https://public@sentry.test/123");
   });
 
@@ -62,6 +86,26 @@ describe("Sentry init no-PII contract", () => {
     expect(initMock).toHaveBeenCalledTimes(1);
     const cfg = initMock.mock.calls[0][0];
     expect(cfg.sendDefaultPii).toBe(false);
+  });
+
+  it("clears inherited breadcrumbs for ZKA-sensitive capture variants", async () => {
+    const mod = await freshSentryModule();
+    const exception = new Error("fixed-code-only");
+    const context = { tags: { area: "or-import" } };
+
+    mod.captureExceptionWithoutBreadcrumbs(exception, context);
+    mod.captureMessageWithoutBreadcrumbs("fixed message", context);
+
+    expect(withScopeMock).toHaveBeenCalledTimes(2);
+    expect(clearBreadcrumbsMock).toHaveBeenCalledTimes(2);
+    expect(addEventProcessorMock).toHaveBeenCalledTimes(2);
+    expect(captureExceptionMock).toHaveBeenCalledWith(exception, context);
+    expect(captureMessageMock).toHaveBeenCalledWith("fixed message", context);
+    for (const processor of eventProcessors) {
+      expect(
+        processor({ breadcrumbs: [{ message: "private wallet value" }], message: "fixed" }),
+      ).toEqual({ breadcrumbs: [], message: "fixed" });
+    }
   });
 
   it("keeps tracesSampleRate at 0 (no performance tracing)", async () => {
@@ -169,8 +213,8 @@ describe("Sentry init no-PII contract", () => {
    * The one free-form string beforeSend used to miss. Sentry.captureMessage
    * populates the top-level message, and none of the walks (extra, contexts,
    * tags, request, transaction, breadcrumbs, exception values) reach it. There
-   * is no application callsite for captureMessage today, so this pins a latent
-   * gap shut before one arrives rather than closing a live leak.
+   * current application callsites use literal messages, so this pins the
+   * free-form variant shut as well.
    */
   it("scrubs the top-level event message, which is what captureMessage populates", async () => {
     const mod = await freshSentryModule();
@@ -260,8 +304,8 @@ describe("Sentry init no-PII contract", () => {
    * event protocol, not just strings. Before this fix, a non-string element
    * (an object, for instance) passed through scrubEventLoose untouched,
    * unlike every other unknown-shape value in this file which goes through
-   * scrubValue. Nothing calls captureMessage with params today, so this
-   * pins a latent gap shut rather than closing a live leak.
+   * scrubValue. Current callsites do not pass params, so this pins the latent
+   * parameterised-message shape shut too.
    */
   it("redacts a secret-looking key inside an object element of logentry.params", async () => {
     const mod = await freshSentryModule();

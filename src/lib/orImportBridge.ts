@@ -3,10 +3,11 @@
  * Personal `transactions` table rows.
  *
  * Design (Personal-specific):
- *   - Pure logic. The caller (ConnectionsPage) supplies the
- *     decrypted OR transactions, the active mapping resolver,
- *     the user id, and the encryption helpers. No React hooks
- *     here so this module stays trivially unit-testable.
+ *   - Framework-independent logic. The caller (ConnectionsPage) supplies the
+ *     decrypted OR transactions, the active mapping resolver, the user id,
+ *     and the encryption helpers. The only direct side effect is a valueless,
+ *     breadcrumb-free observability summary when rows fail; no React hooks
+ *     live here, so the conversion remains directly unit-testable.
  *   - Single-entry transaction model (no double-entry / journal-entry
  *     ledger): each OR tx becomes ONE `transactions` row, written
  *     under the destination account picked via
@@ -35,6 +36,7 @@
  *     via the Edit mapping dialog and re-sync.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { captureMessageWithoutBreadcrumbs as captureMessage } from "@/lib/observability/sentry";
 
 /**
  * Subset of the decrypted OR transaction payload that the bridge
@@ -103,7 +105,8 @@ export interface OrImportResult {
   /** Rows skipped because OR did not stamp a `source_wallet_id`. */
   untagged: number;
   /** Rows that hit a non-fatal error during encryption or insert.
-   *  Always logged via the supplied logger; never thrown. */
+   *  Reported as an aggregate observability summary and to the optional
+   *  per-row logger; never thrown. */
   errored: number;
   /** Subset of `errored` where the failure originated inside buildRow
    *  (almost always an encryptText throw). Isolates crypto failures
@@ -201,6 +204,43 @@ const EXTERNAL_SOURCE = "orangerails";
  * folding it into the generic error tally.
  */
 const OPENED_AT_REJECTION = /before account opened_at/i;
+
+type OrImportFailureCode =
+  | "invalid_date"
+  | "row_build_failed"
+  | "opening_date_rejected"
+  | "upsert_failed";
+
+/**
+ * Report one valueless summary per bridge run. The bridge is the only place
+ * that sees every non-throwing row failure, and reporting here keeps callers
+ * from forwarding the per-row transaction id or database/encryption error.
+ */
+function captureImportFailureSummary(
+  connectionId: string,
+  failureCounts: Partial<Record<OrImportFailureCode, number>>,
+): void {
+  const codes = (Object.keys(failureCounts) as OrImportFailureCode[]).filter(
+    (code) => (failureCounts[code] ?? 0) > 0,
+  );
+  if (codes.length === 0) return;
+
+  try {
+    captureMessage("OR import bridge reported row failures", {
+      level: "warning",
+      tags: {
+        area: "or-import-bridge",
+        failureCodes: codes.sort().join(","),
+      },
+      extra: {
+        connectionId,
+        failureCounts,
+      },
+    });
+  } catch {
+    // Observability must never turn a handled import failure into a throw.
+  }
+}
 
 /**
  * Convert a single OR transaction's amount to the signed string
@@ -519,6 +559,10 @@ export async function importOrTransactions(
     blockedByOpeningDate: 0,
     unitMismatch: 0,
   };
+  const failureCounts: Partial<Record<OrImportFailureCode, number>> = {};
+  const countFailure = (code: OrImportFailureCode, count = 1) => {
+    failureCounts[code] = (failureCounts[code] ?? 0) + count;
+  };
 
   // Track plaintext signed amount keyed by "accountId::externalId" so we can
   // credit the correct account when the upsert response tells us which rows
@@ -590,6 +634,7 @@ export async function importOrTransactions(
           }
         } else {
           result.errored += 1;
+          countFailure("invalid_date");
           // warn carries no values: warn/error breadcrumbs are kept by
           // beforeBreadcrumb and flushed to the error tracker. Values
           // (tx id, timestamp) go to console.log which is dropped before
@@ -601,6 +646,7 @@ export async function importOrTransactions(
       } catch (err) {
         result.errored += 1;
         result.decryptFailures += 1;
+        countFailure("row_build_failed");
         // Same split: valueless error at warn/error level, full object at log level.
         console.error("[orImportBridge] buildRow threw for 1 tx");
         console.log("[orImportBridge] buildRow threw detail", err);
@@ -617,6 +663,7 @@ export async function importOrTransactions(
       errored: result.errored,
       decryptFailures: result.decryptFailures,
     });
+    captureImportFailureSummary(orConnectionId, failureCounts);
     return result;
   }
 
@@ -673,8 +720,10 @@ export async function importOrTransactions(
         // Named separately so the caller can say "these are older than the
         // account's opening date" rather than "import failed".
         result.blockedByOpeningDate += chunk.length;
+        countFailure("opening_date_rejected", chunk.length);
         console.error("[orImportBridge] chunk rejected: rows predate the account opening date");
       } else {
+        countFailure("upsert_failed", chunk.length);
         console.error("[orImportBridge] upsert chunk failed");
       }
       console.log("[orImportBridge] upsert chunk failed detail", error);
@@ -717,6 +766,7 @@ export async function importOrTransactions(
     blockedByOpeningDate: result.blockedByOpeningDate,
     unitMismatch: result.unitMismatch,
   });
+  captureImportFailureSummary(orConnectionId, failureCounts);
   return result;
 }
 
