@@ -326,8 +326,8 @@ function scrubEventLoose(event: unknown): unknown {
   }
   // params is a free-form string array used for parameterised messages
   // (Sentry event protocol: logentry = {message, params, formatted}).
-  // Nothing in this app calls captureMessage with params today, so this
-  // is closing a latent gap the same way message was, not a live leak.
+  // Current call sites pass a literal message and capture context, not params,
+  // so this closes the parameterised-message variant of the same gap.
   if (logentry && Array.isArray(logentry.params)) {
     logentry.params = logentry.params.map((p) =>
       typeof p === "string" ? capString(scrubString(p), 4000) : scrubValue(p),
@@ -377,3 +377,35 @@ function scrubEventLoose(event: unknown): unknown {
  */
 export const captureException = Sentry.captureException;
 export const captureMessage = Sentry.captureMessage;
+
+/**
+ * ZKA-sensitive capture variants. A scrubbed event can still inherit console
+ * breadcrumbs recorded before its call site, so import paths that have
+ * handled decrypted wallet data use an isolated scope with no breadcrumbs.
+ * The normal exports above keep breadcrumbs for error paths that do not cross
+ * that boundary.
+ */
+export function captureExceptionWithoutBreadcrumbs(
+  exception: unknown,
+  hint?: Parameters<typeof Sentry.captureException>[1],
+): void {
+  Sentry.withScope((scope) => {
+    scope.clearBreadcrumbs();
+    // Browser breadcrumbs live on the isolation scope, not only the current
+    // scope cloned by withScope. The local processor runs after scope data is
+    // merged and removes those inherited breadcrumbs from this event alone.
+    scope.addEventProcessor((event) => ({ ...event, breadcrumbs: [] }));
+    Sentry.captureException(exception, hint);
+  });
+}
+
+export function captureMessageWithoutBreadcrumbs(
+  message: string,
+  captureContext?: Parameters<typeof Sentry.captureMessage>[1],
+): void {
+  Sentry.withScope((scope) => {
+    scope.clearBreadcrumbs();
+    scope.addEventProcessor((event) => ({ ...event, breadcrumbs: [] }));
+    Sentry.captureMessage(message, captureContext);
+  });
+}
