@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  *
- * OWM-T0263. See the file header above (commit message) for why this is a
+ * DL-1506. See the file header above (commit message) for why this is a
  * source-text assertion rather than a behavioural test: recoverWithCode is a
  * useCallback reachable only through useVault(), and this repo has no
  * React-render test infrastructure to drive it directly.
@@ -73,7 +73,7 @@ function extractResolveCallInsideRecoverWithCode(source: string): string {
     throw new Error(
       "Could not find 'const orMaterial = await resolveOrKeyMaterial({' inside recoverWithCode. " +
         "The call was renamed, removed, or restructured (e.g. option (i) from the Cryptography " +
-        "Engineer's ruling on OWM-T0263: recovery given its own entry point). Update or retire " +
+        "Engineer's ruling on DL-1506: recovery given its own entry point). Update or retire " +
         "this test accordingly.",
     );
   }
@@ -84,7 +84,7 @@ function extractResolveCallInsideRecoverWithCode(source: string): string {
   return fnBody.slice(callStart, callEnd + 3);
 }
 
-describe("recoverWithCode pins saltMatchesExistingRows: false (OWM-T0263 / DL-1506)", () => {
+describe("recoverWithCode pins saltMatchesExistingRows: false (DL-1506)", () => {
   it("passes a literal `saltMatchesExistingRows: false` at its resolveOrKeyMaterial call site", () => {
     const source = readFileSync(VAULT_CONTEXT_PATH, "utf8");
     const call = extractResolveCallInsideRecoverWithCode(source);
@@ -93,7 +93,7 @@ describe("recoverWithCode pins saltMatchesExistingRows: false (OWM-T0263 / DL-15
     // before this call runs, so it can never honestly claim the salt
     // matches whatever rows are already sealed. `false` here is what makes
     // resolveOrKeyMaterial refuse to derive-and-pin instead of silently
-    // minting a key that opens nothing (see OWM-T0263 notes: the marker
+    // minting a key that opens nothing (see DL-1506 notes: the marker
     // written earlier in this same function protects the NEXT unlock, not
     // this call, so this literal is still the only thing guarding it).
     expect(
