@@ -120,13 +120,14 @@ const OR_CONNECT_ENABLED = import.meta.env.VITE_OR_CONNECT_ENABLED === "true";
 /** Map an OR provider_type slug to a user-facing name. Hides the plumbing
  *  (no "quiltt"/"orangerails" jargon). Banks read as "Bank" when we don't
  *  have the institution name at hand. */
-function friendlyProviderName(providerType: string): string {
+export function friendlyProviderName(providerType: string): string {
   const map: Record<string, string> = {
     quiltt: "Bank",
     blink: "Blink",
     strike: "Strike",
     sparrow: "Sparrow",
     xpub_stealth: "Private wallet",
+    descriptor_stealth: "Private wallet",
   };
   const key = providerType.toLowerCase();
   return map[key] ?? providerType.charAt(0).toUpperCase() + providerType.slice(1);
