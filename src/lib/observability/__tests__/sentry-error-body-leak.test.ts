@@ -36,6 +36,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallProxyError } from "../../or/proxy-errors";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const initMock = vi.fn();
@@ -86,8 +87,11 @@ describe("B4: does a CallProxyError body reach the Sentry event", () => {
     // Read package.json by a literal filesystem path rather than a
     // "@sentry/react/package.json" subpath import: a subpath import goes
     // through Node's package "exports" map, which is not guaranteed to
-    // expose package.json. A plain fs read has no such dependency.
-    const pkgPath = path.join(process.cwd(), "node_modules", "@sentry", "react", "package.json");
+    // expose package.json. Locate the repo root via import.meta.url rather
+    // than the bare `process` global: eslint.config.js scopes this file to
+    // browser globals only, so `process` trips no-undef.
+    const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+    const pkgPath = path.join(repoRoot, "node_modules", "@sentry", "react", "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
     expect(typeof pkg.version).toBe("string");
     expect(pkg.version).toBeTruthy();
