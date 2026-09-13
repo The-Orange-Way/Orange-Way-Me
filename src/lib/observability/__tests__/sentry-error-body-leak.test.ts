@@ -90,7 +90,8 @@ describe("B4: does a CallProxyError body reach the Sentry event", () => {
     // expose package.json. Locate the repo root via import.meta.url rather
     // than the bare `process` global: eslint.config.js scopes this file to
     // browser globals only, so `process` trips no-undef.
-    const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+    const testDir = path.dirname(fileURLToPath(import.meta.url));
+    const repoRoot = path.join(testDir, "..", "..", "..", "..");
     const pkgPath = path.join(repoRoot, "node_modules", "@sentry", "react", "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
     expect(typeof pkg.version).toBe("string");
