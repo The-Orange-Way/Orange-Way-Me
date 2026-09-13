@@ -31,6 +31,27 @@
 #                                               -> must exit 0 (PASS)
 #  11) a grant that appears only inside a line comment
 #                                               -> must exit 0 (PASS)
+#  12) GRANT ALL on a named function. In PostgreSQL EXECUTE is the only
+#      privilege a function has, so ALL is the same grant written differently.
+#                                               -> must exit 1
+#  13) the ALL PRIVILEGES spelling, to PUBLIC.  -> must exit 1
+#  14) the schema-wide blanket form written with ALL.
+#                                               -> must exit 1
+#  15) default privileges written with ALL, which reaches every FUTURE
+#      function in the schema.                 -> must exit 1
+#  16) the same statement on TABLES, which is outside this scan's remit and
+#      must not be refused.                    -> must exit 0
+#  17) GRANT ALL ON TABLE t TO anon             -> must exit 0, same reason
+#  18) GRANT ALL ON FUNCTION on an ALLOWLISTED function
+#                                               -> must exit 0. The allowlist
+#      is per function signature, not per keyword, so the same privilege
+#      written a different way must still be allowed
+#  19) CREATE OR REPLACE of a hardened SECDEF function (rule 2, OWM-T0599)
+#      with no matching REVOKE                 -> must exit 1. Postgres resets
+#      EXECUTE to PUBLIC on replace even if it had been revoked before.
+#  20) the same replace, but the migration also revokes and re-grants
+#      properly (the pattern the repo's own history already uses)
+#                                               -> must exit 0
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
@@ -195,9 +216,87 @@ git commit -q -m "case11"
 check_case "grant only inside a line comment" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
-# Case 12: CREATE OR REPLACE of a hardened function with no accompanying
-# REVOKE must be refused. Postgres resets EXECUTE to PUBLIC on replace.
+# Case 12: GRANT ALL on a named function. In PostgreSQL EXECUTE is the only
+# privilege a function has, so ALL is the same grant written differently.
 git checkout -q -b case12 main
+cat > supabase/migrations/0002_all_named_fn.sql <<'SQL'
+GRANT ALL ON FUNCTION public.some_definer_fn(uuid) TO anon;
+SQL
+git add -A
+git commit -q -m "case12"
+check_case "GRANT ALL on a named function to anon" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 13: the ALL PRIVILEGES spelling, to PUBLIC.
+git checkout -q -b case13 main
+cat > supabase/migrations/0002_all_privileges.sql <<'SQL'
+GRANT ALL PRIVILEGES ON FUNCTION public.some_definer_fn(uuid) TO PUBLIC;
+SQL
+git add -A
+git commit -q -m "case13"
+check_case "GRANT ALL PRIVILEGES on a named function to PUBLIC" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 14: the schema-wide blanket form written with ALL.
+git checkout -q -b case14 main
+cat > supabase/migrations/0002_all_all_functions.sql <<'SQL'
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon;
+SQL
+git add -A
+git commit -q -m "case14"
+check_case "GRANT ALL ON ALL FUNCTIONS IN SCHEMA" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 15: default privileges written with ALL, which reaches every FUTURE
+# function in the schema.
+git checkout -q -b case15 main
+cat > supabase/migrations/0002_default_privs_all.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon;
+SQL
+git add -A
+git commit -q -m "case15"
+check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON FUNCTIONS" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 16: the same statement on TABLES, which is outside this scan's remit and
+# must not be refused. This is the false positive that accepting ALL at the
+# first filter introduces if the default privileges branch does not check the
+# object type.
+git checkout -q -b case16 main
+cat > supabase/migrations/0002_default_privs_tables.sql <<'SQL'
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon;
+SQL
+git add -A
+git commit -q -m "case16"
+check_case "ALTER DEFAULT PRIVILEGES GRANT ALL ON TABLES is not refused" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 17: a plain table grant written with ALL, same direction as case 16.
+git checkout -q -b case17 main
+cat > supabase/migrations/0002_all_on_table.sql <<'SQL'
+GRANT ALL ON TABLE public.some_table TO anon;
+SQL
+git add -A
+git commit -q -m "case17"
+check_case "GRANT ALL ON TABLE is not refused" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 18: the other direction of the widening. An allowlisted function
+# granted with ALL is the same privilege written differently and must still
+# pass, or a later change that matched on the keyword instead of the signature
+# would start refusing legitimate re-grants with every other case still green.
+git checkout -q -b case18 main
+cat > supabase/migrations/0002_grant_all_allowlisted.sql <<'SQL'
+GRANT ALL ON FUNCTION public.is_invite_code_valid(text) TO anon;
+SQL
+git add -A
+git commit -q -m "case18"
+check_case "GRANT ALL on an allowlisted function" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 19: CREATE OR REPLACE of a hardened function with no accompanying
+# REVOKE must be refused. Postgres resets EXECUTE to PUBLIC on replace.
+git checkout -q -b case19 main
 cat > supabase/migrations/0002_unrevoked_replace.sql <<'SQL'
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
 RETURNS boolean
@@ -205,13 +304,13 @@ LANGUAGE sql SECURITY DEFINER
 AS $$ SELECT true $$;
 SQL
 git add -A
-git commit -q -m "case12"
+git commit -q -m "case19"
 check_case "CREATE OR REPLACE of hardened function with no REVOKE" 1 "$(git rev-parse HEAD)"
 git checkout -q main
 
-# Case 13: the same replace, but the migration also revokes and re-grants
+# Case 20: the same replace, but the migration also revokes and re-grants
 # properly (the pattern the repo's own history already uses). Must pass.
-git checkout -q -b case13 main
+git checkout -q -b case20 main
 cat > supabase/migrations/0002_revoked_replace.sql <<'SQL'
 CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
 RETURNS boolean
@@ -222,7 +321,7 @@ REVOKE EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) TO authenticated;
 SQL
 git add -A
-git commit -q -m "case13"
+git commit -q -m "case20"
 check_case "CREATE OR REPLACE of hardened function WITH matching REVOKE" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
