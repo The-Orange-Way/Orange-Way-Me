@@ -35,6 +35,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallProxyError } from "../../or/proxy-errors";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const initMock = vi.fn();
 
@@ -80,14 +82,17 @@ describe("B4: does a CallProxyError body reach the Sentry event", () => {
     vi.unstubAllEnvs();
   });
 
-  it("records the resolved @sentry/react version this suite ran against (package.json pins ^10, a range, not a fact)", async () => {
-    const pkg = (await import("@sentry/react/package.json")) as unknown as
-      | { version?: string; default?: { version?: string } };
-    const version = pkg.version ?? pkg.default?.version;
-    expect(typeof version).toBe("string");
-    expect(version).toBeTruthy();
+  it("records the resolved @sentry/react version this suite ran against (package.json pins ^10, a range, not a fact)", () => {
+    // Read package.json by a literal filesystem path rather than a
+    // "@sentry/react/package.json" subpath import: a subpath import goes
+    // through Node's package "exports" map, which is not guaranteed to
+    // expose package.json. A plain fs read has no such dependency.
+    const pkgPath = path.join(process.cwd(), "node_modules", "@sentry", "react", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    expect(typeof pkg.version).toBe("string");
+    expect(pkg.version).toBeTruthy();
     // eslint-disable-next-line no-console -- QA reads this in the CI run output, on purpose.
-    console.log(`OWM-T0428: resolved @sentry/react version = ${version}`);
+    console.log(`OWM-T0428: resolved @sentry/react version = ${pkg.version}`);
   });
 
   it("beforeBreadcrumb: a CallProxyError-shaped console/error breadcrumb -- does the sink row marker survive?", async () => {
