@@ -1,5 +1,5 @@
 /**
- * Ref OWM-T0419, follow-up from OWM-T0164 / PR #443.
+ * Ref OWM-T0419, follow-up from OWM-T0164.
  *
  * normalizeErrorCode used to slice the widget's raw error code to 32
  * characters and test the TRUNCATED copy against /^[A-Za-z0-9_]+$/. Base58
@@ -9,7 +9,7 @@
  * cannot catch this: the truncation happens in the browser, so the value
  * reaching the insert is already short and already legal.
  *
- * Fixed on PR #443: length is now tested first, on the original value, and
+ * Fixed under OWM-T0164: length is now tested first, on the original value, and
  * an over-long value fails closed to the placeholder. This test guards
  * that fix directly against the shipped function.
  *
