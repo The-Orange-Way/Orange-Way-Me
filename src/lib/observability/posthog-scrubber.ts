@@ -21,7 +21,7 @@ import { redactValueShapes } from "./value-shapes";
  * under an innocuous name; that case is handled by redactValueShapes,
  * which both this scrubber and sentry.ts import from value-shapes.ts.
  */
-const SCRUB_VALUE_KEY_HINTS = [
+export const SCRUB_VALUE_KEY_HINTS = [
   "account",
   "household",
   "transaction",
