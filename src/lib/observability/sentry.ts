@@ -50,7 +50,7 @@ import * as Sentry from "@sentry/react";
 import { redactValueShapes } from "./value-shapes";
 
 /** Object keys (case-insensitive) we scrub from event payloads. */
-const SECRET_KEY_PATTERNS = [
+export const SECRET_KEY_PATTERNS = [
   /password/i,
   /passphrase/i,
   /pin/i,
@@ -69,6 +69,10 @@ const SECRET_KEY_PATTERNS = [
   /seed/i,
   /secret/i,
   /xpub/i,
+  /xpriv/i,
+  /xprv/i,
+  /entropy/i,
+  /salt/i,
   /private_key/i,
   /privatekey/i,
   /api_key/i,
@@ -112,7 +116,7 @@ const TOKEN_PATTERNS: Array<[RegExp, string]> = [
     "$1=[redacted]",
   ],
   [
-    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub)=[^&\s#"']+/gi,
+    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub|xpriv|xprv|entropy|salt)=[^&\s#"']+/gi,
     "$1=[redacted]",
   ],
   // Bearer Authorization headers
