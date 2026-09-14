@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
+import { scrubPostHogEvent, SCRUB_VALUE_KEY_HINTS } from "@/lib/observability/posthog-scrubber";
+import { SECRET_KEY_PATTERNS } from "@/lib/observability/sentry";
 import { VALUE_SHAPE_REDACTED } from "@/lib/observability/value-shapes";
 
 const initMock = vi.fn();
@@ -15,47 +16,77 @@ async function freshSentryModule() {
   return import("../sentry");
 }
 
-// The canonical key names this ticket exists to close the gap on: xpub and
-// stealth key names, plus seed/secret parity across both lists. Each must
-// be redacted by BOTH the Sentry scrubber and the PostHog scrubber.
-const MUST_REDACT_KEYS = [
-  "xpub",
-  "wallet_xpub",
-  "or_stealth_key_b64",
-  "stealth_key",
-  "seed",
-  "wallet_seed",
-  "secret",
-  "my_secret",
-];
+/**
+ * Key names covered by BOTH scrubbers, derived from the real source arrays.
+ * No hardcoded list: if a hint is added to posthog-scrubber.ts but not to
+ * sentry.ts (or the reverse), this set narrows and the invariant test below
+ * fires with an actionable message before CI goes green.
+ *
+ * Algorithm: take every substring hint from SCRUB_VALUE_KEY_HINTS and keep
+ * only those that also match at least one regex in SECRET_KEY_PATTERNS. The
+ * result is the intersection the two lists are meant to share for key
+ * material.
+ */
+const BOTH_SCRUBBERS_COVER = SCRUB_VALUE_KEY_HINTS.filter((hint) =>
+  SECRET_KEY_PATTERNS.some((p) => p.test(hint)),
+);
 
-describe("Sentry vs PostHog scrubber parity (DL-1584)", () => {
+describe("Sentry vs PostHog scrubber parity (OWM-T0738)", () => {
   beforeEach(() => {
     initMock.mockClear();
     vi.stubEnv("VITE_SENTRY_DSN", "https://public@sentry.test/123");
   });
 
-  it("redacts every DL-1584 key name on the PostHog side", () => {
-    const props = Object.fromEntries(MUST_REDACT_KEYS.map((k) => [k, "sensitive-value"]));
+  it("shared coverage set contains every key-material hint added by OWM-T0738", () => {
+    // These strings are the specific parity gap this ticket closes. entropy,
+    // salt, xpriv and xprv were in sentry.ts but absent from posthog-scrubber.ts
+    // before the fix. If any of them is removed from EITHER source array,
+    // BOTH_SCRUBBERS_COVER shrinks and this assertion fires before the
+    // behavioral tests below have a chance to silently miss it.
+    const TICKET_FIXED_KEYS = [
+      "entropy",
+      "salt",
+      "xpriv",
+      "xprv",
+      "xpub",
+      "seed",
+      "secret",
+      "mek",
+      "opk",
+      "password",
+      "passphrase",
+    ];
+    for (const key of TICKET_FIXED_KEYS) {
+      expect(
+        BOTH_SCRUBBERS_COVER,
+        `"${key}" dropped from shared coverage -- verify it is in both ` +
+          `SCRUB_VALUE_KEY_HINTS (posthog-scrubber.ts) AND matched by ` +
+          `SECRET_KEY_PATTERNS (sentry.ts)`,
+      ).toContain(key);
+    }
+  });
+
+  it("PostHog scrubs every key in the shared coverage set", () => {
+    const props = Object.fromEntries(BOTH_SCRUBBERS_COVER.map((k) => [k, "sensitive-value"]));
     const r = scrubPostHogEvent({
       uuid: "00000000-0000-0000-0000-000000000000",
       event: "test",
       properties: props,
     } as unknown as Parameters<typeof scrubPostHogEvent>[0]);
 
-    for (const key of MUST_REDACT_KEYS) {
+    for (const key of BOTH_SCRUBBERS_COVER) {
       expect(r?.properties[key], `PostHog scrubber did not redact "${key}"`).toBe("[redacted]");
     }
   });
 
-  it("redacts every DL-1584 key name on the Sentry side", async () => {
+  it("Sentry scrubs every key in the shared coverage set", async () => {
     const mod = await freshSentryModule();
     mod.initSentry();
     const cfg = initMock.mock.calls[0][0];
-    const extra = Object.fromEntries(MUST_REDACT_KEYS.map((k) => [k, "sensitive-value"]));
+    const extra = Object.fromEntries(BOTH_SCRUBBERS_COVER.map((k) => [k, "sensitive-value"]));
     const scrubbed = cfg.beforeSend({ extra }) as { extra: Record<string, unknown> };
 
-    for (const key of MUST_REDACT_KEYS) {
+    for (const key of BOTH_SCRUBBERS_COVER) {
       expect(scrubbed.extra[key], `Sentry scrubber did not redact "${key}"`).toBe("[redacted]");
     }
   });
