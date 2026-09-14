@@ -28,13 +28,45 @@ mkdir -p "${WORK}/bin"
 cat > "${WORK}/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 # Stub curl. Writes $OW_TEST_BODY to the path given by -o and prints the code.
+#
+# It also asserts the request itself, not only the response: the URL must
+# target OW_TEST_EXPECT_REF (defaulting to OW_DEFINER_PROJECT_REF, the ref the
+# gate was actually given), and the request body must carry the public-schema
+# filter and the security-definer filter the gate's SQL is supposed to send.
+# Without this, all cases would stay green even if the gate started asking a
+# different project, or asking the right project the wrong question.
+set -u
 OUT=""
+DATA=""
+URL=""
 PREV=""
 for ARG in "$@"; do
   [ "$PREV" = "-o" ] && OUT="$ARG"
+  [ "$PREV" = "--data-binary" ] && DATA="$ARG"
+  case "$ARG" in
+    https://*) URL="$ARG" ;;
+  esac
   PREV="$ARG"
 done
+
+if [ -n "${OW_TEST_CURL_RC:-}" ] && [ "${OW_TEST_CURL_RC}" != "0" ]; then
+  echo "stub curl: forced transport failure (OW_TEST_CURL_RC=${OW_TEST_CURL_RC})" >&2
+  exit "$OW_TEST_CURL_RC"
+fi
+
 [ -n "$OUT" ] || { echo "stub curl: no -o argument" >&2; exit 9; }
+
+EXPECT_REF="${OW_TEST_EXPECT_REF:-${OW_DEFINER_PROJECT_REF:-}}"
+if [ -n "$EXPECT_REF" ] && [[ "$URL" != *"$EXPECT_REF"* ]]; then
+  echo "stub curl: request URL '${URL}' does not target expected ref '${EXPECT_REF}'" >&2
+  exit 9
+fi
+
+if [[ "$DATA" != *"nspname = 'public'"* ]] || [[ "$DATA" != *"p.prosecdef"* ]]; then
+  echo "stub curl: request body is missing the public-schema or security-definer filter" >&2
+  exit 9
+fi
+
 printf '%s' "$OW_TEST_BODY" > "$OUT"
 printf '%s' "${OW_TEST_HTTP_CODE:-201}"
 STUB
@@ -48,7 +80,7 @@ body() { printf '[{"report":%s}]' "$1"; }
 
 FAILURES=0
 run_case() {
-  local NAME="$1" WANT="$2" BODY="$3"
+  local NAME="$1" WANT="$2" BODY="$3" EXTRA="${4:-}"
   local OUT RC
   OUT=$(
     PATH="${WORK}/bin:${PATH}" \
@@ -56,6 +88,7 @@ run_case() {
     OW_DEFINER_PROJECT_REF="$DEV_REF" \
     OW_TEST_BODY="$BODY" \
     GITHUB_STEP_SUMMARY="${WORK}/summary.md" \
+    ${EXTRA:+$EXTRA} \
     bash "$GATE" 2>&1
   )
   RC=$?
@@ -110,6 +143,31 @@ run_case 'zero functions is CANNOT CHECK' 2 \
   "$(body "{\"definer_total\":0,\"definer_sigs\":[],\"offenders\":[]}")"
 
 run_case 'no report object is CANNOT CHECK' 2 '[{"not_a_report":1}]'
+
+# 10. A non-zero curl exit (DNS failure, timeout, connection refused) must
+#     refuse, not silently treat a stub-shaped absence of output as clean.
+#     This is the branch at check-definer-grants.sh lines 146-148, never
+#     observed firing until now because the stub always returned rc 0.
+run_case 'curl transport failure is CANNOT CHECK' 2 \
+  "$(body "{\"definer_total\":3,\"definer_sigs\":${SIGS},\"offenders\":[]}")" \
+  'OW_TEST_CURL_RC=7'
+
+# 11. A non-2xx HTTP status (expired token, wrong scope, revoked credential)
+#     must refuse. This is the branch at lines 154-164, and it is the one the
+#     2xx widening in PR #489 touched directly: nothing before this proved
+#     that widening did not also swallow a genuine failure status.
+run_case 'non-2xx http status is CANNOT CHECK' 2 \
+  "$(body "{\"definer_total\":3,\"definer_sigs\":${SIGS},\"offenders\":[]}")" \
+  'OW_TEST_HTTP_CODE=401'
+
+# 12. The suite must also prove it would notice the gate asking the wrong
+#     question: the stub refuses a request that does not target the given
+#     project ref, or whose body drops the public-schema or security-definer
+#     filter. This case forces that mismatch on purpose, so the assertion
+#     itself is proven able to fire rather than sitting there unexercised.
+run_case 'stub catches a request aimed at the wrong project ref' 2 \
+  "$(body "{\"definer_total\":3,\"definer_sigs\":${SIGS},\"offenders\":[]}")" \
+  'OW_TEST_EXPECT_REF=not-the-real-project-ref'
 
 echo
 if [ "$FAILURES" -gt 0 ]; then
