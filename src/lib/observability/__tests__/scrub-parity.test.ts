@@ -3,7 +3,7 @@ import { scrubPostHogEvent, SCRUB_VALUE_KEY_HINTS } from "@/lib/observability/po
 import { SECRET_KEY_PATTERNS } from "@/lib/observability/sentry";
 import { VALUE_SHAPE_REDACTED } from "@/lib/observability/value-shapes";
 
-const initMock = vi.fn();
+const { initMock } = vi.hoisted(() => ({ initMock: vi.fn() }));
 
 vi.mock("@sentry/react", () => ({
   init: initMock,
