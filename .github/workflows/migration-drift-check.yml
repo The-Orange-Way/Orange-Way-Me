@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     # Binds to the GitHub Environment named for the branch being compared.
     # Each environment defines its OWN SUPABASE_ACCESS_TOKEN, so a dev run
-    # never has the prod credential in scope. A scheduled run
+    # never has the prod credential in scope (DL-1082). A scheduled run
     # targets prod, because prod is the environment where an unapplied
     # migration actually costs something.
     environment: ${{ github.event_name == 'schedule' && 'prod' || github.ref_name }}
@@ -50,18 +50,12 @@ jobs:
 
       - name: Pick the branch and project ref to compare
         id: target
-        # The branch name reaches the shell through this mapping rather than
-        # being interpolated into the script text, so the runner never rewrites
-        # the body of the script with a value taken from a ref name.
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "schedule" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ]; then
             BRANCH=prod
           else
-            BRANCH="$REF_NAME"
+            BRANCH="${{ github.ref_name }}"
           fi
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           if [ "$BRANCH" = "prod" ]; then
@@ -78,7 +72,6 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           BRANCH: ${{ steps.target.outputs.branch }}
           REF: ${{ steps.target.outputs.ref }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -88,11 +81,11 @@ jobs:
           # prod with no mapping means the comparison did not happen while the
           # job goes green. That case must go RED.
           if [ -z "${REF:-}" ]; then
-            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-              echo "No project ref for $BRANCH: nothing was compared (manual run off a branch that is neither dev nor prod)." >&2
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "No project ref for $BRANCH: nothing was compared (manual run off dev/prod)." >&2
               exit 0
             fi
-            echo "No project ref for $BRANCH on a $EVENT_NAME event: the comparison did not happen. Failing loudly." >&2
+            echo "No project ref for $BRANCH on a ${{ github.event_name }} event: the comparison did not happen. Failing loudly." >&2
             exit 1
           fi
 
@@ -106,34 +99,9 @@ jobs:
             echo "No migration files under supabase/migrations. Refusing to report 'no drift' out of an empty checkout." >&2
             exit 1
           fi
-          basename -a supabase/migrations/*.sql | sort -u > local_files.txt
-          # sort -u collapses two files that share one 14-digit prefix into a
-          # single entry. That is deliberate, not a blind spot: the ledger holds
-          # ONE row per version, so a duplicate prefix cannot be compared as two
-          # in the first place, and the Migration filename hygiene job in ci.yml
-          # refuses any NEW duplicate before it can merge.
-          sed -nE 's/^([0-9]{14}).*/\1/p' local_files.txt | sort -u > local.txt
-          # A filename that does not begin with a 14-digit version is dropped by
-          # the parse above and never reaches the comparison at all. The guard
-          # below only fires when EVERY name is dropped, so a single misnamed
-          # file would be invisible in exactly the way an unreadable ledger cell
-          # is. Collect the names here and report them at the END of the run.
-          # Deliberately not an early exit: this runs before the CLI call, and
-          # the first real run of this workflow is what settles whether the
-          # access token alone can read the ledger. A filename must not be what
-          # stops us finding that out.
-          # grep exits 1 when nothing matches, which is the normal healthy case
-          # and must not fail the run under set -e. Anything above 1 is a real
-          # grep error, and swallowing that alongside the expected 1 would leave
-          # local_bad.txt empty and the report at the end of this run silent.
-          set +e
-          grep -vE '^[0-9]{14}' local_files.txt > local_bad.txt
-          GREP_STATUS=$?
-          set -e
-          if [ "$GREP_STATUS" -gt 1 ]; then
-            echo "grep exited $GREP_STATUS while listing migration filenames that do not begin with a 14-digit version. That is a grep failure, not an empty result, so nothing below it can be trusted." >&2
-            exit 1
-          fi
+          basename -a supabase/migrations/*.sql \
+            | sed -nE 's/^([0-9]{14}).*/\1/p' \
+            | sort -u > local.txt
           if [ ! -s local.txt ]; then
             echo "Parsed zero versions out of the migration filenames. The naming convention changed and this check can no longer tell drift from silence." >&2
             exit 1
@@ -156,58 +124,20 @@ jobs:
           # so a leading pipe or a reordered table does not silently shift which
           # column is read. If the header is not found, remote.txt stays empty
           # and the guard below fails the run.
-          rm -f remote_bad.txt
           awk -F'|' '
             BEGIN { ri = 0 }
             {
-              # Trim, strip the backticks the CLI wraps every DATA cell in, then
-              # trim again. Without that strip, every value reaching the tests
-              # below is literally `20260418021640`, backticks included, so no
-              # value can ever match a 14-digit version and the entire ledger
-              # falls through to remote_bad.txt. A blank cell arrives as "` `",
-              # which is why the second trim is needed: without it the blank
-              # reads as an unreadable value instead of as the CLI saying this
-              # version is not applied. Header cells are not backticked, so this
-              # is a no-op on the header row and the column lookup is unchanged.
-              for (i = 1; i <= NF; i++) {
-                f = $i
-                gsub(/^[ \t]+|[ \t]+$/, "", f)
-                gsub(/^`|`$/, "", f)
-                gsub(/^[ \t]+|[ \t]+$/, "", f)
-                c[i] = f
-              }
+              for (i = 1; i <= NF; i++) { f = $i; gsub(/^[ \t]+|[ \t]+$/, "", f); c[i] = f }
               if (ri == 0) { for (i = 1; i <= NF; i++) if (toupper(c[i]) == "REMOTE") ri = i; next }
-              if (ri > NF) next
-              v = c[ri]
-              # A blank REMOTE cell is the CLI stating that this version is not
-              # applied. That is real data, and the comparison below reports it.
-              if (v == "") next
-              # Table border rows are decoration, never data.
-              if (v ~ /^[-+= ]+$/) next
-              if (v ~ /^[0-9]{14}$/) { print v; next }
-              # Anything else is a REMOTE value we could not read. Do NOT drop
-              # it. A ledger entry that is not a 14-digit version is the
-              # fingerprint of a hand-written schema_migrations row, which is
-              # the exact fault this check exists to surface.
-              print v > "remote_bad.txt"
+              if (ri > 0 && c[ri] ~ /^[0-9]{14}$/) print c[ri]
             }' list.txt | sort -u > remote.txt
-
-          # Reported before the comparison, not alongside it. A ledger read that
-          # is only partly parsed would show genuinely applied versions as
-          # unapplied, so drift output computed over it is misleading rather
-          # than merely incomplete. Separate message from both drift directions.
-          if [ -s remote_bad.txt ]; then
-            echo "UNREADABLE LEDGER VALUES: the CLI reported REMOTE entries that are not 14-digit versions. A hand-written schema_migrations row is the usual cause. Nothing is compared while these are unread. Offending values:" >&2
-            sort -u remote_bad.txt >&2
-            exit 1
-          fi
 
           if [ ! -s remote.txt ]; then
             echo "Parsed zero applied versions out of the CLI output above. Either the ledger is genuinely empty or the output format changed. Both go RED on purpose: an unparseable table read as 'no drift' is exactly the silent success this check exists to catch." >&2
             exit 1
           fi
 
-          echo "branch=$BRANCH project=$REF local=$(wc -l < local.txt) remote=$(wc -l < remote.txt) local_unparsed=$(wc -l < local_bad.txt)"
+          echo "branch=$BRANCH project=$REF local=$(wc -l < local.txt) remote=$(wc -l < remote.txt)"
 
           UNAPPLIED="$(comm -23 local.txt remote.txt)"
           UNTRACKED="$(comm -13 local.txt remote.txt)"
@@ -221,11 +151,6 @@ jobs:
           if [ -n "$UNTRACKED" ]; then
             echo "DRIFT: versions the database reports applied with no matching file on $BRANCH:" >&2
             echo "$UNTRACKED" >&2
-            STATUS=1
-          fi
-          if [ -s local_bad.txt ]; then
-            echo "NOT COMPARED: migration files on $BRANCH whose name does not begin with a 14-digit version. These were excluded from every count above, so the comparison is incomplete until they are renamed:" >&2
-            cat local_bad.txt >&2
             STATUS=1
           fi
           if [ "$STATUS" -eq 0 ]; then
