@@ -99,6 +99,28 @@ function blockAt(code: string, searchFrom: number): string {
   throw new Error(`Braces starting at index ${searchFrom} never balanced.`);
 }
 
+describe("ConnectionsPage private-wallet title", () => {
+  it("maps the Xpub_stealth provider enum to a friendly card title", () => {
+    const helperStart = CODE_ONLY.indexOf("function friendlyProviderName(");
+    expect(
+      helperStart,
+      "ConnectionsPage no longer contains friendlyProviderName. Re-anchor this test " +
+        "on the helper that supplies the connection card's provider title.",
+    ).toBeGreaterThan(-1);
+
+    const helper = blockAt(CODE_ONLY, helperStart);
+    expect(helper).toContain('xpub_stealth: "Private wallet"');
+    expect(
+      helper,
+      "friendlyProviderName must normalize the provider enum before looking it up, " +
+        "because Orange Rails sends Xpub_stealth with an uppercase first letter.",
+    ).toContain("providerType.toLowerCase()");
+
+    expect(CODE_ONLY).toMatch(/const providerWord = friendlyProviderName\(conn\.provider_type\)/);
+    expect(CODE_ONLY).toMatch(/const cardTitle = realName \|\| providerWord/);
+  });
+});
+
 describe("ConnectionsPage handleSync wiring", () => {
   it("still exists as a handler this test can read", () => {
     const code = handlerCode("handleSync");
