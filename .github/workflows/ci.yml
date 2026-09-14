@@ -73,7 +73,7 @@ jobs:
           echo "EXPECTED_TEST_FILES=$DISK" >> "$GITHUB_ENV"
 
       - name: Test
-        run: bun run test -- --reporter=verbose --reporter=json --outputFile="$RUNNER_TEMP/vitest-results.json"
+        run: bun run test -- --reporter=verbose --reporter=json --reporter=github-actions --outputFile="$RUNNER_TEMP/vitest-results.json"
 
       - name: Test-collection verify (post-test guard)
         # Compares the number of test SUITES vitest actually collected against
