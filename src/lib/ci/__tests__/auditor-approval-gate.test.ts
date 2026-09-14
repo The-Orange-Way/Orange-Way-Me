@@ -60,6 +60,15 @@ describe("evaluateAuditorApproval", () => {
     expect(result.approved).toBe(false);
   });
 
+  it("does not let a later COMMENTED review from the same reviewer erase an earlier APPROVED", () => {
+    const reviews = [
+      { state: "APPROVED", user: { id: 9, login: AUDITOR, type: "User" } },
+      { state: "COMMENTED", user: { id: 9, login: AUDITOR, type: "User" } },
+    ];
+    const result = evaluateAuditorApproval(reviews, BUILDER, AUDITOR);
+    expect(result.approved).toBe(true);
+  });
+
   it("rejects a stale Auditor approval filed against a commit that is no longer the PR's head", () => {
     const reviews = [
       { state: "APPROVED", user: { id: 7, login: AUDITOR, type: "User" }, commit_id: OLD_SHA },
