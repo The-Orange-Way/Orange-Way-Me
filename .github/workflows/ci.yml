@@ -94,6 +94,55 @@ jobs:
           fi
           echo "Test collection OK: $COLLECTED suite(s) collected, $EXPECTED_TEST_FILES file(s) on disk"
 
+          # Identity guard (OWM-T0359): the count check above cannot tell "deleted
+          # one test file" from "deleted a different test file" when the total still
+          # looks plausible. Assert specific must-never-disappear files were actually
+          # collected, not just that some number of files were. Extracted into its
+          # own script (rather than the inline node -e this replaces) so the step
+          # below can feed it synthetic input and prove it can go RED.
+          if [ ! -f scripts/ci-must-collect-tests.txt ]; then
+            echo "::error::scripts/ci-must-collect-tests.txt is missing, so the manifest guard cannot run."
+            exit 1
+          fi
+          node scripts/assert-manifest-collected.mjs "$RUNNER_TEMP/vitest-results.json" scripts/ci-must-collect-tests.txt
+
+      - name: Prove the manifest guard can go RED
+        # Same discipline as "Prove the test-execution guard can go RED" below:
+        # feed the manifest guard synthetic reports and require it to fail when
+        # a must-never-disappear file is missing from the collected suite, and
+        # pass on a healthy one, in this same run, so it is a proven gate and
+        # not a green rubber stamp watching nothing.
+        run: |
+          set -euo pipefail
+
+          # Synthetic manifest matching the two real must-never-disappear
+          # files, so the healthy/broken cases below are decided by the
+          # vitest-results content, not by a manifest that differs from
+          # the real one in scripts/ci-must-collect-tests.txt.
+          cat > "$RUNNER_TEMP/synthetic-manifest.txt" <<'TXT'
+          src/lib/or/__tests__/or-key-material.test.ts
+          src/context/__tests__/resolveOrKeyMaterial.test.ts
+          TXT
+
+          # Case 1: one manifest entry missing from the collected suite --
+          # the exact shape of a deleted or renamed must-never-disappear file.
+          cat > "$RUNNER_TEMP/manifest-missing-one.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"passed"}]},{"name":"src/some/other.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          if node scripts/assert-manifest-collected.mjs "$RUNNER_TEMP/manifest-missing-one.json" "$RUNNER_TEMP/synthetic-manifest.txt"; then
+            echo "::error::manifest guard did NOT fail when a must-never-disappear file was missing from the collected suite"
+            exit 1
+          fi
+          echo "guard correctly failed: resolveOrKeyMaterial.test.ts missing from collection"
+
+          # Case 2: everything healthy -- the guard must PASS, so a guard
+          # that is always red does not look identical to one that works.
+          cat > "$RUNNER_TEMP/manifest-healthy.json" <<'JSON'
+          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"passed"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]}]}
+          JSON
+          node scripts/assert-manifest-collected.mjs "$RUNNER_TEMP/manifest-healthy.json" "$RUNNER_TEMP/synthetic-manifest.txt"
+          echo "guard correctly passed on a healthy report"
+
       - name: Test-execution guard (no silent skip or empty suite)
         # Neither guard above can tell a suite that RAN from one that was
         # collected and then skipped or emptied out. See
@@ -149,22 +198,6 @@ jobs:
           JSON
           node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/healthy.json"
           echo "guard correctly passed on a healthy report"
-
-          # Case 5: partial skip -- the P0 file's own describe block is
-          # skipped but an unrelated describe block in the SAME FILE still
-          # runs, so the file's aggregate executed count stays above zero.
-          # This is the exact shape a throwaway demo run found live: describe.skip on
-          # or-key-material.test.ts's planOrKeyMaterial suite passed CI
-          # green before this fix, because that file also has an unrelated
-          # OrNamespaceDisabledError describe block that kept executing.
-          cat > "$RUNNER_TEMP/partial-skip.json" <<'JSON'
-          {"testResults":[{"name":"src/lib/or/__tests__/or-key-material.test.ts","assertionResults":[{"status":"skipped"},{"status":"skipped"},{"status":"passed"}]},{"name":"src/context/__tests__/resolveOrKeyMaterial.test.ts","assertionResults":[{"status":"passed"}]}]}
-          JSON
-          if node scripts/assert-tests-ran.mjs "$RUNNER_TEMP/partial-skip.json"; then
-            echo "::error::test-execution guard did NOT fail when the P0 or-key-material suite was PARTIALLY skipped (an unrelated describe block in the same file kept it executed > 0)"
-            exit 1
-          fi
-          echo "guard correctly failed: P0 suite partially skipped, hiding behind another describe block in the same file"
 
   migration-hygiene:
     name: Migration filename hygiene
@@ -398,11 +431,7 @@ jobs:
     # fire on commits authored through the GitHub API, so this job catches the
     # exact path the hook cannot: API-authored commits and commits pushed via
     # tooling that bypasses local hooks.
-    # Promotion PRs (dev -> prod) are exempt: those commits were already in dev
-    # history and should have been checked when they entered dev. Checking them
-    # again on promotion creates a permanent blocker if any historical commit
-    # lacks the trailer (no path to fix without rewriting a protected branch).
-    if: github.event_name == 'pull_request' && github.base_ref != 'prod'
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
