@@ -272,7 +272,26 @@ printf '%s\n' "$PLANTED_CI_OUT" | sed 's/^/    | /'
 printf '\nobserved output, tailnet fixture, CI mode:\n'
 printf '%s\n' "$TAILNET_CI_OUT" | sed 's/^/    | /'
 
-printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
+# How many cases this file must actually RUN.
+#
+# Deciding the exit status on the failure counter alone means a file
+# truncated to nothing reports "0 passed, 0 failed", prints that the self
+# test passed, and exits 0. That is the absence-reads-as-green shape every
+# defect in this gate has had, in the file written to catch it. Raising
+# this number when a case is added is the point: it makes deleting a case
+# a deliberate act instead of a silent one.
+EXPECTED_CASES=21
+TOTAL=$((PASSED + FAILED))
+
+printf '\n%d passed, %d failed, %d ran of %d expected\n\n' \
+  "$PASSED" "$FAILED" "$TOTAL" "$EXPECTED_CASES"
+
+if [ "$TOTAL" -lt "$EXPECTED_CASES" ]; then
+  printf 'leak scan red run self test FAILED: only %d case(s) ran, %d were expected.\n' \
+    "$TOTAL" "$EXPECTED_CASES"
+  printf 'Cases have been removed, or this file did not run to the end.\n\n'
+  exit 1
+fi
 
 if [ "$FAILED" -ne 0 ]; then
   printf 'leak scan red run self test FAILED\n\n'

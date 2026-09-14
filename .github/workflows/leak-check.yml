@@ -25,7 +25,16 @@ jobs:
         #
         # This needs no secret, so it runs on fork and Dependabot pull
         # requests too.
-        run: bash scripts/test-canon-terms.sh
+        #
+        # The pass/fail floor lives inside the script it protects, so a
+        # script truncated or emptied before that floor check runs would
+        # still exit 0. Asserting the result line here, at the caller,
+        # means truncating the script cannot remove the assertion too.
+        run: |
+          set -o pipefail
+          bash scripts/test-canon-terms.sh | tee "$RUNNER_TEMP/canon-self-test.log"
+          grep -qE '[0-9]+ passed, 0 failed, [0-9]+ ran of [0-9]+ expected' "$RUNNER_TEMP/canon-self-test.log" \
+            || { echo "::error::the canon-terms self test produced no result line; it did not run to the end."; exit 1; }
 
       - name: Leak scan red run self test
         # The reserved-term category withholds matched text in CI, and a
@@ -36,7 +45,16 @@ jobs:
         # list against a tree with no plant comes back green.
         #
         # Needs no secret; runs on forks and Dependabot too.
-        run: bash scripts/test-leak-scan-red.sh
+        #
+        # Same caller-side floor as the canon-terms self test above: the
+        # pass/fail counters live inside the script, so a truncated or
+        # emptied script would still exit 0. Asserting the result line here
+        # means truncating the script cannot remove the assertion too.
+        run: |
+          set -o pipefail
+          bash scripts/test-leak-scan-red.sh | tee "$RUNNER_TEMP/leak-scan-red-self-test.log"
+          grep -qE '[0-9]+ passed, 0 failed, [0-9]+ ran of [0-9]+ expected' "$RUNNER_TEMP/leak-scan-red-self-test.log" \
+            || { echo "::error::the leak-scan-red self test produced no result line; it did not run to the end."; exit 1; }
 
       - name: Run pre-publish leak scan
         # Fails the job (and the required check) if any leak is found.
