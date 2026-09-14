@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { toastError } from "@/lib/friendly-error";
 import { CaptchaWidget, CAPTCHA_REQUIRED } from "@/components/auth/CaptchaWidget";
+import { PasswordSignInForm } from "@/components/auth/PasswordSignInForm";
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 
 /**
@@ -374,55 +375,19 @@ export function AuthScreen() {
               </TabsList>
 
               <TabsContent value="signin" className="mt-6 space-y-4">
-                <CardTitle className="text-lg">Welcome back</CardTitle>
-                <CardDescription>Sign in with your email and password.</CardDescription>
-                {/*
-                  e2e-anchor: tests/e2e/auth.setup.ts logs the
-                  fixture test user in via the #si-email and #si-pw
-                  inputs and the "Sign in" button. Renaming any of
-                  those breaks the authenticated harness; update
-                  auth.setup.ts in the same change.
-                */}
-                <form onSubmit={onSignIn} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="si-email">Email</Label>
-                    <Input
-                      id="si-email"
-                      type="email"
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="si-pw">Password</Label>
-                    <Input
-                      id="si-pw"
-                      type="password"
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <CaptchaWidget
-                    ref={widgetRef}
-                    onSuccess={setCaptchaToken}
-                    onError={resetCaptcha}
-                    onExpire={resetCaptcha}
-                  />
-                  <Button type="submit" className="w-full" disabled={submitDisabled}>
-                    {busy ? "Signing in…" : "Sign in"}
-                  </Button>
-                  <button
-                    type="button"
-                    className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setTab("reset")}
-                  >
-                    Forgot your password?
-                  </button>
-                </form>
+                <PasswordSignInForm
+                  email={email}
+                  onEmailChange={setEmail}
+                  password={password}
+                  onPasswordChange={setPassword}
+                  busy={busy}
+                  submitDisabled={submitDisabled}
+                  onSubmit={onSignIn}
+                  widgetRef={widgetRef}
+                  onCaptchaSuccess={setCaptchaToken}
+                  onCaptchaReset={resetCaptcha}
+                  onForgotPassword={() => setTab("reset")}
+                />
               </TabsContent>
 
               <TabsContent value="signup" className="mt-6 space-y-4">
