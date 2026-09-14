@@ -9,10 +9,19 @@
 // own merge gate uses): a later CHANGES_REQUESTED or a dismissal
 // supersedes an earlier APPROVED from the same person. `reviews` must
 // be in the order the GitHub API returns them (oldest first).
+//
+// A COMMENTED review is not a decision. GitHub's own review decision
+// (APPROVED / CHANGES_REQUESTED) is not changed by a reviewer leaving
+// a follow-up comment, so a COMMENTED review must not overwrite an
+// earlier decisive review from the same person here either. Only
+// APPROVED, CHANGES_REQUESTED and DISMISSED are decisive.
+const DECISIVE_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
+
 function evaluateAuditorApproval(reviews, prAuthorLogin, auditorLogin, headSha) {
   const latestByUser = new Map();
   for (const r of reviews || []) {
     if (!r || !r.user) continue;
+    if (!DECISIVE_STATES.has(r.state)) continue;
     latestByUser.set(r.user.id, r);
   }
 
