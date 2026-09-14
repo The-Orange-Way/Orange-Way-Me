@@ -2,9 +2,11 @@
  * The add door of the stealth kill switch, contract tests.
  *
  * The sentence these exist to prevent: "the flag is off, so the feature is
- * off". It was not. The flag closed the sync path and the add path never read
- * it, so private-wallet connections could still be created while everyone
- * believed the switch had closed the feature.
+ * off". It was not, twice. First the add path never read the flag at all
+ * (fixed under OWM-T0478). Then the add path read it but let any slug it did
+ * not recognise as a private wallet through, a deny list that could never be
+ * complete against a catalogue this app does not host, and that had no real
+ * caller anyway (fixed under OWM-T0506, see add-gate.ts's module comment).
  */
 
 import { describe, it, expect } from "vitest";
@@ -22,6 +24,15 @@ describe("isStealthCatalogueSlug", () => {
       expect(isStealthCatalogueSlug(slug.toUpperCase())).toBe(true);
       expect(isStealthCatalogueSlug(`  ${slug}  `)).toBe(true);
     }
+  });
+
+  it("recognises a gated slug even when the separator is renamed", () => {
+    // OWM-T0506's concrete failure scenario: a hyphen swapped for the
+    // underscore in "xpub_stealth". The matcher must not care which
+    // separator is used, or a rename silently drops out of the gated list.
+    expect(isStealthCatalogueSlug("xpub-stealth")).toBe(true);
+    expect(isStealthCatalogueSlug("XPUB-STEALTH")).toBe(true);
+    expect(isStealthCatalogueSlug("xpub_stealth")).toBe(true);
   });
 
   it("does not claim a non-private slug, an empty string, or a missing one", () => {
@@ -62,15 +73,15 @@ describe("planCatalogueAdd with the flag OFF", () => {
     expect(planCatalogueAdd({ slug: "   ", stealthSyncEnabled: false }).allowed).toBe(false);
   });
 
-  it("leaves the bank route alone, which is the biggest risk in this change", () => {
-    expect(planCatalogueAdd({ slug: "quiltt", stealthSyncEnabled: false })).toEqual({
-      allowed: true,
-    });
-  });
-
-  it("leaves other named non-private sources alone", () => {
-    expect(planCatalogueAdd({ slug: "blink", stealthSyncEnabled: false }).allowed).toBe(true);
-    expect(planCatalogueAdd({ slug: "strike", stealthSyncEnabled: false }).allowed).toBe(true);
+  it("refuses a named slug this side does not recognise (OWM-T0506)", () => {
+    // Nothing here hosts the provider's catalogue, so a slug that is not on
+    // STEALTH_CATALOGUE_SLUGS is not proof it is safe, only proof it is not
+    // one of the three we happen to know about. There is also no production
+    // caller relying on this passing: ConnectionsPage never names a slug,
+    // and the bank flow (AddBankDialog) never calls this gate at all.
+    expect(planCatalogueAdd({ slug: "quiltt", stealthSyncEnabled: false }).allowed).toBe(false);
+    expect(planCatalogueAdd({ slug: "blink", stealthSyncEnabled: false }).allowed).toBe(false);
+    expect(planCatalogueAdd({ slug: "strike", stealthSyncEnabled: false }).allowed).toBe(false);
   });
 });
 
@@ -85,7 +96,7 @@ describe("planCatalogueAdd with the flag ON", () => {
     expect(planCatalogueAdd({ stealthSyncEnabled: true })).toEqual({ allowed: true });
   });
 
-  it("passes the bank route", () => {
+  it("passes any other named slug too, once the switch is genuinely on", () => {
     expect(planCatalogueAdd({ slug: "quiltt", stealthSyncEnabled: true })).toEqual({
       allowed: true,
     });
@@ -97,7 +108,7 @@ describe("planCatalogueAdd fails closed when the flag cannot be read", () => {
   // error, a missing row, or a boot that has not resolved yet all leave it
   // false. This is the same rule one layer up, for a caller that hands us
   // something other than a boolean. An unreadable kill switch is not an open
-  // one, so none of these may pass on truthiness.
+  // one, so none of these may pass on truthiness, named slug or not.
   const notTrue: unknown[] = [undefined, null, "true", "false", 1, 0, {}, [], NaN];
 
   it("refuses a gated slug for every non-boolean-true flag value", () => {
@@ -112,9 +123,9 @@ describe("planCatalogueAdd fails closed when the flag cannot be read", () => {
     }
   });
 
-  it("still lets the bank route through, so an unreadable flag cannot break bank connect", () => {
+  it("refuses a named non-gated slug too, for every non-boolean-true flag value", () => {
     for (const value of notTrue) {
-      expect(planCatalogueAdd({ slug: "quiltt", stealthSyncEnabled: value }).allowed).toBe(true);
+      expect(planCatalogueAdd({ slug: "quiltt", stealthSyncEnabled: value }).allowed).toBe(false);
     }
   });
 });
