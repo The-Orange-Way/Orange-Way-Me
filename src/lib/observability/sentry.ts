@@ -116,7 +116,7 @@ const TOKEN_PATTERNS: Array<[RegExp, string]> = [
     "$1=[redacted]",
   ],
   [
-    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub)=[^&\s#"']+/gi,
+    /(token|code|state|nonce|jwt|api_key|apikey|secret|password|opk|mek|seed|xpub|xpriv|xprv|entropy|salt)=[^&\s#"']+/gi,
     "$1=[redacted]",
   ],
   // Bearer Authorization headers
