@@ -17,6 +17,8 @@
 #
 # Override (escape hatch — emits a loud warning, do not use casually):
 #   PR_THIS_BYPASS=1 git push
+# Scanner-only override (when gitleaks genuinely is not installed):
+#   PR_THIS_ALLOW_NO_GITLEAKS=1 git push
 #
 # Install on a fresh clone:
 #   bash scripts/install-hooks.sh
@@ -310,7 +312,11 @@ done
 # makes this probe measure "does the scanner exist" instead of "is it on
 # PATH right now".
 resolve_gitleaks() {
-  if [ -x "$HOME/.local/bin/gitleaks" ]; then
+  # HOME is normally set by git, but absence testing and stripped-down
+  # automation environments may omit it. Under set -u, expanding a missing
+  # HOME here used to abort the whole gate before the fail-closed branch could
+  # print its refusal and named override.
+  if [ -n "${HOME:-}" ] && [ -x "$HOME/.local/bin/gitleaks" ]; then
     printf '%s' "$HOME/.local/bin/gitleaks"
     return 0
   fi
