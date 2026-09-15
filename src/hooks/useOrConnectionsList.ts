@@ -100,8 +100,16 @@ export function useOrConnectionsList(): {
   const { isUnlocked, decryptOrCipher } = useVault();
   const [result, setResult] = useState<OrConnectionsResult>({ state: "unavailable" });
   const [loading, setLoading] = useState(true);
+  // OWM-T0117. refresh has no AbortController and no cancelled flag, so two
+  // overlapping calls (mount + a manual refresh, for instance) used to let
+  // whichever one resolved last win regardless of which was issued last.
+  // Bumped at the top of every call; a call whose token no longer matches
+  // when a step resolves stops writing state instead of overwriting a
+  // newer answer with a stale one.
+  const generationRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const gen = ++generationRef.current;
     if (!user || !isUnlocked) {
       // Cannot read anything without an unlocked vault. Nothing to surface.
       setResult({ state: "unavailable" });
@@ -121,6 +129,7 @@ export function useOrConnectionsList(): {
         .select("or_subaccount_id")
         .eq("user_id", user.id)
         .maybeSingle();
+      if (listCallIsStale()) return;
       if (error) {
         // We could not determine whether a subaccount exists. That is
         // UNKNOWN, not empty: a connection in error may sit behind this
@@ -179,8 +188,10 @@ export function useOrConnectionsList(): {
           lastError,
         });
       }
+      if (listCallIsStale()) return;
       setResult({ state: "loaded", connections: out });
     } catch (err) {
+      if (listCallIsStale()) return;
       // The read failed. The list is UNKNOWN, not empty: a broken
       // connection may exist and we could not see it. Surface that as
       // unreadable so the badge can say "status unknown" instead of
@@ -189,7 +200,11 @@ export function useOrConnectionsList(): {
       console.warn("[useOrConnectionsList] fetch failed", err);
       setResult({ state: "unreadable" });
     } finally {
-      setLoading(false);
+      if (!listCallIsStale()) setLoading(false);
+    }
+
+    function listCallIsStale() {
+      return generationRef.current !== gen;
     }
   }, [user, isUnlocked, decryptOrCipher]);
 
