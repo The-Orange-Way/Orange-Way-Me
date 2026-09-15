@@ -142,7 +142,7 @@ describe("ConnectionsPage handleDeleteConfirmed wiring", () => {
     const ifStart = code.indexOf('if (readback === "silent-failure")');
     expect(
       ifStart,
-      "No `if (readback === \"silent-failure\")` branch found after " +
+      'No `if (readback === "silent-failure")` branch found after ' +
         "classifyDeleteReadback. Without it the classification result is computed " +
         "and never acted on.",
     ).toBeGreaterThan(-1);
