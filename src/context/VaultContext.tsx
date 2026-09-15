@@ -279,7 +279,48 @@ function assertOrAvailable(reasonRef: { current: string | null }): void {
 }
 
 type OrKeyMaterial =
-  | { ok: true; orMekBytes: Uint8Array; saltContext: string }
+  | {
+      ok: true;
+      orMekBytes: Uint8Array;
+      saltContext: string;
+      /**
+       * OWM-T0584. Present only when this key was just derived from a row
+       * that carried NONE of the three Orange Rails columns (see
+       * planOrKeyMaterial's "derive-and-pin" case) AND the caller asked for
+       * the pin to be deferred rather than written immediately.
+       *
+       * That row shape is genuinely ambiguous, not merely unlikely. A
+       * brand-new account that has never touched Orange Rails, and an
+       * account whose password rotated before DL-1506 shipped any column to
+       * record that rotation, both read back as "all three columns null"
+       * today - there is no local signal that tells them apart, because the
+       * marking mechanism (or-recovery-marking.ts) did not exist yet when
+       * the second kind of account last rotated. Pinning immediately treats
+       * every such row as the first case. For the second, the derivation
+       * below uses the CURRENT salt, which is not the salt any already
+       * synced Orange Rails row was sealed under, so the pin would commit a
+       * well-formed key that opens none of them - silently, and
+       * permanently, which is the exact DL-1506 failure this reopens.
+       *
+       * The caller cannot resolve this here: telling the two apart needs to
+       * know whether the account has any Orange Rails data at all, which is
+       * a network fact, and no network call belongs on the unlock path
+       * (rejected designs on the ticket). So the key is handed back for
+       * immediate session use either way - deriving is deterministic and
+       * cheap, and using it commits nothing - while the decision to persist
+       * it as the account's permanent pin is handed back to the caller as
+       * this field. The caller commits it once something downstream, on the
+       * customer's actual path, proves the derivation was right: see
+       * confirmOrKeyMaterialProven and its call sites in ConnectionsPage.tsx.
+       */
+      pendingPin?: {
+        userId: string;
+        mek: CryptoKey;
+        orMekBytes: Uint8Array;
+        saltContext: string;
+        epoch: number;
+      };
+    }
   | { ok: false; reason: string };
 
 /**
@@ -330,8 +371,22 @@ export async function resolveOrKeyMaterial(params: {
    * passes false because it has just minted a new one.
    */
   saltMatchesExistingRows: boolean;
+  /**
+   * OWM-T0584. True asks this call, on a "derive-and-pin" plan only, to hand
+   * the pin back as `pendingPin` instead of writing it. False keeps the
+   * original behaviour of writing it immediately. unlock() passes true: it
+   * is the only caller that can ever reach a "derive-and-pin" plan (recovery
+   * always states `saltMatchesExistingRows: false`, which planOrKeyMaterial
+   * only ever resolves to "refuse"), and it is the caller with a downstream
+   * page that can prove the derivation right before it is committed.
+   * recoverWithCode passes false so this stays an explicit, checkable
+   * decision at each call site rather than a default either could drift
+   * away from silently.
+   */
+  deferPinUntilProven: boolean;
 }): Promise<OrKeyMaterial> {
-  const { userId, password, mek, row, kdfSalt, saltMatchesExistingRows } = params;
+  const { userId, password, mek, row, kdfSalt, saltMatchesExistingRows, deferPinUntilProven } =
+    params;
 
   const plan = planOrKeyMaterial(row, kdfSalt, { saltMatchesExistingRows });
 
@@ -367,6 +422,26 @@ export async function resolveOrKeyMaterial(params: {
   }
 
   const orMekBytes = await deriveOrMekBytes(password, userId, plan.saltContext);
+
+  if (deferPinUntilProven) {
+    // OWM-T0584. See the pendingPin field above for why this row shape
+    // cannot be pinned on trust. The key is still returned for immediate use
+    // - the session must not wait on a network round trip to function -
+    // only the DATABASE WRITE is withheld, for the caller to commit once it
+    // is proven.
+    return {
+      ok: true,
+      orMekBytes,
+      saltContext: plan.saltContext,
+      pendingPin: {
+        userId,
+        mek,
+        orMekBytes,
+        saltContext: plan.saltContext,
+        epoch: plan.epoch,
+      },
+    };
+  }
 
   // Return as soon as the key exists. Persisting the pin is DURABILITY work,
   // not correctness work: the bytes above are the right key for this session
@@ -499,6 +574,13 @@ interface VaultContextType {
    * call fail later with something that reads like a lock.
    */
   orNamespaceDisabledReason: string | null;
+  /**
+   * OWM-T0584. Commit an Orange Rails key pin that unlock deferred pending
+   * proof. See VaultProvider's implementation for the full rationale and
+   * ConnectionsPage.tsx for its call sites. A no-op when nothing is
+   * pending - safe to call unconditionally.
+   */
+  confirmOrKeyMaterialProven: () => void;
   unlock: (password: string) => Promise<void>;
   createVault: (password: string) => Promise<CreateVaultResult>;
   finalizeVaultSetup: () => void;
@@ -635,6 +717,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // lifetime rules as the OPK seed: zeroed and nulled on lock, on sign-out and
   // on no-user, and never written to storage or sent to any server.
   const orStealthKeyBytesRef = useRef<Uint8Array | null>(null);
+  // OWM-T0584. Set only while a "derive-and-pin" key is in use but its
+  // database write has been deferred pending proof (see resolveOrKeyMaterial's
+  // pendingPin). Read and cleared by confirmOrKeyMaterialProven; cleared
+  // without writing on lock, sign-out and a fresh unlock, since a pin that
+  // was never proven for one unlock must not be written under a later one's
+  // password.
+  const pendingOrPinRef = useRef<{
+    userId: string;
+    mek: CryptoKey;
+    orMekBytes: Uint8Array;
+    saltContext: string;
+    epoch: number;
+  } | null>(null);
 
   const orDisabledReasonRef = useRef<string | null>(null); // Phase 4.2: active household + unwrapped DEK. Populated on unlock
   // when the user has a membership row + a wrap we can open with their
@@ -694,6 +789,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orDisabledReasonRef.current = null;
         setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
+        pendingOrPinRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
           handle.privateKeyBytes.fill(0);
@@ -755,6 +851,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orDisabledReasonRef.current = null;
         setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
+        pendingOrPinRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
           handle.privateKeyBytes.fill(0);
@@ -1101,7 +1198,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       row,
       kdfSalt: row.kdf_salt,
       saltMatchesExistingRows: !saltRotatedWhileUnpinned(row),
+      // OWM-T0584. unlock is the only caller that can reach a
+      // "derive-and-pin" plan (recoverWithCode always states
+      // saltMatchesExistingRows: false, which never resolves to that plan),
+      // and the only one with a downstream page - ConnectionsPage - that can
+      // later prove the derivation right. See pendingPin above.
+      deferPinUntilProven: true,
     });
+    // A pin deferred by a PRIOR unlock in this session must not be written
+    // under this one's password: it closed over the previous mek. Each
+    // unlock either replaces it with its own pending pin or clears it.
+    pendingOrPinRef.current = orMaterial.ok ? (orMaterial.pendingPin ?? null) : null;
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -1487,7 +1594,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // against it cannot reproduce anything, so an unpinned row must refuse
       // here rather than mint a replacement key and call that success.
       saltMatchesExistingRows: false,
+      // OWM-T0584. Explicit, not merely the same as omitting the field: this
+      // path can never reach "derive-and-pin" (saltMatchesExistingRows is
+      // false above, and planOrKeyMaterial only resolves that combination to
+      // "refuse"), so there is nothing here for a deferred pin to defer. Kept
+      // false rather than left to a default so a future change to either
+      // function has to touch this line to change that.
+      deferPinUntilProven: false,
     });
+    // Out of scope for OWM-T0584 (recovery mints a fresh salt and can never
+    // produce a pendingPin - see deferPinUntilProven above), but cleared
+    // defensively: a pin deferred by an earlier unlock in this session closed
+    // over that unlock's mek and must not be written under the recovered one.
+    pendingOrPinRef.current = null;
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -1533,6 +1652,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orDisabledReasonRef.current = null;
     setOrNamespaceDisabledReason(null);
     currentHouseholdRef.current = null;
+    // OWM-T0584. A pin deferred while unlocked must not survive to a later
+    // unlock; that unlock computes its own pendingPin or none at all.
+    pendingOrPinRef.current = null;
     // Phase 4.4: clear HSK cache + retained salt on lock.
     kdfSaltRef.current = null;
     for (const handle of signingKeysRef.current.values()) {
@@ -1543,6 +1665,34 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setIsUnlocked(false);
     // Intentionally keep vaultKeyVersion — it reflects on-disk state and
     // should remain visible in the locked settings screen.
+  }, []);
+
+  /**
+   * OWM-T0584. Commit a deferred Orange Rails pin once the caller has proof
+   * the derivation was right for THIS account, not merely well formed.
+   *
+   * Idempotent and safe to call speculatively: a no-op when there is nothing
+   * pending, which covers every session that did not hit the ambiguous row
+   * shape (see resolveOrKeyMaterial's pendingPin) as well as a second call
+   * after the first already committed. ConnectionsPage calls this from two
+   * places - zero connections on this account (nothing exists yet to be
+   * wrong about), and the first transaction row that actually decrypts with
+   * the derived keys (direct evidence the derivation was right) - and calls
+   * it unconditionally from both, relying on this no-op behaviour rather than
+   * tracking whether it already fired.
+   *
+   * Fire-and-forget, same as the immediate-pin path in resolveOrKeyMaterial:
+   * the caller (a page render, not the unlock) has nothing to block on, and
+   * a failed write here leaves the row exactly as unpinned as it already was,
+   * which the next unlock's own pendingPin will attempt again.
+   */
+  const confirmOrKeyMaterialProven = useCallback(() => {
+    const pending = pendingOrPinRef.current;
+    if (!pending) return;
+    pendingOrPinRef.current = null;
+    void pinOrKeyMaterial(pending).catch((e) => {
+      console.error("[vault] background pin of Orange Rails key material threw (post-proof)", e);
+    });
   }, []);
 
   const encryptText = useCallback(async (plaintext: string) => {
@@ -1880,6 +2030,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         vaultCheckError,
         vaultKeyVersion,
         orNamespaceDisabledReason,
+        confirmOrKeyMaterialProven,
         unlock,
         createVault,
         finalizeVaultSetup,
