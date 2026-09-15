@@ -1,5 +1,5 @@
 /**
- * Goals math — pure helpers for current amount, projection, ordering, amortization.
+ * Goals math - pure helpers for current amount, projection, ordering, amortization.
  *
  * These functions operate on the decrypted Goal + Account + Transaction shapes
  * already in memory. No encryption logic here.
@@ -7,18 +7,21 @@
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
-import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
+import { unitIsExact } from "@/lib/format";
+import { convert } from "@/lib/fx-rates";
 
 /**
- * A linked account's balance, normalized to sats when the currency is
- * Bitcoin-like so it is never summed at face value against a mismatched
- * unit. Non-Bitcoin currencies pass through unchanged (see the module-level
- * note on computeCurrent for the FX limitation this does not fix).
+ * A linked account's balance, converted to the goal's primary currency so it
+ * is never summed or compared at face value against a mismatched unit.
+ *
+ * `convert()` already does the Bitcoin sats/BTC disambiguation internally
+ * (see fx-rates.ts), so a BTC or sats account and a fiat account land in the
+ * same unit here rather than needing a separate normalization step.
  */
-function normalizedBalance(a: Account): number {
-  const raw = Number(a.balance) || 0;
-  if (!isBitcoinCurrency(a.currency)) return raw;
-  return normalizeBitcoinToSats(raw, a.currency, { unitIsExact: unitIsExact(a.format_version) });
+export function normalizedBalance(a: Account, primaryCurrency: string = "USD"): number {
+  return convert(Number(a.balance) || 0, a.currency, primaryCurrency, {
+    unitIsExact: unitIsExact(a.format_version),
+  });
 }
 
 export interface GoalProgress {
@@ -80,31 +83,50 @@ export function untrackableReason(
 }
 
 /**
- * Compute the goal's current amount from its linked accounts.
+ * Compute the goal's current amount from its linked accounts, in
+ * `primaryCurrency`.
  *
- * - save_up + all_balance: sum of linked account balances (positive numbers)
- * - save_up + specific_amount: the user's manual allocation
+ * - save_up + all_balance: sum of linked account balances (positive numbers),
+ *   each converted to primaryCurrency before summing so a goal that links
+ *   accounts in different currencies (or a Bitcoin account, whose raw balance
+ *   may be sats or decimal BTC) is never added at face value.
+ * - save_up + specific_amount: the user's manual allocation, which carries no
+ *   currency of its own and is treated as already being in primaryCurrency
+ *   (the same assumption the goal's target_amount makes - see OWM-T0772).
  * - pay_down: starting_balance - |current debt balance|, where debt balances are
- *   typically negative; we coerce to positive for display ("paid off so far")
+ *   typically negative; we coerce to positive for display ("paid off so far").
+ *   starting_balance is unitless the same way target_amount is, so only the
+ *   linked debt accounts are converted; the starting figure is left as-is.
  */
-export function computeCurrent(goal: Goal, accounts: Account[]): number {
+export function computeCurrent(
+  goal: Goal,
+  accounts: Account[],
+  primaryCurrency: string = "USD",
+): number {
   const linked = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
 
   if (goal.type === "save_up") {
     if (goal.strategy === "specific_amount") {
       return Number(goal.manual_allocation ?? "0") || 0;
     }
-    return linked.reduce((sum, a) => sum + Math.max(0, normalizedBalance(a)), 0);
+    return linked.reduce((sum, a) => sum + Math.max(0, normalizedBalance(a, primaryCurrency)), 0);
   }
 
   // pay_down: amount paid off = starting - |current|
   const start = Number(goal.starting_balance ?? goal.target_amount) || 0;
-  const currentDebt = linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a)), 0);
+  const currentDebt = linked.reduce(
+    (sum, a) => sum + Math.abs(normalizedBalance(a, primaryCurrency)),
+    0,
+  );
   return Math.max(0, start - currentDebt);
 }
 
-export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
-  const current = computeCurrent(goal, accounts);
+export function computeProgress(
+  goal: Goal,
+  accounts: Account[],
+  primaryCurrency: string = "USD",
+): GoalProgress {
+  const current = computeCurrent(goal, accounts, primaryCurrency);
   const target = Number(goal.target_amount) || 0;
   const remaining = Math.max(0, target - current);
   const pct = target > 0 ? Math.min(1, current / target) : 0;
@@ -164,7 +186,11 @@ export interface GoalsSummary {
  * (DL-1589). That needs a product decision on whether goals may share an
  * account at all, and deduping by account here would pre-empt it.
  */
-export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
+export function summariseGoals(
+  goals: Goal[],
+  accounts: Account[],
+  primaryCurrency: string = "USD",
+): GoalsSummary {
   let saved = 0;
   let target = 0;
   let counted = 0;
@@ -173,7 +199,7 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
   for (const g of goals) {
     if (g.is_completed) continue;
     active += 1;
-    const p = computeProgress(g, accounts);
+    const p = computeProgress(g, accounts, primaryCurrency);
     if (p.untrackableReason) continue;
     counted += 1;
     saved += Math.min(p.current, p.target);
@@ -186,7 +212,12 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
 /**
  * Average monthly contribution across the trailing N months of transactions
  * for the goal's linked accounts. For save_up: positive net inflow.
- * For pay_down: positive net outflow (payments) — measured as -net.
+ * For pay_down: positive net outflow (payments) - measured as -net.
+ *
+ * NOT currency-converted (tracked separately as a follow-on to OWM-T0772):
+ * this sums raw txn.amount across the goal's linked accounts, so a goal whose
+ * linked accounts are not all in the same currency will mix units here the
+ * same way computeCurrent used to before this fix.
  */
 export function averageMonthlyContribution(goal: Goal, txns: DecryptedTxn[], months = 3): number {
   if (goal.linked_account_ids.length === 0) return 0;
@@ -248,7 +279,7 @@ export function orderPayDown(
 }
 
 /**
- * Amortization preview — how many months and how much interest at a fixed
+ * Amortization preview - how many months and how much interest at a fixed
  * monthly payment. Returns null when payment can't cover monthly interest.
  */
 export interface Amortization {
@@ -284,6 +315,7 @@ export function balanceHistory(
   goal: Goal,
   accounts: Account[],
   txns: DecryptedTxn[],
+  primaryCurrency: string = "USD",
 ): Array<{ date: string; value: number }> {
   const monthCount = 12;
   const today = new Date();
@@ -297,10 +329,15 @@ export function balanceHistory(
 
   // Start from the current computed value and walk backwards, removing
   // transactions per month. This avoids needing an external "snapshot at
-  // month X" — we approximate by reversing the in-range txn flow.
-  const currentValue = computeCurrent(goal, accounts);
+  // month X" - we approximate by reversing the in-range txn flow.
+  const currentValue = computeCurrent(goal, accounts, primaryCurrency);
   const linkedIds = new Set(goal.linked_account_ids);
   const inRange = txns.filter((t) => linkedIds.has(t.account_id) && !t.split_parent_id);
+  // Same primaryCurrency conversion computeCurrent applies to the anchor
+  // value has to apply to the deltas walked off it (OWM-T0772), or the chart
+  // mixes a converted anchor with un-converted flow for any goal whose linked
+  // accounts are not already in primaryCurrency.
+  const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
 
   // For each month boundary, sum txns AFTER that boundary and subtract.
   const series: Array<{ date: string; value: number }> = [];
@@ -309,7 +346,8 @@ export function balanceHistory(
     let flowAfter = 0;
     for (const t of inRange) {
       if (new Date(t.date + "T00:00:00").getTime() >= boundary) {
-        flowAfter += Number(t.amount) || 0;
+        const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
+        flowAfter += convert(Number(t.amount) || 0, cur, primaryCurrency);
       }
     }
     const valueAtBoundary =
