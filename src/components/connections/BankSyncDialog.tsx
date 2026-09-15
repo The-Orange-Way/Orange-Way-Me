@@ -29,10 +29,8 @@ export interface BankSyncProgress {
 }
 
 export interface BankSyncOutcome {
-  imported: number;
-  total: number;
-  unmapped: number;
-  errored: number;
+  /** True only after the local transaction table has been read after import. */
+  ledgerReadBack: boolean;
   /** Balance credits the DL-1424 unit guard refused because the transaction's
    *  unit did not match the destination account's currency. Present so the
    *  dialog can warn instead of reporting silent success (OWM-T0740). */
@@ -58,7 +56,6 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
   const [phase, setPhase] = useState<Phase>("idle");
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
-  const [imported, setImported] = useState(0);
   const [unitMismatch, setUnitMismatch] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +87,6 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
       setPhase("fetching");
       setDone(0);
       setTotal(0);
-      setImported(0);
       setUnitMismatch(0);
       setError(null);
       try {
@@ -101,8 +97,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
           setTotal(p.total);
         });
         if (cancelled) return;
-        setImported(outcome.imported);
-        setTotal(outcome.total);
+        setTotal(0);
         setUnitMismatch(outcome.unitMismatch);
         setPhase("done");
         onDoneRef.current?.(outcome);
@@ -173,13 +168,7 @@ export function BankSyncDialog({ open, onOpenChange, runSync, onDone }: BankSync
             ) : (
               <Check className="h-8 w-8 text-green-600 dark:text-green-400" />
             )}
-            <p className="text-sm">
-              {total === 0
-                ? "No transactions returned."
-                : imported === total
-                  ? `Imported ${imported} ${imported === 1 ? "transaction" : "transactions"}.`
-                  : `Imported ${imported} of ${total} ${total === 1 ? "transaction" : "transactions"}.`}
-            </p>
+            <p className="text-sm">{"Your transaction list was refreshed."}</p>
             {bankSyncHasWarning({ unitMismatch }) && (
               <p className="text-center text-sm text-amber-600 dark:text-amber-400">
                 {`${unitMismatch} ${unitMismatch === 1 ? "balance was" : "balances were"} not updated because the account's currency does not match. Your bitcoin is unaffected; set the account's currency correctly and sync again to apply ${unitMismatch === 1 ? "it" : "them"}.`}
