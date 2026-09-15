@@ -216,9 +216,26 @@ export function orRowsForConnection(response: unknown, connectionId: string): Or
  *     the pair as a generic API key. Rephrasing beat adding an allowlist
  *     entry, which would have been a permanent hole for one comment.)
  *
- * There is no new key material here. The widget seals with the `txn_key` this
- * app hands it in the /connect fragment, and that is `deriveTransactionsKey`
- * -- the same ORANGERAILS_TRANSACTIONS_V1 subkey that opens `encrypted_payload`.
+ * There is no new key material here. There is, however, a sentence that used
+ * to sit in this spot and was WRONG, so it is corrected rather than deleted:
+ * it said "the widget seals with the `txn_key` this app hands it in the
+ * /connect fragment, and that is `deriveTransactionsKey`".
+ *
+ * The widget seals with the CREDENTIALS subkey. Both routes into it hand it
+ * `credKeyB64`, under two different field names. That was established the day
+ * after this comment was written, by a production bug: stealth sync imported
+ * zero transactions because this app was opening creds-sealed rows with the
+ * transactions subkey, and the only visible symptom was a toast reading
+ * "Wallet ledger: 14 undecryptable". The reader at ConnectionsPage.tsx now
+ * tries creds first and txns second, and the long comment above that loop is
+ * the authority on why.
+ *
+ * The confusion the old sentence encoded is worth naming, because it is easy
+ * to make again: the transactions subkey really is what opens
+ * `encrypted_payload` -- but those rows come from or-sync, which received the
+ * key in its REQUEST BODY, not from anything handed over in a /connect
+ * fragment. Two different handovers, and only one of them ever sealed these
+ * envelopes. As of OWM-T0413 the fragment carries no transactions key at all.
  * ------------------------------------------------------------------------- */
 
 /** The sealed envelope as `or-stealth-transactions-list` returns it. */

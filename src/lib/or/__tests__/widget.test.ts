@@ -6,7 +6,7 @@
  *
  *   1. Mints a widget_token via ow-or-proxy.
  *   2. Builds the /connect URL (with or without provider, fragment-carries
- *      cred_key / txn_key / widget_token).
+ *      cred_key / widget_token, and NOT txn_key).
  *   3. Resolves / rejects on postMessage / popup-close / popup-blocked.
  *
  * We don't drive a real popup; window.open is stubbed. The real cross-
@@ -38,7 +38,6 @@ vi.stubEnv("VITE_OR_CONNECT_URL", "https://connect.orangerails.com/connect");
 
 const ORG_ID = "user-uuid-1234";
 const CRED_KEY = "Y3JlZF9rZXlfYjY0X29wYXF1ZQ==";
-const TXN_KEY = "dHhuX2tleV9iNjRfb3BhcXVl";
 
 interface MockPopup {
   closed: boolean;
@@ -142,7 +141,6 @@ describe("openOrConnect", () => {
     const pending = openOrConnect({
       orgId: ORG_ID,
       credKeyB64: CRED_KEY,
-      txnKeyB64: TXN_KEY,
     });
     // Let the await chain inside openOrConnect flush so fetch + open run.
     await new Promise((r) => setTimeout(r, 0));
@@ -170,7 +168,12 @@ describe("openOrConnect", () => {
     const frag = new URLSearchParams(url.hash.slice(1));
     expect(frag.get("widget_token")).toBe("widget-tok-abc");
     expect(frag.get("cred_key")).toBe(CRED_KEY);
-    expect(frag.get("txn_key")).toBe(TXN_KEY);
+    // OWM-T0413. The transactions-namespace key must not cross to Orange
+    // Rails by any route, and the connect fragment was one of the two routes
+    // it used to take. This is the regression guard for that: a reader who
+    // adds txn_key back for convenience fails here, not in production.
+    expect(frag.get("txn_key")).toBeNull();
+    expect(url.hash).not.toContain("txn_key");
 
     // Drive a success message.
     postSuccess({
@@ -194,7 +197,6 @@ describe("openOrConnect", () => {
       orgId: ORG_ID,
       provider: "blink",
       credKeyB64: CRED_KEY,
-      txnKeyB64: TXN_KEY,
     });
     await new Promise((r) => setTimeout(r, 0));
     const url = new URL(shim.openedUrls[0]);
@@ -208,7 +210,6 @@ describe("openOrConnect", () => {
     const pending = openOrConnect({
       orgId: ORG_ID,
       credKeyB64: CRED_KEY,
-      txnKeyB64: TXN_KEY,
     });
     await new Promise((r) => setTimeout(r, 0));
     postCancel();
@@ -220,17 +221,17 @@ describe("openOrConnect", () => {
     const win = (globalThis as unknown as { window: { open: ReturnType<typeof vi.fn> } }).window;
     win.open.mockReturnValueOnce(null);
     const { openOrConnect } = await import("../widget");
-    await expect(
-      openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY }),
-    ).rejects.toThrow(/popup blocked/i);
+    await expect(openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY })).rejects.toThrow(
+      /popup blocked/i,
+    );
   });
 
   it("rejects when ow-or-proxy returns a non-200 for mint-token", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
     const { openOrConnect } = await import("../widget");
-    await expect(
-      openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY }),
-    ).rejects.toThrow(/or-link-mint-token failed.*429/);
+    await expect(openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY })).rejects.toThrow(
+      /or-link-mint-token failed.*429/,
+    );
   });
 
   it("returns the server-issued expiry for a long-running widget session", async () => {
@@ -256,7 +257,6 @@ describe("openOrConnect", () => {
     const pending = openOrConnect({
       orgId: ORG_ID,
       credKeyB64: CRED_KEY,
-      txnKeyB64: TXN_KEY,
     });
     await new Promise((r) => setTimeout(r, 0));
 
@@ -281,7 +281,6 @@ describe("openOrConnect", () => {
       const pending = openOrConnect({
         orgId: ORG_ID,
         credKeyB64: CRED_KEY,
-        txnKeyB64: TXN_KEY,
       });
 
       // Track settlement without leaving an unhandled rejection when the
@@ -331,7 +330,6 @@ describe("openOrConnect", () => {
     const pending = openOrConnect({
       orgId: ORG_ID,
       credKeyB64: CRED_KEY,
-      txnKeyB64: TXN_KEY,
     });
     await new Promise((r) => setTimeout(r, 0));
     const url = new URL(shim.openedUrls[0]);
@@ -382,7 +380,7 @@ describe("or-link-success contract, through the consumer (DL-1114)", () => {
   // fixture whose type ever drifts fails rather than being papered over.
   async function resolveWith(fixture: Record<string, unknown>) {
     const { openOrConnect } = await import("../widget");
-    const pending = openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY, txnKeyB64: TXN_KEY });
+    const pending = openOrConnect({ orgId: ORG_ID, credKeyB64: CRED_KEY });
     await new Promise((r) => setTimeout(r, 0));
     const win = (globalThis as { window: EventTarget }).window;
     win.dispatchEvent(

@@ -6,15 +6,25 @@
  * in app code, this helper opens OR's hosted /connect route in a popup,
  * then resolves a Promise when the user finishes.
  *
- * Key handoff:
- *   OR's /connect route accepts `cred_key` + `txn_key` (base64 raw
- *   32-byte AES keys) in the URL fragment. The fragment never reaches
- *   OR's server logs. To produce these bytes, we re-derive from the
- *   user's vault password using the same HKDF contexts already used by
- *   the vault (ORANGERAILS_CREDENTIALS_V1 / ORANGERAILS_TRANSACTIONS_V1).
- *   The widget locks the credential under those keys and posts only
- *   the resulting subaccount_id / connection_id back to OW — OW never
- *   sees the plaintext credential.
+ * Key handoff, and it is ONE key now (OWM-T0413):
+ *   OR's /connect route accepts `cred_key` in the URL fragment, a base64
+ *   raw 32-byte AES key re-derived here from the user's vault using the
+ *   ORANGERAILS_CREDENTIALS_V1 HKDF context. The widget locks the
+ *   credential under it and posts only the resulting subaccount_id /
+ *   connection_id back to OW, so OW never sees the plaintext credential.
+ *
+ *   `txn_key` USED TO RIDE ALONGSIDE IT AND NO LONGER DOES. Do not put it
+ *   back. The transactions-namespace key must not cross to Orange Rails by
+ *   any route (condition C2 as extended on OWM-T0413), and it was never
+ *   needed here: at OR's /connect the parameter is optional, and when it is
+ *   absent OR reuses cred_key for the one thing it was used for, encrypting
+ *   the per-wallet {currency, label} metadata blob. It locks no credential
+ *   and no transaction. Read at OR dev HEAD 2026-09-15; their consumer
+ *   integration guide states cred_key REQUIRED, txn_key OPTIONAL.
+ *
+ *   The fragment is not sent with the request, so none of this reaches
+ *   OR's server logs. That is the only threat it answers: a fragment is
+ *   still visible in the popup's address bar and history entry.
  *
  * Single-user adaptation (vs. V3 which is multi-org):
  *   OW has no org concept. The vault is per-user, so `orgId` here is
@@ -104,7 +114,6 @@ export async function openOrConnect(args: {
   orgId: string;
   provider?: string;
   credKeyB64: string;
-  txnKeyB64: string;
 }): Promise<OrLinkSuccess> {
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
@@ -114,7 +123,6 @@ export async function openOrConnect(args: {
     returnTo: window.location.origin,
     widgetToken,
     credKeyB64: args.credKeyB64,
-    txnKeyB64: args.txnKeyB64,
   });
 
   const popup = window.open(url, "or-connect", "width=720,height=900,popup=yes");
@@ -249,7 +257,6 @@ function buildConnectUrl(args: {
   returnTo: string;
   widgetToken: string;
   credKeyB64: string;
-  txnKeyB64: string;
 }): string {
   const qs = new URLSearchParams({
     platform: args.platform,
@@ -260,7 +267,6 @@ function buildConnectUrl(args: {
   const frag = new URLSearchParams({
     widget_token: args.widgetToken,
     cred_key: args.credKeyB64,
-    txn_key: args.txnKeyB64,
   });
   return `${OR_CONNECT_BASE}?${qs.toString()}#${frag.toString()}`;
 }

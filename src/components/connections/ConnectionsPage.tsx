@@ -236,7 +236,6 @@ export function ConnectionsPage() {
     decryptOrCipher,
     decryptOrTxnCipher,
     exportOrCredsKey,
-    exportOrTxnsKey,
     buildHouseholdSignatureFields,
     getOpkKeypair,
     orNamespaceDisabledReason,
@@ -598,11 +597,18 @@ export function ConnectionsPage() {
    * provider's side. We do not drive that handshake from here; our part ends
    * when the list posts the completed connection back to us.
    *
-   * The two vault keys travel in the URL fragment. They lock the stored
-   * credential and the per-wallet metadata, so the connect provider holds
-   * ciphertext and we hold the only keys that open it. Read immediately
-   * before the call so a vault that locked while this page sat open fails
-   * here rather than part-way through.
+   * ONE vault key travels in the URL fragment: the credentials subkey. It
+   * locks the stored credential and, on the provider's side, the per-wallet
+   * metadata too, so the connect provider holds ciphertext and we hold the
+   * only key that opens it. Read immediately before the call so a vault that
+   * locked while this page sat open fails here rather than part-way through.
+   *
+   * It used to be two. The transactions subkey was sent beside it and is not
+   * any more (OWM-T0413), because the transactions-namespace key must not
+   * cross to the connect provider by any route. Nothing broke by removing
+   * it: on their side the parameter is optional and, when it is absent, the
+   * credentials key is used for the one thing it was used for. Do not add it
+   * back to make something else easier.
    *
    * What the fragment buys us, and what it does not, because the half
    * answer that used to be here reassured readers about a question it never
@@ -657,11 +663,9 @@ export function ConnectionsPage() {
     const knownConnectionIdsBefore = connections.map((c) => c.id);
     try {
       const credKeyB64 = await exportOrCredsKey();
-      const txnKeyB64 = await exportOrTxnsKey();
       const result = await openOrConnect({
         orgId: user.id,
         credKeyB64,
-        txnKeyB64,
       });
       // The widget posting a connection_id is evidence the connection was
       // created. It is NOT evidence that it is in this list, and those came
