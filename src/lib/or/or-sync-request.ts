@@ -7,7 +7,7 @@
  * app-shaped plaintext drafts to this browser and does not write them to its
  * encrypted_transactions store. The browser then routes those drafts through
  * importOrTransactions, which encrypts every sensitive field under the vault
- * MEK before the OWM database write.
+ * MEK before the Orange Way Me database write.
  *
  * The response format is checked here rather than inferred from the request.
  * A server that ignores or changes `format` must fail closed; falling back to
@@ -88,7 +88,7 @@ export class OrSyncRouteRefusal extends Error {
 
 /**
  * Raised when Orange Rails did not positively identify the response as the
- * requested OWM sink shape. The response body is intentionally not attached:
+ * requested Orange Way Me sink shape. The response body is intentionally not attached:
  * sink rows contain plaintext transaction values while they are in memory.
  */
 export class OrSyncSinkContractError extends Error {
@@ -262,7 +262,8 @@ export async function sinkAndLegacyTransactionsForConnection(
 }
 
 /**
- * Ask or-sync to sync these connections through the OWM response sink.
+ * Ask or-sync to sync these connections through the Orange Way Me response
+ * sink.
  * Refuses before exporting credentials if any connection belongs elsewhere.
  *
  * There is no legacy fallback. If sink mode is unavailable or its response is
