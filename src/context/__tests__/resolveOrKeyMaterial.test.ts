@@ -150,7 +150,19 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
     expect(result.orMekBytes).toEqual(new Uint8Array([1, 2, 3, 4]));
-    expect(unwrapOrMekWithVaultMek).toHaveBeenCalledWith("sealed-blob", expect.anything());
+    expect(unwrapOrMekWithVaultMek).toHaveBeenCalledWith(
+      "sealed-blob",
+      expect.anything(),
+      expect.any(Uint8Array),
+    );
+    // And it is bound to THIS user's row and THIS column, not merely to
+    // something. A pinned blob lifted out of another user's row has to stop
+    // opening here, and the only thing that makes it stop is what goes in
+    // this third argument.
+    const aadArg = unwrapOrMekWithVaultMek.mock.calls[0][2] as Uint8Array;
+    expect(new TextDecoder().decode(aadArg)).toBe(
+      "owm/v1|public.vault_metadata|enc_or_mek_ciphertext|user-1",
+    );
     // Unwrap does not re-pin: the row already carries the current pin, so
     // pinOrKeyMaterial is never reached on this path either.
     expect(deriveOrMekBytes).not.toHaveBeenCalled();
