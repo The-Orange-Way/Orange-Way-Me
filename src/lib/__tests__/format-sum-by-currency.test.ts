@@ -24,12 +24,34 @@
 import { describe, it, expect } from "vitest";
 import {
   formatTotalsWithMode,
+  formatPrimaryCurrencyWithMode,
   isBitcoinCurrency,
   normalizeBitcoinToSats,
   unitIsExact,
   sumByCurrency,
   toBalanceEntry,
 } from "../format";
+
+describe("formatPrimaryCurrencyWithMode", () => {
+  it("renders one converted Bitcoin balance in each selected mode", () => {
+    const modes = {
+      sats: "5,000,000 sats",
+      btc: "0.05000000 BTC",
+      btc_easy: "0.05 000 000 BTC",
+      primary: "₿ 5,000,000",
+    } as const;
+
+    for (const [mode, expected] of Object.entries(modes)) {
+      expect(
+        formatPrimaryCurrencyWithMode(5_000_000, "sats", mode as keyof typeof modes, "en-US"),
+      ).toBe(expected);
+    }
+  });
+
+  it("treats a converted whole BTC value as BTC rather than one satoshi", () => {
+    expect(formatPrimaryCurrencyWithMode(1, "BTC", "btc", "en-US")).toBe("1.00000000 BTC");
+  });
+});
 
 describe("sumByCurrency", () => {
   // A wallet set shaped like the one that exposed this, with synthetic

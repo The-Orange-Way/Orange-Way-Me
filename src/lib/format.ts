@@ -103,6 +103,30 @@ export function formatCurrencyWithMode(
   }
 }
 
+/**
+ * Format an amount that has already been converted into the selected primary
+ * currency. Dashboard math represents BTC as decimal BTC and sats as sats, so
+ * the unit is known here rather than inferred from the number's magnitude.
+ * Fiat keeps the locale formatter's existing defaults.
+ */
+export function formatPrimaryCurrencyWithMode(
+  amount: number,
+  currency: string,
+  mode: BtcDisplayMode = "btc",
+  locale?: string,
+  opts?: { minimumFractionDigits?: number; maximumFractionDigits?: number },
+): string {
+  if (isBitcoinCurrency(currency)) {
+    return formatCurrencyWithMode(amount, currency, mode, locale, {
+      unitIsExact: currency === "BTC",
+    });
+  }
+  return formatCurrency(String(amount), currency, locale, {
+    minimumFractionDigits: opts?.minimumFractionDigits ?? 0,
+    maximumFractionDigits: opts?.maximumFractionDigits ?? 0,
+  });
+}
+
 export function formatTotalsWithMode(
   totals: Record<string, number>,
   mode: BtcDisplayMode = "btc",
@@ -113,7 +137,12 @@ export function formatTotalsWithMode(
   return entries.map(([cur, sum]) => formatCurrencyWithMode(sum, cur, mode, locale)).join(" · ");
 }
 
-export function formatCurrency(amount: string, currency: string, locale?: string): string {
+export function formatCurrency(
+  amount: string,
+  currency: string,
+  locale?: string,
+  opts?: { minimumFractionDigits?: number; maximumFractionDigits?: number },
+): string {
   const n = Number(amount);
   if (!Number.isFinite(n)) return amount;
   if (currency === "BTC") {
@@ -126,8 +155,8 @@ export function formatCurrency(amount: string, currency: string, locale?: string
     return new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: opts?.minimumFractionDigits ?? 2,
+      maximumFractionDigits: opts?.maximumFractionDigits ?? 2,
     }).format(n);
   } catch {
     return `${n.toFixed(2)} ${currency}`;

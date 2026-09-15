@@ -12,12 +12,14 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { computeProgress } from "@/lib/goals-math";
 import { UNTRACKABLE_SHORT } from "@/lib/goal-untrackable-copy";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatCurrencyWithMode, isBitcoinCurrency } from "@/lib/format";
 
 export function GoalsProgressWidget() {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
   const { goals, loading } = useGoals();
   const { accounts } = useAccounts();
 
@@ -53,6 +55,10 @@ export function GoalsProgressWidget() {
               const p = computeProgress(g, accounts);
               const linkedAcct = accounts.find((a) => g.linked_account_ids.includes(a.id));
               const goalCurrency = linkedAcct?.currency ?? prefs.primaryCurrency;
+              const fmtGoalAmount = (n: number) =>
+                isBitcoinCurrency(goalCurrency)
+                  ? formatCurrencyWithMode(n, "sats", prefs.btcDisplayMode, loc)
+                  : fmt.formatCurrency(n, goalCurrency);
               return (
                 <Link
                   key={g.id}
@@ -87,8 +93,8 @@ export function GoalsProgressWidget() {
                     <>
                       <Progress value={p.pct * 100} className="mt-2 h-1.5" />
                       <div className="mt-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
-                        <span>{fmt.formatCurrency(p.current, goalCurrency)}</span>
-                        <span>of {fmt.formatCurrency(p.target, goalCurrency)}</span>
+                        <span>{fmtGoalAmount(p.current)}</span>
+                        <span>of {fmtGoalAmount(p.target)}</span>
                       </div>
                     </>
                   )}

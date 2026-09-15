@@ -79,8 +79,6 @@ export function GoalDetailPage({ id }: { id: string }) {
   const { items: txns } = useTransactions(range);
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
-  const fmtUSD = (n: number, frac = 0) =>
-    fmt.formatCurrency(n, prefs.primaryCurrency, { maximumFractionDigits: frac });
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -123,6 +121,12 @@ export function GoalDetailPage({ id }: { id: string }) {
   const history = balanceHistory(goal, accounts, txns);
 
   const linked = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
+  const goalCurrency = linked[0]?.currency ?? prefs.primaryCurrency;
+  const loc = numberLocale(prefs.numberFormat);
+  const fmtGoalAmount = (n: number, frac = 0) =>
+    isBitcoinCurrency(goalCurrency)
+      ? formatCurrencyWithMode(n, "sats", prefs.btcDisplayMode, loc)
+      : fmt.formatCurrency(n, goalCurrency, { maximumFractionDigits: frac });
   const linkedTxns = txns
     .filter((t) => goal.linked_account_ids.includes(t.account_id) && !t.split_parent_id)
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -209,14 +213,16 @@ export function GoalDetailPage({ id }: { id: string }) {
           {prog.untrackableReason ? (
             <>
               <div className="flex items-baseline justify-between font-mono tabular-nums">
-                <span className="text-3xl font-semibold">{fmtUSD(prog.current)}</span>
+                <span className="text-3xl font-semibold">{fmtGoalAmount(prog.current)}</span>
                 {/*
                  * Suppressed for no_target_set only. Printing "of $0" states a
                  * target the goal does not carry, which is the same unsupported
                  * claim as the bar. The other two reasons do have a real target.
                  */}
                 {prog.untrackableReason !== "no_target_set" && (
-                  <span className="text-sm text-muted-foreground">of {fmtUSD(prog.target)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    of {fmtGoalAmount(prog.target)}
+                  </span>
                 )}
               </div>
               <div className="flex items-start gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm text-muted-foreground">
@@ -227,8 +233,10 @@ export function GoalDetailPage({ id }: { id: string }) {
           ) : (
             <>
               <div className="flex items-baseline justify-between font-mono tabular-nums">
-                <span className="text-3xl font-semibold">{fmtUSD(prog.current)}</span>
-                <span className="text-sm text-muted-foreground">of {fmtUSD(prog.target)}</span>
+                <span className="text-3xl font-semibold">{fmtGoalAmount(prog.current)}</span>
+                <span className="text-sm text-muted-foreground">
+                  of {fmtGoalAmount(prog.target)}
+                </span>
               </div>
               <Progress value={prog.pct * 100} className="h-3" />
             </>
@@ -236,7 +244,7 @@ export function GoalDetailPage({ id }: { id: string }) {
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <div>
               <span className="text-muted-foreground">Remaining: </span>
-              <span className="font-medium tabular-nums">{fmtUSD(prog.remaining)}</span>
+              <span className="font-medium tabular-nums">{fmtGoalAmount(prog.remaining)}</span>
             </div>
             {prog.daysToTarget != null && (
               <div className={prog.isOverdue ? "text-destructive font-medium" : ""}>
@@ -251,7 +259,7 @@ export function GoalDetailPage({ id }: { id: string }) {
               <div>
                 <span className="text-muted-foreground">3mo avg: </span>
                 <span className="font-medium tabular-nums">
-                  {fmtUSD(monthly)}/mo {goal.type === "save_up" ? "saved" : "paid"}
+                  {fmtGoalAmount(monthly)}/mo {goal.type === "save_up" ? "saved" : "paid"}
                 </span>
               </div>
             )}
@@ -281,9 +289,13 @@ export function GoalDetailPage({ id }: { id: string }) {
                   tickFormatter={(d) => fmt.formatDate(new Date(d), { month: "short" })}
                   className="text-xs"
                 />
-                <YAxis tickFormatter={(v) => fmtUSD(Number(v))} className="text-xs" width={70} />
+                <YAxis
+                  tickFormatter={(v) => fmtGoalAmount(Number(v))}
+                  className="text-xs"
+                  width={70}
+                />
                 <Tooltip
-                  formatter={((v: number) => fmtUSD(v)) as never}
+                  formatter={((v: number) => fmtGoalAmount(v)) as never}
                   contentStyle={{
                     background: "hsl(var(--popover))",
                     border: "1px solid hsl(var(--border))",
@@ -311,8 +323,9 @@ export function GoalDetailPage({ id }: { id: string }) {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>
-              At <span className="font-mono tabular-nums">{fmtUSD(previewPayment)}/month</span> and{" "}
-              {apr.toFixed(2)}% APR, this debt will be paid off in{" "}
+              At{" "}
+              <span className="font-mono tabular-nums">{fmtGoalAmount(previewPayment)}/month</span>{" "}
+              and {apr.toFixed(2)}% APR, this debt will be paid off in{" "}
               <span className="font-semibold">
                 {amort.months} month{amort.months === 1 ? "" : "s"}
               </span>{" "}
@@ -320,7 +333,9 @@ export function GoalDetailPage({ id }: { id: string }) {
             </p>
             <p className="text-muted-foreground">
               Total interest paid:{" "}
-              <span className="font-mono tabular-nums">{fmtUSD(amort.totalInterest, 2)}</span>
+              <span className="font-mono tabular-nums">
+                {fmtGoalAmount(amort.totalInterest, 2)}
+              </span>
             </p>
           </CardContent>
         </Card>
@@ -394,7 +409,16 @@ export function GoalDetailPage({ id }: { id: string }) {
                       }`}
                     >
                       {amt >= 0 ? "+" : ""}
-                      {fmtUSD(amt, 2)}
+                      {isBitcoinCurrency(t.currency ?? goalCurrency)
+                        ? formatCurrencyWithMode(
+                            amt,
+                            t.currency ?? goalCurrency,
+                            prefs.btcDisplayMode,
+                            loc,
+                          )
+                        : fmt.formatCurrency(amt, t.currency ?? goalCurrency, {
+                            maximumFractionDigits: 2,
+                          })}
                     </div>
                   </div>
                 );

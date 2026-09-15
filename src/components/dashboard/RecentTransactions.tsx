@@ -10,7 +10,8 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useCategories } from "@/hooks/useCategories";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { convert } from "@/lib/fx-rates";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
+import { formatPrimaryCurrencyWithMode } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function trailingRange(days: number) {
@@ -30,6 +31,7 @@ export function RecentTransactions() {
   const { categories } = useCategories();
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
 
   const acctCurrency = useMemo(() => new Map(accounts.map((a) => [a.id, a.currency])), [accounts]);
   const catName = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
@@ -93,9 +95,13 @@ export function RecentTransactions() {
                     }`}
                   >
                     {amt >= 0 ? "+" : ""}
-                    {fmt.formatCurrency(inPrimary, prefs.primaryCurrency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatPrimaryCurrencyWithMode(
+                      inPrimary,
+                      prefs.primaryCurrency,
+                      prefs.btcDisplayMode,
+                      loc,
+                      { maximumFractionDigits: 2 },
+                    )}
                   </span>
                 </Link>
               );

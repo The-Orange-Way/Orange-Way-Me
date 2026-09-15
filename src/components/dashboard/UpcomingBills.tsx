@@ -11,8 +11,9 @@ import { useCategories } from "@/hooks/useCategories";
 import { useDashboardPrefs } from "@/hooks/useDashboardPrefs";
 import { detectRecurringBills } from "@/lib/dashboard-math";
 import { convert } from "@/lib/fx-rates";
-import { useLocaleFormat } from "@/lib/locale";
+import { numberLocale, useLocaleFormat } from "@/lib/locale";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatPrimaryCurrencyWithMode } from "@/lib/format";
 
 function trailing90() {
   const end = new Date();
@@ -30,6 +31,7 @@ export function UpcomingBills() {
   const { categories } = useCategories();
   const { prefs, dismissRecurring, restoreRecurring } = useDashboardPrefs();
   const fmt = useLocaleFormat();
+  const loc = numberLocale(prefs.numberFormat);
 
   const bills = useMemo(() => {
     const all = detectRecurringBills(items);
@@ -67,10 +69,7 @@ export function UpcomingBills() {
         ) : (
           <div className="space-y-1">
             {bills.map((b) => {
-              // Use the merchant's most-frequent currency by checking the accounts
-              // we've seen. Fall back to primary.
-              const cur = prefs.primaryCurrency;
-              const amount = convert(b.typicalAmount, cur, prefs.primaryCurrency);
+              const amount = convert(b.typicalAmount, b.currency, prefs.primaryCurrency);
               return (
                 <div
                   key={b.key}
@@ -89,9 +88,13 @@ export function UpcomingBills() {
                     </div>
                   </div>
                   <span className="shrink-0 font-mono text-sm tabular-nums">
-                    {fmt.formatCurrency(amount, prefs.primaryCurrency, {
-                      maximumFractionDigits: 2,
-                    })}
+                    {formatPrimaryCurrencyWithMode(
+                      amount,
+                      prefs.primaryCurrency,
+                      prefs.btcDisplayMode,
+                      loc,
+                      { maximumFractionDigits: 2 },
+                    )}
                   </span>
                   <button
                     onClick={() => dismissRecurring(b.key)}
