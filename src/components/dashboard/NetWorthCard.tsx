@@ -106,7 +106,7 @@ export function NetWorthCard() {
         ) : (
           <div className="flex flex-wrap items-baseline gap-4">
             <div className="font-mono text-3xl font-semibold tabular-nums">
-              {fmt.formatCurrency(summary.net, prefs.primaryCurrency)}
+              {fmt.formatCurrency(summary.net, prefs.primaryCurrency, { unitIsExact: true })}
               {multiCurrency && (
                 <TooltipProvider>
                   <UiTooltip>
@@ -136,7 +136,9 @@ export function NetWorthCard() {
             >
               {isUp ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
               <span className="tabular-nums">
-                {fmt.formatCurrency(Math.abs(delta.abs), prefs.primaryCurrency)}
+                {fmt.formatCurrency(Math.abs(delta.abs), prefs.primaryCurrency, {
+                  unitIsExact: true,
+                })}
               </span>
               <span className="text-xs text-muted-foreground">
                 ({delta.pct >= 0 ? "+" : ""}
@@ -165,6 +167,7 @@ export function NetWorthCard() {
                   tickFormatter={(v) =>
                     fmt.formatCurrency(Number(v), prefs.primaryCurrency, {
                       maximumFractionDigits: 0,
+                      unitIsExact: true,
                     })
                   }
                   className="text-xs"
@@ -182,7 +185,10 @@ export function NetWorthCard() {
                   ]}
                 />
                 <Tooltip
-                  formatter={((v: number) => fmt.formatCurrency(v, prefs.primaryCurrency)) as never}
+                  formatter={
+                    ((v: number) =>
+                      fmt.formatCurrency(v, prefs.primaryCurrency, { unitIsExact: true })) as never
+                  }
                   labelFormatter={(d) =>
                     new Date(d + "T12:00:00").toLocaleDateString(undefined, {
                       month: "long",
