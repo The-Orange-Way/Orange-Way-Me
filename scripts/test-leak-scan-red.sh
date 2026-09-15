@@ -93,6 +93,25 @@ new_fixture() {
   printf '%s' "$dir"
 }
 
+# new_fixture_text <name> <content line>
+#
+# Like new_fixture, but writes an exact line of prose instead of the
+# `export const owner = "..."` shape, so category 2 (the MB/OWM
+# structural check) can be exercised with realistic comment text: a
+# ticket-id citation, optionally sharing a line with a real leak.
+new_fixture_text() {
+  local name="$1"
+  local content="$2"
+  local dir="$WORK/$name"
+
+  mkdir -p "$dir/scripts" "$dir/src"
+  cp "$SCAN" "$dir/scripts/pre-publish-scan.sh"
+  cp "$CANON" "$dir/scripts/canon-terms.sh"
+  printf 'export const label = "ordinary";\n' > "$dir/src/clean.ts"
+  printf '%s\n' "$content" > "$dir/src/case.ts"
+  printf '%s' "$dir"
+}
+
 LAST_OUT=""
 LAST_RC=0
 
