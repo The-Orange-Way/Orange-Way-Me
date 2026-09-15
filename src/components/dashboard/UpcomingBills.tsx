@@ -70,6 +70,12 @@ export function UpcomingBills() {
               // Use the merchant's most-frequent currency by checking the accounts
               // we've seen. Fall back to primary.
               const cur = prefs.primaryCurrency;
+              // convert() to "BTC" always returns a decimal BTC quantity and is
+              // never ambiguous, so the printed value below passes
+              // unitIsExact. Without it, a bill that converts to a whole number
+              // of BTC is read as that many SATS and renders 100,000,000x too
+              // small. A raw stored balance is the opposite case and must NOT
+              // set the flag, because it can genuinely be either unit.
               const amount = convert(b.typicalAmount, cur, prefs.primaryCurrency);
               return (
                 <div
@@ -91,6 +97,7 @@ export function UpcomingBills() {
                   <span className="shrink-0 font-mono text-sm tabular-nums">
                     {fmt.formatCurrency(amount, prefs.primaryCurrency, {
                       maximumFractionDigits: 2,
+                      unitIsExact: true,
                     })}
                   </span>
                   <button
