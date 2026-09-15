@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { formatCurrencyPref } from "../locale";
+import { convert } from "../fx-rates";
 
 describe("formatCurrencyPref — Bitcoin honours btcDisplayMode", () => {
   it("mode=sats renders sats, not the old fixed BTC format", () => {
@@ -86,5 +87,37 @@ describe("formatCurrencyPref — non-Bitcoin currencies are unaffected", () => {
     expect(out).toContain("1.200");
     expect(out).toContain("€");
     expect(out).not.toContain("1,200");
+  });
+});
+
+describe("convert() -> formatCurrencyPref, as UpcomingBills.tsx composes them", () => {
+  // OWM-T0153 regression. UpcomingBills computes
+  //   const amount = convert(typicalAmount, primaryCurrency, primaryCurrency);
+  //   fmt.formatCurrency(amount, primaryCurrency, { unitIsExact: true });
+  // When primaryCurrency is "BTC" this from===to pair is not a true no-op:
+  // convert()'s BTC leg always normalizes through normalizeBitcoinToSats
+  // first. A whole-number typicalAmount (e.g. "1", meaning 1 BTC) is read
+  // as already-sats by the magnitude heuristic unless unitIsExact is
+  // passed, so the round trip silently divides the value by 1e8.
+
+  it("without unitIsExact, a whole-BTC typical amount is misread and shrinks 1e8x (the bug)", () => {
+    const amount = convert(1, "BTC", "BTC");
+    const out = formatCurrencyPref(amount, "BTC", "us", "btc");
+    expect(out).toBe("0.00000001 BTC");
+  });
+
+  it("with unitIsExact, the same whole-BTC amount round-trips correctly (the fix)", () => {
+    const amount = convert(1, "BTC", "BTC", { unitIsExact: true });
+    const out = formatCurrencyPref(amount, "BTC", "us", "btc", { unitIsExact: true });
+    expect(out).toBe("1.00000000 BTC");
+  });
+
+  it("a fractional BTC typical amount was never affected (the heuristic only misreads whole numbers)", () => {
+    const withFlag = convert(0.5, "BTC", "BTC", { unitIsExact: true });
+    const withoutFlag = convert(0.5, "BTC", "BTC");
+    expect(withFlag).toBe(withoutFlag);
+    expect(formatCurrencyPref(withFlag, "BTC", "us", "btc", { unitIsExact: true })).toBe(
+      "0.50000000 BTC",
+    );
   });
 });
