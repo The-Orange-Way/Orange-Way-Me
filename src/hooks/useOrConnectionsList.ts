@@ -29,7 +29,7 @@
  * string is deliberately not returned when a fetch fails; a failed
  * read yields the unreadable state, not an error message on the UI.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { useVault } from "@/context/VaultContext";
