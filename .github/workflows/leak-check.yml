@@ -42,6 +42,21 @@ jobs:
             "$RUNNER_TEMP/canon-self-test.log" \
             || { echo "::error::the canon-terms self test printed no result line, so it did not run to the end. A self test that cannot say how many cases ran has verified nothing."; exit 1; }
 
+      - name: Push-base self test
+        # push_base decides the range every scan in the pre-push gate measures,
+        # so a defect in it is invisible from the outside: too narrow and the
+        # gate scans nothing while reporting that it found nothing, too wide
+        # and it refuses honest work over commits already merged on dev. The
+        # result line is asserted HERE as well as inside the script, for the
+        # reason given on the step above: bash exits 0 on a zero-byte file, so
+        # a truncated self test prints nothing and goes green.
+        run: |
+          set -euo pipefail
+          bash scripts/test-push-base.sh | tee "$RUNNER_TEMP/push-base-self-test.log"
+          grep -qE '^[0-9]+ passed, 0 failed, [0-9]+ ran of [0-9]+ expected$' \
+            "$RUNNER_TEMP/push-base-self-test.log" \
+            || { echo "::error::the push-base self test printed no result line, so it did not run to the end. A self test that cannot say how many cases ran has verified nothing."; exit 1; }
+
       - name: Leak scan red run self test
         # The reserved-term category withholds matched text in CI, and a
         # scanner that has been silenced produces output identical to a
