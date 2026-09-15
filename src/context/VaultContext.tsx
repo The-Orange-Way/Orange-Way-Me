@@ -32,10 +32,12 @@ import {
   KEY_DERIVATION_STRATEGIES,
   VAULT_VERIFIER_PLAINTEXT,
   type VaultKeyVersion,
+  buildVaultAad,
   createEncryptedHmacKey,
   decryptBlob as cryptoDecryptBlob,
   decryptHmacKey,
   decryptText as cryptoDecryptText,
+  decryptTextBound as cryptoDecryptTextBound,
   deriveHmacKey,
   deriveMek,
   deriveOrCredsKeyFromMek,
@@ -45,6 +47,7 @@ import {
   deriveOrStealthWidgetKeyBytesFromMek,
   encryptBlob as cryptoEncryptBlob,
   encryptText as cryptoEncryptText,
+  encryptTextBound as cryptoEncryptTextBound,
   generateRecoveryCode,
   importMekFromRaw,
   randomBytesB64,
@@ -317,6 +320,24 @@ function sleep(ms: number): Promise<void> {
  * a well formed key that opens nothing and reports success, which is precisely
  * the failure being removed.
  */
+/**
+ * Additional authenticated data for one sealed column of vault_metadata.
+ *
+ * vault_metadata is one row per user and user_id IS its primary key, which is
+ * the whole reason these wraps can be bound in phase 1 without touching any
+ * writer: the binding value is known before the value is sealed. Row-field
+ * columns on accounts, transactions and the rest do not have that property,
+ * because the client does not hold the row uuid at encrypt time, and they are
+ * phase 2 (OWM-T0641).
+ *
+ * Pass the column name the ciphertext is actually STORED IN. Passing the
+ * wrong one produces a value that seals cleanly and then refuses to open,
+ * which is the failure this binding is designed to cause.
+ */
+function vaultMetaAad(column: string, userId: string): Uint8Array {
+  return buildVaultAad({ table: "vault_metadata", column, rowId: userId });
+}
+
 export async function resolveOrKeyMaterial(params: {
   userId: string;
   password: string;
@@ -350,7 +371,11 @@ export async function resolveOrKeyMaterial(params: {
     try {
       return {
         ok: true,
-        orMekBytes: await unwrapOrMekWithVaultMek(plan.ciphertext, mek),
+        orMekBytes: await unwrapOrMekWithVaultMek(
+          plan.ciphertext,
+          mek,
+          vaultMetaAad("enc_or_mek_ciphertext", userId),
+        ),
         saltContext: plan.saltContext,
       };
     } catch (e) {
@@ -418,7 +443,11 @@ async function pinOrKeyMaterial(params: {
   epoch: number;
 }): Promise<void> {
   const { userId, mek, orMekBytes, saltContext, epoch } = params;
-  const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
+  const ciphertext = await wrapOrMekWithVaultMek(
+    orMekBytes,
+    mek,
+    vaultMetaAad("enc_or_mek_ciphertext", userId),
+  );
   let lastPinError: unknown = null;
 
   for (let attempt = 0; attempt < PIN_WRITE_BACKOFF_MS.length; attempt += 1) {
@@ -801,21 +830,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const mekRawArr = crypto.getRandomValues(new Uint8Array(32));
     const mek = await importMekFromRaw(mekRawArr);
 
-    const verifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
+    const verifier = await cryptoEncryptTextBound(
+      VAULT_VERIFIER_PLAINTEXT,
+      mek,
+      vaultMetaAad("verifier_ciphertext", user.id),
+    );
     // New vaults ship on the current version, which is the only version.
     const strategy = KEY_DERIVATION_STRATEGIES[CURRENT_VAULT_KEY_VERSION];
     const encMekCiphertext = await strategy.wrapMekWithPassword(
       mekRawArr.buffer as ArrayBuffer,
       password,
       kdfSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
     const recoveryCode = await generateRecoveryCode();
     const recoveryWrapped = await wrapMekWithRecovery(
       mekRawArr.buffer as ArrayBuffer,
       recoveryCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
     );
 
-    const { raw: hmacRaw, ciphertext: encHmacKey } = await createEncryptedHmacKey(mek);
+    const { raw: hmacRaw, ciphertext: encHmacKey } = await createEncryptedHmacKey(
+      mek,
+      vaultMetaAad("enc_hmac_key", user.id),
+    );
     const hmacKey = await crypto.subtle.importKey(
       "raw",
       hmacRaw as BufferSource,
@@ -837,7 +875,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, kdfSalt);
     const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, kdfSalt);
     const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, kdfSalt);
-    const encOrMek = await wrapOrMekWithVaultMek(orMekBytes, mek);
+    const encOrMek = await wrapOrMekWithVaultMek(
+      orMekBytes,
+      mek,
+      vaultMetaAad("enc_or_mek_ciphertext", user.id),
+    );
 
     const { error } = await vaultTable().insert({
       user_id: user.id,
@@ -982,7 +1024,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
       const mekForHkdf = await importMekForHkdf(mekBytes);
       const wrapKey = await derivePqcSecretWrapKey(mekForHkdf, saltB64);
-      const secretKeyB64 = await cryptoDecryptText(pkRow.enc_private_key, wrapKey);
+      const secretKeyB64 = await cryptoDecryptTextBound(
+        pkRow.enc_private_key,
+        wrapKey,
+        vaultMetaAad("enc_private_key", userId),
+      );
       const secretKeyBytes = base64ToBytes(secretKeyB64);
 
       // 4) Finally, unwrap the household DEK.
@@ -1034,6 +1080,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           row.enc_mek_ciphertext,
           password,
           row.kdf_salt,
+          vaultMetaAad("enc_mek_ciphertext", user.id),
         );
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1042,7 +1089,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mek = await importMekFromRaw(mekBytes);
       // Verify MEK is correct.
       try {
-        const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
+        const probe = await cryptoDecryptTextBound(
+          row.verifier_ciphertext,
+          mek,
+          vaultMetaAad("verifier_ciphertext", user.id),
+        );
         if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1054,7 +1105,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // the strategy map, so no version in the registry describes it.
       mek = await deriveMek(password, row.kdf_salt, row.kdf_iterations);
       try {
-        const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
+        const probe = await cryptoDecryptTextBound(
+          row.verifier_ciphertext,
+          mek,
+          vaultMetaAad("verifier_ciphertext", user.id),
+        );
         if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1066,7 +1121,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     let hmacKey: CryptoKey;
     if (row.enc_hmac_key) {
-      hmacKey = await decryptHmacKey(row.enc_hmac_key, mek);
+      hmacKey = await decryptHmacKey(row.enc_hmac_key, mek, vaultMetaAad("enc_hmac_key", user.id));
     } else {
       // Legacy HMAC derivation, only reachable for pre-enc_hmac_key vaults.
       // Those predate the strategy map, so the stored iteration count is the
@@ -1224,6 +1279,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         row.enc_mek_ciphertext,
         currentPassword,
         row.kdf_salt,
+        vaultMetaAad("enc_mek_ciphertext", user.id),
       );
     } catch {
       throw new Error("Current vault password is incorrect");
@@ -1269,6 +1325,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mekBytes.buffer as ArrayBuffer,
       newPassword,
       newSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
 
     // Recovery ciphertext is unaffected — MEK bytes don't change on password change.
@@ -1329,7 +1386,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Vault must be unlocked (new architecture) to regenerate recovery code.");
 
     const newCode = await generateRecoveryCode();
-    const wrapped = await wrapMekWithRecovery(mekBytesRef.current.buffer as ArrayBuffer, newCode);
+    const wrapped = await wrapMekWithRecovery(
+      mekBytesRef.current.buffer as ArrayBuffer,
+      newCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
+    );
 
     const { error } = await vaultTable()
       .update({ recovery_ciphertext: wrapped })
@@ -1365,7 +1426,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     let mekBytes: Uint8Array;
     try {
-      mekBytes = await unwrapMekWithRecovery(data.recovery_ciphertext, recoveryCode);
+      mekBytes = await unwrapMekWithRecovery(
+        data.recovery_ciphertext,
+        recoveryCode,
+        vaultMetaAad("recovery_ciphertext", user.id),
+      );
     } catch {
       throw new Error("Invalid recovery code");
     }
@@ -1385,25 +1450,37 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orMarking = recoveryOrMarking(data, data.kdf_salt);
 
     const mek = await importMekFromRaw(mekBytes);
-    const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
+    const freshVerifier = await cryptoEncryptTextBound(
+      VAULT_VERIFIER_PLAINTEXT,
+      mek,
+      vaultMetaAad("verifier_ciphertext", user.id),
+    );
     // Recovery always promotes the vault to the current best KDF.
     const newStrategy = KEY_DERIVATION_STRATEGIES[CURRENT_VAULT_KEY_VERSION];
     const newEncMek = await newStrategy.wrapMekWithPassword(
       mekBytes.buffer as ArrayBuffer,
       newPassword,
       newSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
-    const freshRecovery = await wrapMekWithRecovery(mekBytes.buffer as ArrayBuffer, recoveryCode);
+    const freshRecovery = await wrapMekWithRecovery(
+      mekBytes.buffer as ArrayBuffer,
+      recoveryCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
+    );
 
     let encHmacKey: string | undefined;
     let hmacKey: CryptoKey;
     if (data.enc_hmac_key) {
       // Keep existing HMAC key — MEK hasn't changed, so blind indexes stay valid.
       encHmacKey = data.enc_hmac_key;
-      hmacKey = await decryptHmacKey(data.enc_hmac_key, mek);
+      hmacKey = await decryptHmacKey(data.enc_hmac_key, mek, vaultMetaAad("enc_hmac_key", user.id));
     } else {
       // Legacy: create a new HMAC key.
-      const { raw: hmacRaw, ciphertext } = await createEncryptedHmacKey(mek);
+      const { raw: hmacRaw, ciphertext } = await createEncryptedHmacKey(
+        mek,
+        vaultMetaAad("enc_hmac_key", user.id),
+      );
       encHmacKey = ciphertext;
       hmacKey = await crypto.subtle.importKey(
         "raw",
@@ -1436,8 +1513,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       const mekForHkdf = await importMekForHkdf(mekBytes);
       const oldWrapKey = await derivePqcSecretWrapKey(mekForHkdf, data.kdf_salt);
       const newWrapKey = await derivePqcSecretWrapKey(mekForHkdf, newSalt);
-      const secretKeyB64 = await cryptoDecryptText(data.enc_private_key, oldWrapKey);
-      newEncPrivateKey = await cryptoEncryptText(secretKeyB64, newWrapKey);
+      const secretKeyB64 = await cryptoDecryptTextBound(
+        data.enc_private_key,
+        oldWrapKey,
+        vaultMetaAad("enc_private_key", user.id),
+      );
+      newEncPrivateKey = await cryptoEncryptTextBound(
+        secretKeyB64,
+        newWrapKey,
+        vaultMetaAad("enc_private_key", user.id),
+      );
     }
 
     const updatePayload: Record<string, unknown> = {
@@ -1756,7 +1841,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       try {
         const mekForHkdf = await importMekForHkdf(mekBytesRef.current);
         const wrapKey = await derivePqcSecretWrapKey(mekForHkdf, kdfSaltRef.current);
-        const hybridPrivKeyB64 = await cryptoDecryptText(pkRow.enc_private_key, wrapKey);
+        const hybridPrivKeyB64 = await cryptoDecryptTextBound(
+          pkRow.enc_private_key,
+          wrapKey,
+          vaultMetaAad("enc_private_key", user.id),
+        );
         const hybridPrivKey = base64ToBytes(hybridPrivKeyB64);
 
         const privateKeyBytes = await unwrapHouseholdSigningKey(

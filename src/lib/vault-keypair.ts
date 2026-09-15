@@ -36,7 +36,21 @@
  * in-memory stub without pulling in the generated schema types.
  */
 
-import { encryptString, decryptString } from "./vault";
+import { buildVaultAad, encryptTextBound, decryptTextBound } from "./vault";
+
+/**
+ * AAD for vault_metadata.enc_private_key. Bound to the user id, which is the
+ * primary key of that table, so a private key sealed for one user cannot be
+ * moved onto another user's row and still open. See vault.ts for the formula
+ * and why each field of it is load-bearing.
+ */
+function privateKeyAad(userId: string): Uint8Array {
+  return buildVaultAad({
+    table: "vault_metadata",
+    column: "enc_private_key",
+    rowId: userId,
+  });
+}
 import { derivePqcSecretWrapKey } from "./key-derivation";
 import { generateHybridKemKeyPair } from "./pqc";
 
@@ -153,7 +167,11 @@ export async function ensureUserKeypair(
   const wrapKey = await derivePqcSecretWrapKey(mek, saltB64);
   const kem = generateHybridKemKeyPair();
   const publicKeyB64 = bytesToBase64(kem.publicKey);
-  const encPrivateKey = await encryptString(bytesToBase64(kem.secretKey), wrapKey);
+  const encPrivateKey = await encryptTextBound(
+    bytesToBase64(kem.secretKey),
+    wrapKey,
+    privateKeyAad(userId),
+  );
 
   const insert = await supabase.from("user_public_keys").insert({
     user_id: userId,
@@ -244,8 +262,12 @@ export async function rewrapUserKeypair(
   // written, not whatever is current.
   const oldWrapKey = await derivePqcSecretWrapKey(oldMek, oldSaltB64);
   const newWrapKey = await derivePqcSecretWrapKey(newMek, newSaltB64);
-  const secretKeyB64 = await decryptString(existingData.enc_private_key, oldWrapKey);
-  const newEncrypted = await encryptString(secretKeyB64, newWrapKey);
+  const secretKeyB64 = await decryptTextBound(
+    existingData.enc_private_key,
+    oldWrapKey,
+    privateKeyAad(userId),
+  );
+  const newEncrypted = await encryptTextBound(secretKeyB64, newWrapKey, privateKeyAad(userId));
 
   // Atomic UPDATE on the existing vault_metadata row. No INSERT, no
   // DELETE, no row-count drift.
