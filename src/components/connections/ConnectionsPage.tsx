@@ -476,6 +476,7 @@ export function ConnectionsPage() {
   // Fetch connections list whenever subaccount + vault are ready.
   const refreshList = useCallback(async () => {
     if (!subaccountId || !isUnlocked) return;
+    const gen = ++listGenerationRef.current;
     setLoading(true);
     // Set when the catch below hands off to the provision effect, so the
     // finally leaves the spinner up for the re-provision instead of flashing
@@ -485,6 +486,10 @@ export function ConnectionsPage() {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
       };
+      // A newer refreshList call started while this one was in flight; that
+      // call owns the screen now, so this one stops here rather than racing
+      // it to setConnections below.
+      if (listGenerationRef.current !== gen) return;
       // Read before decoding, so a decrypt problem further down cannot leave
       // the page silently pretending the arm is healthy.
       setStealthUnavailable(readStealthUnavailable(res));
@@ -552,12 +557,14 @@ export function ConnectionsPage() {
           };
         }),
       );
+      if (listGenerationRef.current !== gen) return;
       setConnections(decoded);
       // Returned so a caller that just created something can check whether it
       // is actually in the list, rather than assuming the refresh it awaited
       // means the row arrived. Every existing caller ignores this.
       return decoded;
     } catch (err) {
+      if (listGenerationRef.current !== gen) return;
       // An id OR does not recognise is recoverable, so fix it rather than
       // report it. Dropping subaccountId re-runs the provision effect, which
       // issues one against the OR this build actually talks to and re-runs this
@@ -577,7 +584,7 @@ export function ConnectionsPage() {
       setStealthUnavailable(false);
       toastError(err, "We couldn't load your connections.");
     } finally {
-      if (!recovering) setLoading(false);
+      if (!recovering && listGenerationRef.current === gen) setLoading(false);
     }
   }, [subaccountId, isUnlocked, decryptOrCipher, userId]);
 
