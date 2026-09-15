@@ -67,6 +67,7 @@ import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-del
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
 import { planSyncRoute } from "@/lib/or/sync-route";
 import { requestOrSync } from "@/lib/or/or-sync-request";
+import { decryptSourceWalletMetadata } from "@/lib/or/source-wallet-metadata";
 import { startStealthSyncRun, finishStealthSyncRun } from "@/lib/stealthSyncRuns";
 import {
   startStealthSync,
@@ -504,25 +505,21 @@ export function ConnectionsPage() {
 
           const decrypted_wallets: DecryptedWalletForBadges[] = [];
           for (const w of c.source_wallets ?? []) {
-            try {
-              const json = await decryptOrCipher(w.encrypted_metadata);
-              const parsed = JSON.parse(json) as { currency?: string; label?: string };
-              decrypted_wallets.push({
-                id: w.id,
-                external_wallet_id: w.external_wallet_id,
-                is_synced: w.is_synced,
-                currency: parsed.currency ?? "",
-                label: parsed.label ?? null,
-              });
-            } catch {
-              decrypted_wallets.push({
-                id: w.id,
-                external_wallet_id: w.external_wallet_id,
-                is_synced: w.is_synced,
-                currency: "",
-                label: null,
-              });
-            }
+            // See decryptSourceWalletMetadata for why both subkeys are
+            // tried (OWM-T0770): existing rows can be sealed under either
+            // one, same as the stealth-row loop below.
+            const { currency, label } = await decryptSourceWalletMetadata(
+              w.encrypted_metadata,
+              decryptOrCipher,
+              decryptOrTxnCipher,
+            );
+            decrypted_wallets.push({
+              id: w.id,
+              external_wallet_id: w.external_wallet_id,
+              is_synced: w.is_synced,
+              currency,
+              label,
+            });
           }
 
           // DL-1116. A stealth connection always arrives with source_wallets
