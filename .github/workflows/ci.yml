@@ -423,8 +423,7 @@ jobs:
           # (Claude-Session: <url>) right after it. Drop both before the
           # last-line check, mirroring the pre-push hook so local and server
           # enforcement share the same exemption and cannot drift (OWM-T0769:
-          # the Claude-Session line alone used to fail this check on its own,
-          # reproduced on PR #869 and proven fixed on PR #871).
+          # the Claude-Session line alone used to fail this check on its own).
           COAUTHOR_EXEMPT='^[[:space:]]*(Co-authored-by:.*<noreply@anthropic\.com>|Claude-Session:[[:space:]]*https://claude\.ai/.*)[[:space:]]*$'
 
           TOTAL=$(git rev-list --count "$BASE..$HEAD")
