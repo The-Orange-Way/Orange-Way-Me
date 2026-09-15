@@ -391,10 +391,13 @@ fi
 # adds. Merge commits are skipped, exactly as the CI seat-line-check job does,
 # so local and server enforcement cannot drift.
 SEAT_PATTERN='^Seat: [a-z0-9-]+$'
-# GitHub injects a Claude co-author trailer on squash/rebase merges; that is a
-# public identifier, not a seat, so it is dropped before the last-line check,
-# mirroring the reserved-term scan's exemption so the two cannot drift.
-SEAT_COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+# GitHub injects a Claude co-author trailer on squash/rebase merges, and the
+# standard Claude Code attribution footer adds a second line
+# (Claude-Session: <url>) right after it. Both are public identifiers, not a
+# seat, so both are dropped before the last-line check, mirroring the CI
+# seat-line-check job's exemption so the two cannot drift (OWM-T0769: the
+# Claude-Session line alone used to fail this check on its own).
+SEAT_COAUTHOR_EXEMPT='^[[:space:]]*(Co-authored-by:.*<noreply@anthropic\.com>|Claude-Session:[[:space:]]*https://claude\.ai/.*)[[:space:]]*$'
 SEAT_FAIL=0
 for i in "${!LOCAL_SHAS[@]}"; do
   sha="${LOCAL_SHAS[$i]}"
@@ -413,7 +416,8 @@ for i in "${!LOCAL_SHAS[@]}"; do
       | grep -vE '^[[:space:]]*$' | tail -1 || true)"
     if ! printf '%s\n' "$last_line" | grep -qE "$SEAT_PATTERN"; then
       red "✗ Commit ${commit:0:8} lacks a valid Seat: trailer as its last body line."
-      red "  End the commit body with 'Seat: <your-seat>' (matches ^Seat: [a-z0-9-]+\$)."
+      red "  End the commit body with a BARE seat name, e.g. 'Seat: developer-owm'"
+      red "  (no org prefix -- DL-0347 ruled bare canonical, matches ^Seat: [a-z0-9-]+\$)."
       FAIL=1
       SEAT_FAIL=1
     fi

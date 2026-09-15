@@ -418,10 +418,13 @@ jobs:
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
           SEAT_PATTERN='^Seat: [a-z0-9-]+$'
-          # GitHub injects a Claude co-author trailer on squash/rebase merges.
-          # Drop it before the last-line check, mirroring the pre-push hook so
-          # local and server enforcement share the same exemption and cannot drift.
-          COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+          # GitHub injects a Claude co-author trailer on squash/rebase merges,
+          # and the standard Claude Code attribution footer adds a second line
+          # (Claude-Session: <url>) right after it. Drop both before the
+          # last-line check, mirroring the pre-push hook so local and server
+          # enforcement share the same exemption and cannot drift (OWM-T0769:
+          # the Claude-Session line alone used to fail this check on its own).
+          COAUTHOR_EXEMPT='^[[:space:]]*(Co-authored-by:.*<noreply@anthropic\.com>|Claude-Session:[[:space:]]*https://claude\.ai/.*)[[:space:]]*$'
 
           TOTAL=$(git rev-list --count "$BASE..$HEAD")
 
@@ -439,7 +442,7 @@ jobs:
               | grep -viE "$COAUTHOR_EXEMPT" \
               | grep -vE '^[[:space:]]*$' | tail -1 || true)
             if ! printf '%s\n' "$LAST_LINE" | grep -qE "$SEAT_PATTERN"; then
-              echo "::error::Commit ${commit:0:8} lacks a valid Seat: trailer (got: '${LAST_LINE}'). End the commit body with 'Seat: <seat-name>' matching ^Seat: [a-z0-9-]+\$."
+              echo "::error::Commit ${commit:0:8} lacks a valid Seat: trailer (got: '${LAST_LINE}'). End the commit body with a BARE seat name, e.g. 'Seat: developer-owm' (no org prefix -- DL-0347 ruled bare canonical), matching ^Seat: [a-z0-9-]+\$."
               FAIL=1
             else
               echo "ok ${commit:0:8}: $LAST_LINE"
