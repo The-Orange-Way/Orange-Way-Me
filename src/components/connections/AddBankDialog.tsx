@@ -13,8 +13,11 @@
  *   any step →  error (toast + back to idle)
  *
  * ZKA boundary:
- *   - cred_key + txn_key are derived from the unlocked vault MEK and
- *     piped to OR in the popup URL fragment ONLY.
+ *   - cred_key is derived from the unlocked vault MEK and piped to OR in
+ *     the popup URL fragment ONLY. txn_key used to be sent beside it and
+ *     is not any more (OWM-T0413): the transactions-namespace key must not
+ *     cross to Orange Rails by any route, and OR treats the parameter as
+ *     optional. Do not add it back.
  *   - The vault password never leaves the browser.
  *   - Account metadata returned by discovery (name, mask, institution,
  *     currency, kind) is plaintext-OK — same fields visible in the bank
@@ -127,7 +130,7 @@ export interface AddBankDialogProps {
 }
 
 export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialogProps) {
-  const { exportOrCredsKey, exportOrTxnsKey, encryptText, isUnlocked } = useVault();
+  const { exportOrCredsKey, encryptText, isUnlocked } = useVault();
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAccount[]>([]);
@@ -148,9 +151,8 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
     setError(null);
     try {
       const credKeyB64 = await exportOrCredsKey();
-      const txnKeyB64 = await exportOrTxnsKey();
       const qc = await quickConnect();
-      const url = buildBankPopupUrl({ quickConnect: qc, credKeyB64, txnKeyB64 });
+      const url = buildBankPopupUrl({ quickConnect: qc, credKeyB64 });
       // Now switch to "connecting" so our dialog hides while the popup
       // window is open (avoids the "popup inside popup" feel).
       setStep("connecting");
@@ -199,7 +201,7 @@ export function AddBankDialog({ open, onOpenChange, onConnected }: AddBankDialog
       setError(humanizeError(err));
       setStep("idle");
     }
-  }, [exportOrCredsKey, exportOrTxnsKey, reset, onOpenChange]);
+  }, [exportOrCredsKey, reset, onOpenChange]);
 
   const handleSave = useCallback(async () => {
     if (!linkCtx || !isUnlocked) {

@@ -338,3 +338,66 @@ describe("OR_QUILTT_LINK_COMPLETE contract, through the consumer (DL-1114)", () 
     expect(shim.popup.close).toHaveBeenCalled();
   });
 });
+
+/**
+ * OWM-T0413. The bank popup fragment is the SECOND route the
+ * transactions-namespace key used to take to Orange Rails, and until this
+ * block existed nothing pinned it: the whole file had no assertion about
+ * fragment contents at all, so removing txn_key from the other route would
+ * have left this one silently carrying it.
+ *
+ * Both shapes are covered on purpose. buildBankPopupUrl emits two different
+ * URLs depending on whether a Quiltt session bundle is present, and only one
+ * of them is exercised by the happy path a reader is likely to check.
+ */
+describe("bank popup fragment does not carry the transactions key", () => {
+  const CRED_KEY = "Y3JlZF9rZXlfYjY0";
+
+  // The fallback shape reads window.location.origin for return_to, so this
+  // node-environment file needs the same minimal shim the rest of the file
+  // uses for its popup tests.
+  beforeEach(() => {
+    (globalThis as unknown as { window?: unknown }).window = {
+      location: { origin: "https://app.orangeway.test" },
+    };
+  });
+
+  afterEach(() => {
+    delete (globalThis as unknown as { window?: unknown }).window;
+  });
+
+  async function fragmentOf(quickConnect: unknown): Promise<URLSearchParams> {
+    const { buildBankPopupUrl } = await import("../bank-connect");
+    const url = buildBankPopupUrl({
+      quickConnect: quickConnect as never,
+      credKeyB64: CRED_KEY,
+    });
+    return new URLSearchParams(new URL(url).hash.slice(1));
+  }
+
+  it("omits txn_key on the fast path, and still carries cred_key", async () => {
+    const frag = await fragmentOf({
+      orPlatformUserId: "app-user-1",
+      widget_token: "widget-tok-abc",
+      expires_at: new Date(Date.now() + 600_000).toISOString(),
+      quilttBundle: {
+        session_token: "sess-tok",
+        connector_id: "conn-id",
+        platform_slug: "orangeway",
+        app_user_id: "app-user-1",
+      },
+    });
+    expect(frag.get("cred_key")).toBe(CRED_KEY);
+    expect(frag.get("txn_key")).toBeNull();
+  });
+
+  it("omits txn_key on the fallback path too", async () => {
+    const frag = await fragmentOf({
+      orPlatformUserId: "app-user-1",
+      widget_token: "widget-tok-abc",
+      expires_at: new Date(Date.now() + 600_000).toISOString(),
+    });
+    expect(frag.get("cred_key")).toBe(CRED_KEY);
+    expect(frag.get("txn_key")).toBeNull();
+  });
+});

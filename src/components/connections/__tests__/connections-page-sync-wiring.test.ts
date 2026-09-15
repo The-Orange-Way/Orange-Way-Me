@@ -13,8 +13,9 @@
  *
  * WHAT IT DEFENDS (OWM-T0530, OWM-T0544). handleSync routes a private
  * connection to handleStealthSync and everything else to requestOrSync, which
- * is the only call in this app that takes the Orange Rails credentials key and
- * transactions key out of the vault and puts them in a request body. The rule
+ * is the only call in this app that takes the Orange Rails credentials key out
+ * of the vault and puts it in a request body. The transactions key is absent
+ * from that request contract. The rule
  * itself is tested in sync-route.test.ts and the key handover is tested in
  * or-sync-request.test.ts. Neither of those notices if the ARM in the handler
  * is deleted. Deleting it no longer leaks a key, because requestOrSync asks
@@ -144,6 +145,16 @@ describe("ConnectionsPage handleSync wiring", () => {
     }
   });
 
+  it("hands the verified sink response to the encrypting import path", () => {
+    const code = handlerCode("handleSync");
+    expect(
+      code.includes("importSyncedTransactionsForConnection(conn, res)"),
+      "handleSync no longer passes the or-sync response into the import path. " +
+        "Sink rows would remain plaintext drafts in memory and never reach the " +
+        "vault-encrypting transaction bridge.",
+    ).toBe(true);
+  });
+
   it("does not consult the kill switch to decide where the press goes", () => {
     const code = handlerCode("handleSync");
     expect(
@@ -176,6 +187,15 @@ describe("ConnectionsPage handleSyncAll wiring", () => {
     for (const forbidden of ["exportOrCredsKey", "exportOrTxnsKey"]) {
       expect(code.includes(forbidden), `handleSyncAll calls ${forbidden} directly.`).toBe(false);
     }
+  });
+
+  it("hands the batch sink response to each successful import", () => {
+    const code = handlerCode("handleSyncAll");
+    expect(
+      code.includes("importSyncedTransactionsForConnection(conn, res)"),
+      "handleSyncAll no longer passes the sink response to the per-connection " +
+        "encrypting import path.",
+    ).toBe(true);
   });
 });
 

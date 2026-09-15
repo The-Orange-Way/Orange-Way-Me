@@ -47,7 +47,6 @@ async function resolveBaseOrigin(): Promise<string> {
   const url = buildBankPopupUrl({
     quickConnect: QUICK_CONNECT,
     credKeyB64: "Y3JlZA==",
-    txnKeyB64: "dHhu",
   });
   return new URL(url).origin;
 }

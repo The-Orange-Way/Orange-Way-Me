@@ -13,10 +13,19 @@
  *      Quiltt connection id.
  *   4. Caller hands off to owm-or-discover-quiltt to enumerate accounts.
  *
- * ZKA note: caller MUST pass cred_key + txn_key derived from the user's
- * unlocked vault. These keys ride in the popup's URL fragment to OR; OR
- * uses them to encrypt the Quiltt-fetched transactions before returning
- * them. The vault password itself never leaves the browser.
+ * ZKA note: caller MUST pass cred_key, derived from the user's unlocked
+ * vault. It rides in the popup's URL fragment to OR. The vault password
+ * itself never leaves the browser.
+ *
+ * The previous version of this note said the caller must also pass
+ * txn_key, and that OR "uses them to encrypt the Quiltt-fetched
+ * transactions before returning them". Both halves were wrong and the
+ * second was the dangerous one: Quiltt bank transactions come back sealed
+ * under the subaccount's OPK (libsodium crypto_box_seal), opened here at
+ * src/lib/or/bank-sync-opk.ts:178, and never under the transactions
+ * subkey. txn_key is gone from this fragment under OWM-T0413 and must not
+ * be reinstated: the transactions-namespace key does not cross to Orange
+ * Rails by any route.
  */
 
 import { supabase } from "@/integrations/supabase/client";
@@ -97,8 +106,8 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 
 /**
  * Step 2: build the popup URL with the Quiltt session bundle embedded in
- * the fragment, plus the ZKA keys cred_key + txn_key. All of these travel
- * ONLY in the URL fragment, never in the query string.
+ * the fragment, plus the ZKA key cred_key. All of these travel ONLY in the
+ * URL fragment, never in the query string.
  *
  * That answers exactly one threat, and it is worth saying which one so the
  * next reader does not take it for more. A fragment is not sent with the
@@ -111,14 +120,12 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 export function buildBankPopupUrl(args: {
   quickConnect: BankConnectQuickConnectResponse;
   credKeyB64: string;
-  txnKeyB64: string;
 }): string {
-  const { quickConnect: qc, credKeyB64, txnKeyB64 } = args;
+  const { quickConnect: qc, credKeyB64 } = args;
   const base = new URL(OR_CONNECT_BASE);
   const fragParams = new URLSearchParams({
     widget_token: qc.widget_token,
     cred_key: credKeyB64,
-    txn_key: txnKeyB64,
   });
   if (qc.quilttBundle) {
     // Fast path: skip /connect, go straight to /connect/quiltt with the

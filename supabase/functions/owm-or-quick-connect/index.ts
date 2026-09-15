@@ -12,11 +12,20 @@
  *   4. Cache the Quiltt session token on user_profiles for 1hr so subsequent
  *      popup opens stay under Quiltt's 10/hr per-Profile rate limit
  *
- * ZKA note: this function never sees the vault password, MEK, or any
- * derived txn_key. The browser derives cred_key + txn_key from the
- * unlocked vault and posts them to OR via the popup's URL fragment —
- * out of band of this edge function. The transactions OR later returns
- * are encrypted under txn_key; the server (this side) cannot decrypt them.
+ * ZKA note: this function never sees the vault password, the MEK, or any
+ * derived subkey. The browser derives cred_key from the unlocked vault and
+ * posts it to OR via the popup's URL fragment, out of band of this edge
+ * function. Verified: the only key-shaped material handled here is the
+ * platform API key, the widget token and the Quiltt session token.
+ *
+ * Two corrections to what this note used to say, both of which described
+ * behaviour this function cannot observe. It said the browser also sends
+ * txn_key: it no longer does, under OWM-T0413, because the
+ * transactions-namespace key must not cross to OR by any route. And it said
+ * "the transactions OR later returns are encrypted under txn_key", which was
+ * never true of the bank path this function serves: Quiltt transactions come
+ * back sealed under the subaccount's OPK and are opened in the browser at
+ * src/lib/or/bank-sync-opk.ts.
  *
  * Per-user privacy: all DB reads/writes scope to auth.uid(). Household
  * partners get NO visibility into each other's bank connections by
