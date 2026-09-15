@@ -1770,14 +1770,26 @@ export function ConnectionsPage() {
         if (!deletedConnectionIdsRef.current.has(conn.id)) {
           console.error("[Connections] delete 404 on unrecognised id", err);
           setConnections(snapshot);
-          toast.error("Couldn't disconnect. Give it a moment and try again.");
+          // OWM-T0115. This used to say "Give it a moment and try again" no
+          // matter what the server said. For an actual 404 that is the wrong
+          // advice: the row is not there, so an identical retry 404s again.
+          // humanizeError already carries a 404 case ("That item is no
+          // longer there.") that does not promise a retry will do anything;
+          // let it speak instead of overriding it with fixed copy.
+          toast.error(humanizeError(err, "Couldn't disconnect. Give it a moment and try again."));
           return;
         }
         // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
       } else {
         console.error("[Connections] delete failed", err);
         setConnections(snapshot);
-        toast.error("Couldn't disconnect. Give it a moment and try again.");
+        // OWM-T0115. Same fix as the 404 branch above: let humanizeError
+        // tell a session-expired (401) or forbidden (403) failure apart
+        // from a genuinely transient one instead of asking every failure to
+        // wait and retry. Falls back to the original copy for anything it
+        // does not recognise, which is still accurate for the network/5xx
+        // failures that make up most of this branch.
+        toast.error(humanizeError(err, "Couldn't disconnect. Give it a moment and try again."));
         return;
       }
     }
