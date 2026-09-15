@@ -117,4 +117,24 @@ describe("humanizeError", () => {
     const msg = humanizeError(new Error("or-link-mint-token failed (503): stealth_sync_disabled"));
     expect(msg).toBe("Private wallet sync is temporarily unavailable. Please try again later.");
   });
+
+  // OWM-T0115. ConnectionsPage's disconnect flow used to show fixed
+  // "Give it a moment and try again" copy for every delete failure,
+  // including a genuine 404 where the row is simply not there: an
+  // identical retry 404s again, so that copy asked for something that
+  // cannot work. It now routes the error through humanizeError instead of
+  // overriding it, so assert the 404 case says the item is gone rather
+  // than inviting a retry, the same shape the stealth-sync-disabled test
+  // above already asserts for a different unretryable failure.
+  it("catches not-found / 404 without inviting a retry that cannot work", () => {
+    const msg = humanizeError(new Error("Connection not found in this subaccount (404)"));
+    expect(msg).toMatch(/no longer there/i);
+    expect(msg).not.toMatch(/try again/i);
+  });
+
+  it("catches forbidden / 403 as a distinct shape from not-found", () => {
+    const msg = humanizeError(new Error("403 Forbidden"));
+    expect(msg).not.toMatch(/no longer there/i);
+    expect(msg).not.toMatch(/sign in again/i);
+  });
 });
