@@ -314,6 +314,15 @@ export function ConnectionsPage() {
    * upstream cursor that survived longer than our evidence for it.
    */
   const cursorKnowledgeRef = useRef<Map<string, StealthCursorKnowledge>>(new Map());
+  /**
+   * OWM-T0117. refreshList has no AbortController and no cancelled flag
+   * (unlike the provision and OPK effects above), so two overlapping calls
+   * used to let whichever request resolved last win, even if it was issued
+   * first. Incremented at the top of every refreshList call; a call whose
+   * token no longer matches when a step resolves stops touching state
+   * instead of overwriting a newer answer with a stale one.
+   */
+  const listGenerationRef = useRef(0);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
