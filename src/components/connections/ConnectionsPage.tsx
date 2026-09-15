@@ -314,6 +314,15 @@ export function ConnectionsPage() {
    * upstream cursor that survived longer than our evidence for it.
    */
   const cursorKnowledgeRef = useRef<Map<string, StealthCursorKnowledge>>(new Map());
+  /**
+   * OWM-T0117. refreshList has no AbortController and no cancelled flag
+   * (unlike the provision and OPK effects above), so two overlapping calls
+   * used to let whichever request resolved last win, even if it was issued
+   * first. Incremented at the top of every refreshList call; a call whose
+   * token no longer matches when a step resolves stops touching state
+   * instead of overwriting a newer answer with a stale one.
+   */
+  const listGenerationRef = useRef(0);
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [securing, setSecuring] = useState(false);
@@ -467,6 +476,7 @@ export function ConnectionsPage() {
   // Fetch connections list whenever subaccount + vault are ready.
   const refreshList = useCallback(async () => {
     if (!subaccountId || !isUnlocked) return;
+    const gen = ++listGenerationRef.current;
     setLoading(true);
     // Set when the catch below hands off to the provision effect, so the
     // finally leaves the spinner up for the re-provision instead of flashing
@@ -476,6 +486,10 @@ export function ConnectionsPage() {
       const res = (await callProxy("or-connection-list", { subaccount_id: subaccountId })) as {
         connections: ConnectionRow[];
       };
+      // A newer refreshList call started while this one was in flight; that
+      // call owns the screen now, so this one stops here rather than racing
+      // it to setConnections below.
+      if (listGenerationRef.current !== gen) return;
       // Read before decoding, so a decrypt problem further down cannot leave
       // the page silently pretending the arm is healthy.
       setStealthUnavailable(readStealthUnavailable(res));
@@ -543,12 +557,14 @@ export function ConnectionsPage() {
           };
         }),
       );
+      if (listGenerationRef.current !== gen) return;
       setConnections(decoded);
       // Returned so a caller that just created something can check whether it
       // is actually in the list, rather than assuming the refresh it awaited
       // means the row arrived. Every existing caller ignores this.
       return decoded;
     } catch (err) {
+      if (listGenerationRef.current !== gen) return;
       // An id OR does not recognise is recoverable, so fix it rather than
       // report it. Dropping subaccountId re-runs the provision effect, which
       // issues one against the OR this build actually talks to and re-runs this
@@ -568,7 +584,7 @@ export function ConnectionsPage() {
       setStealthUnavailable(false);
       toastError(err, "We couldn't load your connections.");
     } finally {
-      if (!recovering) setLoading(false);
+      if (!recovering && listGenerationRef.current === gen) setLoading(false);
     }
   }, [subaccountId, isUnlocked, decryptOrCipher, userId]);
 
