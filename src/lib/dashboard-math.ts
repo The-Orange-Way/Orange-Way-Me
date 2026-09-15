@@ -58,8 +58,14 @@ export function netWorthSeries(
   );
 
   // For each historical point, subtract everything after that point.
-  // We index account currencies for FX conversion.
+  // We index account currencies for FX conversion, and each account's own
+  // unit stamp: a transaction has no format_version column of its own, so it
+  // is priced using the stamp its own account carries (OW-T0384). Without
+  // this, a stamped account's balance converted exactly while that same
+  // account's transactions fell through the magnitude heuristic and read as
+  // 1e8 too small, so months before a bitcoin deposit showed it as already held.
   const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
+  const acctFormatVersion = new Map(accounts.map((a) => [a.id, a.format_version]));
 
   return points.map((boundary) => {
     let flowAfter = 0;
@@ -69,7 +75,9 @@ export function netWorthSeries(
       const tDate = new Date(t.date + "T00:00:00").getTime();
       if (tDate <= tBoundary) continue;
       const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
-      flowAfter += convert(Number(t.amount) || 0, cur, primaryCurrency);
+      flowAfter += convert(Number(t.amount) || 0, cur, primaryCurrency, {
+        unitIsExact: unitIsExact(acctFormatVersion.get(t.account_id)),
+      });
     }
     return {
       date: new Date(boundary.getFullYear(), boundary.getMonth(), 1).toISOString().slice(0, 10),
@@ -97,6 +105,7 @@ export function cashFlowByMonth(
   monthsBack: number,
 ): CashFlowMonth[] {
   const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
+  const acctFormatVersion = new Map(accounts.map((a) => [a.id, a.format_version]));
   const today = new Date();
   const buckets: CashFlowMonth[] = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
@@ -116,7 +125,9 @@ export function cashFlowByMonth(
     const bucket = buckets.find((b) => b.monthKey === key);
     if (!bucket) continue;
     const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
-    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency);
+    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency, {
+      unitIsExact: unitIsExact(acctFormatVersion.get(t.account_id)),
+    });
     if (amt >= 0) bucket.income += amt;
     else bucket.spending += Math.abs(amt);
   }
@@ -143,6 +154,7 @@ export function thisMonthSummary(
   anchor: Date = new Date(),
 ): MonthSummary {
   const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
+  const acctFormatVersion = new Map(accounts.map((a) => [a.id, a.format_version]));
   const ym = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
   const thisYM = ym(anchor);
   const lastYM = ym(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1));
@@ -158,7 +170,9 @@ export function thisMonthSummary(
     const k = ym(d);
     if (k !== thisYM && k !== lastYM) continue;
     const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
-    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency);
+    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency, {
+      unitIsExact: unitIsExact(acctFormatVersion.get(t.account_id)),
+    });
     if (k === thisYM) {
       if (amt >= 0) inc += amt;
       else sp += Math.abs(amt);
