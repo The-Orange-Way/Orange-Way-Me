@@ -277,6 +277,40 @@ check 'category 4: negative control: a clean tree exits 0' \
   '0' "$LAST_RC"
 
 # ----------------------------------------------------------------------
+# Category 2: ticket-id exemption is id-scoped, not line-scoped
+# ----------------------------------------------------------------------
+#
+# OWM-T0406: EXEMPT_OWM_TICKET_ID used to be folded into the whole-line
+# drop_patterns filter, so a line carrying a ticket id AND a separate
+# structural leak produced no finding. Citing a ticket in the same
+# comment that describes the work is the expected usage, not an edge
+# case, so this has to hold on a combined line, not just in isolation.
+# None of these need a reserved-term list, so OW_RESERVED_TERMS is left
+# unset and category 1 reports itself skipped.
+
+TICKET_ONLY="$(new_fixture_text ticket_only 'See OWM-T0410 for the follow-up ticket.')"
+run_scan "$TICKET_ONLY" ci ""
+
+check 'a line with only a ticket id scans clean' \
+  '0' "$LAST_RC"
+
+TICKET_PLUS_LEAK="$(new_fixture_text ticket_plus_leak \
+  'Fixed the OWM sync bug, tracked as OWM-T0410.')"
+run_scan "$TICKET_PLUS_LEAK" ci ""
+
+check 'a ticket id sharing a line with a real leak is still caught' \
+  '1' "$LAST_RC"
+
+check 'the structural-naming category is reported failing' \
+  'present' "$(has 'Internal codename: MB / OWM as acronym (1 findings)')"
+
+BARE_ACRONYM="$(new_fixture_text bare_acronym 'The OWM export handles this case.')"
+run_scan "$BARE_ACRONYM" ci ""
+
+check 'a bare OWM acronym with no ticket id is still caught' \
+  '1' "$LAST_RC"
+
+# ----------------------------------------------------------------------
 # Evidence, for whoever reads this job log
 # ----------------------------------------------------------------------
 #
