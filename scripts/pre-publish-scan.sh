@@ -227,6 +227,7 @@ scan() {
   local flags="$3"
   local extra_exempt="$4"
   local redact="${5:-}"
+  local id_strip="${6:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -264,6 +265,33 @@ scan() {
     filtered=$(printf '%s\n' "$raw" | grep -Ev "$drop_patterns" || true)
   else
     filtered="$raw"
+  fi
+
+  # Id-level exemption: strip only the exempted substring from a working
+  # copy of each line's TEXT column, then re-test the category pattern
+  # against that copy. This drops a line only when the exempted id was the
+  # sole reason it matched; a line that also carries a real leak keeps
+  # matching the stripped copy and is reported with its original text
+  # intact. Unlike drop_patterns above, this can never drop a whole file
+  # or a whole line just because an id appears on it somewhere.
+  if [[ -n "$id_strip" && -n "$filtered" ]]; then
+    local kept="" line text stripped
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      text="${line#*:}"   # "./path:LINE:text" -> "LINE:text"
+      text="${text#*:}"   # "LINE:text" -> "text"
+      stripped=$(printf '%s' "$text" | sed -E "s/${id_strip}//g")
+      if [[ -n "$flags" ]]; then
+        if printf '%s' "$stripped" | grep -qE $flags -- "$pattern"; then
+          kept+="${kept:+$'\n'}${line}"
+        fi
+      else
+        if printf '%s' "$stripped" | grep -qE -- "$pattern"; then
+          kept+="${kept:+$'\n'}${line}"
+        fi
+      fi
+    done <<< "$filtered"
+    filtered="$kept"
   fi
 
   if [[ -z "$filtered" ]]; then
