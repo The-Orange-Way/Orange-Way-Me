@@ -31,25 +31,27 @@
 #                                               -> must exit 0 (PASS)
 #  11) a grant that appears only inside a line comment
 #                                               -> must exit 0 (PASS)
-#  12) GRANT ALL ON FUNCTION f(args) TO anon    -> must exit 1. EXECUTE is the
-#      only privilege a function has, so ALL confers exactly what EXECUTE does
-#  13) GRANT ALL PRIVILEGES ON FUNCTION f(args) TO PUBLIC
-#                                               -> must exit 1, same reason
-#  14) GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon
-#                                               -> must exit 1 (blanket)
-#  15) ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon
-#                                               -> must exit 1 (blanket)
-#  16) ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES TO anon
-#                                               -> must exit 0. A table grant
-#      is outside this scan's remit. The case is here because accepting ALL at
-#      the first filter is what first brings this statement to the default
-#      privileges branch, so that branch has to check the object type or a
-#      legal table grant would be reported as a blanket function grant
+#  12) GRANT ALL on a named function. In PostgreSQL EXECUTE is the only
+#      privilege a function has, so ALL is the same grant written differently.
+#                                               -> must exit 1
+#  13) the ALL PRIVILEGES spelling, to PUBLIC.  -> must exit 1
+#  14) the schema-wide blanket form written with ALL.
+#                                               -> must exit 1
+#  15) default privileges written with ALL, which reaches every FUTURE
+#      function in the schema.                 -> must exit 1
+#  16) the same statement on TABLES, which is outside this scan's remit and
+#      must not be refused.                    -> must exit 0
 #  17) GRANT ALL ON TABLE t TO anon             -> must exit 0, same reason
 #  18) GRANT ALL ON FUNCTION on an ALLOWLISTED function
 #                                               -> must exit 0. The allowlist
 #      is per function signature, not per keyword, so the same privilege
 #      written a different way must still be allowed
+#  19) CREATE OR REPLACE of a hardened SECDEF function (rule 2, OWM-T0599)
+#      with no matching REVOKE                 -> must exit 1. Postgres resets
+#      EXECUTE to PUBLIC on replace even if it had been revoked before.
+#  20) the same replace, but the migration also revokes and re-grants
+#      properly (the pattern the repo's own history already uses)
+#                                               -> must exit 0
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
