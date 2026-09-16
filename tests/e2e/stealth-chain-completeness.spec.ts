@@ -91,7 +91,9 @@ test.describe("OWM-T0617 acceptance 1a: chain-to-import completeness (staged dev
       throw new Error(`Supabase read failed for account ${accountId}: ${error.message}`);
     }
     const rows = data ?? [];
-    const importedExternalIds = new Set(rows.map((r) => r.external_id).filter((v): v is string => !!v));
+    const importedExternalIds = new Set(
+      rows.map((r) => r.external_id).filter((v): v is string => !!v),
+    );
 
     console.log(`[OWM-T0617] imported rows for account ${accountId}: ${rows.length}`);
     console.log(`[OWM-T0617] distinct imported external_id values: ${importedExternalIds.size}`);

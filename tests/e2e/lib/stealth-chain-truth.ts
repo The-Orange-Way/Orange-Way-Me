@@ -50,7 +50,10 @@ export interface ParsedExtendedKey {
  * implied by the ORIGINAL prefix (or the override, if the caller wants
  * to force p2wpkh on an xpub-prefixed BIP84 key).
  */
-export function parseExtendedKey(extendedKey: string, scriptTypeOverride?: ScriptType): ParsedExtendedKey {
+export function parseExtendedKey(
+  extendedKey: string,
+  scriptTypeOverride?: ScriptType,
+): ParsedExtendedKey {
   const decoded = bs58check.decode(extendedKey);
   const versionBytes = decoded.subarray(0, 4);
   const versionHex = Buffer.from(versionBytes).toString("hex");
@@ -72,7 +75,12 @@ export function parseExtendedKey(extendedKey: string, scriptTypeOverride?: Scrip
 }
 
 /** m/chain/index, non-hardened derivation (BIP32/BIP44). */
-export function deriveAddress(hdRoot: HDKey, chain: 0 | 1, index: number, scriptType: ScriptType): string {
+export function deriveAddress(
+  hdRoot: HDKey,
+  chain: 0 | 1,
+  index: number,
+  scriptType: ScriptType,
+): string {
   const child = hdRoot.deriveChild(chain).deriveChild(index);
   if (!child.publicKey) {
     throw new Error(`no public key derived at chain ${chain} index ${index}`);
@@ -94,7 +102,9 @@ export function deriveAddress(hdRoot: HDKey, chain: 0 | 1, index: number, script
   }
 
   if (!payment.address) {
-    throw new Error(`no address produced for script type ${scriptType} at chain ${chain} index ${index}`);
+    throw new Error(
+      `no address produced for script type ${scriptType} at chain ${chain} index ${index}`,
+    );
   }
   return payment.address;
 }
