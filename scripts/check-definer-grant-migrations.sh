@@ -260,6 +260,8 @@ while IFS= read -r FILE; do
   # added lines, drop line comments, collapse whitespace, split on ';'.
   BUFFER=$(printf '%s\n' "$ADDED_LINES" | sed 's/--.*$//' | tr '\n' ' ' | tr -s '[:space:]' ' ')
 
+  check_rule2_unrevoked_replace "$FILE" "$BUFFER"
+
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
     LOWER=$(printf '%s' "$STMT" | tr '[:upper:]' '[:lower:]' | tr -s ' ')
