@@ -237,6 +237,13 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
     expect(wrapOrMekWithVaultMek).toHaveBeenCalledWith(
       new Uint8Array([9, 9, 9]),
       expect.anything(),
+      expect.any(Uint8Array),
+    );
+    // The AAD must bind this specific column and this specific user, so a
+    // wrapped blob cannot be lifted into another column or another row.
+    const wrapAadArg = wrapOrMekWithVaultMek.mock.calls[0][2] as Uint8Array;
+    expect(new TextDecoder().decode(wrapAadArg)).toBe(
+      "owm/v1|public.vault_metadata|enc_or_mek_ciphertext|user-1",
     );
     expect(updateMock).toHaveBeenCalledWith({
       enc_or_mek_ciphertext: "wrapped-ciphertext",
