@@ -30,6 +30,14 @@
 
 set -uo pipefail
 
+# This test's concern is check 4 (identity scan), not check 5 (gitleaks).
+# The runner this test executes on may have no gitleaks binary on PATH or
+# at $HOME/.local/bin/gitleaks -- that is a property of the machine, not of
+# the fixture, and check 5 already refuses loudly and correctly when that
+# happens. Use the gate's own named override so a missing scanner on this
+# particular runner cannot fail an assertion about a different check.
+export PR_THIS_ALLOW_NO_GITLEAKS=1
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE="$HERE/pre-push-gate.sh"
 PUBLISH_SCAN="$HERE/pre-publish-scan.sh"
