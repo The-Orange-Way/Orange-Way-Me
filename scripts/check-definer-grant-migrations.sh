@@ -40,7 +40,10 @@
 # 1. CREATE FUNCTION defaults EXECUTE to PUBLIC, and CREATE OR REPLACE resets
 #    it to PUBLIC even after a clean revoke, with no GRANT line anywhere in
 #    the migration that changed it. A text scan of the diff cannot see that:
-#    there is nothing to find.
+#    there is nothing to find. RULE 2 below closes this gap for the four
+#    functions named in HARDENED_DEFINER_FUNCTIONS: an added CREATE OR
+#    REPLACE of one of them with no matching REVOKE in the same migration is
+#    refused. It stays open for every other SECURITY DEFINER function.
 # 2. A grant built at run time, inside a DO block or by EXECUTE format(...),
 #    where the grantee is not literal text in the migration.
 # 3. A grant that already sits in a file this pull request does not touch.
