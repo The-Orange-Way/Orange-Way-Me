@@ -393,7 +393,7 @@ done <<< "$CHANGED_FILES"
   echo "## SECURITY DEFINER EXECUTE grants, migration diff scan"
   echo
   echo "Migration files changed: $(printf '%s\n' "$CHANGED_FILES" | grep -c .)."
-  echo "Allowlisted grants added: ${ALLOWED_HITS}. Cron-revoke hits: ${CRON_REVOKE_HITS}. Refused: ${#VIOLATIONS[@]}."
+  echo "Rule 1 (unallowlisted GRANT). Allowlisted grants added: ${ALLOWED_HITS}. Cron-revoke hits: ${CRON_REVOKE_HITS}. Refused: ${#VIOLATIONS[@]}."
   if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
     echo
     echo "| file | function | grantee |"
@@ -412,12 +412,28 @@ done <<< "$CHANGED_FILES"
     echo "removes EXECUTE from postgres on a function pg_cron calls; that breaks the"
     echo "schedule silently and must come out of the migration."
   fi
+  echo
+  echo "Rule 2 (CREATE OR REPLACE with no matching REVOKE). Refused: ${#RULE2_VIOLATIONS[@]}."
+  if [ "${#RULE2_VIOLATIONS[@]}" -gt 0 ]; then
+    echo
+    echo "| file | function |"
+    echo "| --- | --- |"
+    for V in "${RULE2_VIOLATIONS[@]}"; do
+      F="${V%%$'\t'*}"
+      HF="${V#*$'\t'}"
+      printf '| `%s` | `%s` |\n' "$F" "$HF"
+    done
+    echo
+    echo "Add \`REVOKE EXECUTE ON FUNCTION public.<name>(...) FROM PUBLIC, anon[, authenticated];\`"
+    echo "to the SAME migration, matching the pattern the function's own original migration"
+    echo "already uses, or move the replace out until the revoke can ship with it."
+  fi
 } >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
-if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
-  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon/PUBLIC EXECUTE grant(s) or protected cron-function EXECUTE revoke(s) added in this pull request's migrations."
+if [ "${#VIOLATIONS[@]}" -gt 0 ] || [ "${#RULE2_VIOLATIONS[@]}" -gt 0 ]; then
+  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon/PUBLIC EXECUTE grant(s) or protected cron-function EXECUTE revoke(s), and ${#RULE2_VIOLATIONS[@]} unrevoked CREATE OR REPLACE of a hardened SECURITY DEFINER function, added in this pull request's migrations."
   exit 1
 fi
 
-echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE; no cron-calling-role revoke on a protected function."
+echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE; no cron-calling-role revoke on a protected function; no unrevoked CREATE OR REPLACE of a hardened SECURITY DEFINER function."
 exit 0
