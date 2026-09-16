@@ -118,7 +118,7 @@ export function GoalDetailPage({ id }: { id: string }) {
   }
 
   const prog = computeProgress(goal, accounts);
-  const monthly = averageMonthlyContribution(goal, txns);
+  const monthly = averageMonthlyContribution(goal, txns, 3, prefs.primaryCurrency);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
   const history = balanceHistory(goal, accounts, txns);
 
