@@ -230,6 +230,7 @@ export function ConnectionsPage() {
   const {
     isUnlocked,
     encryptText,
+    decryptText,
     decryptOrCipher,
     decryptOrTxnCipher,
     exportOrCredsKey,
@@ -1391,6 +1392,9 @@ export function ConnectionsPage() {
       supabase,
       userId: user.id,
       encryptText,
+      // Enables repairLegacyBitcoinRows: without it the repair path returns 0
+      // and rows already in the ledger keep the "Imported transaction" label.
+      decryptText,
       resolveAccountIds: (orConnectionId, sourceWalletId) =>
         getActiveAccountIds(orConnectionId, sourceWalletId),
       getAccountCurrency: (accountId) => accountById.get(accountId)?.currency,
