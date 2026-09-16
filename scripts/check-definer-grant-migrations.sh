@@ -59,18 +59,23 @@
 # Diffs <base-ref>...<head-ref> for files under supabase/migrations, and scans
 # every line added by the PR (not the whole file, so an untouched grant in a
 # migration that already existed is not re-flagged by an unrelated edit to the
-# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, or a
+# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, a
 # REVOKE ... FROM naming postgres on a function pg_cron calls (see CRON
-# CALLING ROLE PROTECTION below).
+# CALLING ROLE PROTECTION below), or an added CREATE OR REPLACE of a hardened
+# SECURITY DEFINER function with no matching REVOKE in the same file (see
+# RULE 2 below).
 #
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
 #           the changed lines grant EXECUTE to anon or PUBLIC outside the
-#           allowlist, and none revoke EXECUTE from postgres on a protected
-#           cron-called function
+#           allowlist, none revoke EXECUTE from postgres on a protected
+#           cron-called function, and no hardened SECURITY DEFINER function is
+#           replaced with no matching revoke
 #   exit 1  VIOLATION                 a changed migration line grants EXECUTE
-#           to anon or PUBLIC on a function not on the allowlist, or revokes
-#           EXECUTE from postgres on a protected cron-called function
+#           to anon or PUBLIC on a function not on the allowlist, revokes
+#           EXECUTE from postgres on a protected cron-called function, or adds
+#           a CREATE OR REPLACE of a hardened SECURITY DEFINER function with
+#           no matching REVOKE in the same migration file
 #
 # The allowlist below MUST be kept identical to the one in
 # check-definer-grants.sh. It is duplicated rather than sourced because this
