@@ -128,11 +128,11 @@ export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
 }
 
 export interface GoalsSummary {
-  /** Sum of each measurable goal's progress, capped at that goal's own target. */
+  /** Sum of the distinct linked-account balances behind active goals. */
   saved: number;
-  /** Sum of the measurable goals' targets. */
+  /** Sum of the active goals' targets. */
   target: number;
-  /** 0..1. Cannot exceed 1, because every term of `saved` is capped at its own target. */
+  /** Ratio of distinct backing-account balances to the goals' combined targets. */
   pct: number;
   /** How many active goals contributed to the figures above. */
   counted: number;
@@ -143,42 +143,35 @@ export interface GoalsSummary {
 /**
  * Roll the active goals up into the one line at the top of the goals screen.
  *
- * This lives here rather than in the page because it has to agree with
- * computeProgress, and the two drifted apart while the header was written
- * inline in JSX where nothing could test it (DL-1603). Two ways they disagreed:
+ * This lives here rather than in the page because the header's total needs the
+ * same active-goal rules as its cards. A shared account is the key case:
  *
- * 1. The header measured goals the tiles refuse to measure. A goal with no
- *    linked accounts still carries a target, so summing it contributed a real
- *    denominator against a current of zero. Its own tile says "Not tracking
- *    yet" and draws no bar, while the header scored it zero percent and pulled
- *    the headline down. Skipping it is the same refusal the tile already makes.
- *
- * 2. A goal contributed more than its own target. computeProgress caps the
- *    per-goal pct at 1 but returns `current` uncapped, so an over-funded goal
- *    spilled its excess into another goal's shortfall. Capping each term at its
- *    own target is what makes "progress across your goals" mean anything: money
- *    past a goal's finish line is not progress toward a different goal.
- *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * Two goals can be backed by the same account. A goal's own progress can use
+ * the whole balance, but the page header reports money the customer actually
+ * holds. It must therefore include that account once, regardless of how many
+ * active goals link it, while retaining every active goal's target.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
-  let saved = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+  const linkedAccountIds = new Set<string>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
     active += 1;
+    target += Math.max(0, Number(g.target_amount) || 0);
+    for (const accountId of g.linked_account_ids) linkedAccountIds.add(accountId);
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
-    target += p.target;
   }
+
+  const saved = accounts.reduce(
+    (sum, account) =>
+      linkedAccountIds.has(account.id) ? sum + Math.max(0, normalizedBalance(account)) : sum,
+    0,
+  );
 
   return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
 }
