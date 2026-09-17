@@ -49,6 +49,7 @@ import { FiltersDrawer, EMPTY_FILTERS, type TxnFilters } from "./FiltersDrawer";
 import { TransactionFormDialog } from "./TransactionFormDialog";
 import { SplitTransactionDialog } from "./SplitTransactionDialog";
 import { TxnImportExportDialog } from "./TxnImportExportDialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function TransactionsPage() {
   const { wallet: initialWallet } = Route.useSearch();
@@ -96,6 +97,7 @@ export function TransactionsPage() {
     items,
     loading,
     totals,
+    decryptFailCount,
     createTransaction,
     createTransfer,
     updateTransaction,
@@ -396,6 +398,18 @@ export function TransactionsPage() {
         onAddTag={handleBulkAddTag}
         onDelete={handleBulkDelete}
       />
+
+      {!loading && decryptFailCount > 0 && (
+        <Alert
+          variant="default"
+          className="border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950/30 dark:text-yellow-200"
+        >
+          <AlertDescription>
+            {decryptFailCount} {decryptFailCount === 1 ? "row" : "rows"} could not be decrypted and
+            are not shown. This can happen after a vault key change.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {loading ? (
         <div className="rounded-lg border border-border p-12 text-center text-sm text-muted-foreground">
