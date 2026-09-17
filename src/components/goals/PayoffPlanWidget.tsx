@@ -1,11 +1,11 @@
 /**
- * Payoff plan widget — orders all active pay_down goals by avalanche or snowball,
+ * Payoff plan widget - orders all active pay_down goals by avalanche or snowball,
  * with a toggle to switch. Displays APR, balance, min payment.
  */
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { orderPayDown } from "@/lib/goals-math";
+import { normalizedBalance, orderPayDown } from "@/lib/goals-math";
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import { Link } from "@tanstack/react-router";
@@ -44,7 +44,15 @@ export function PayoffPlanWidget({ goals, accounts }: Props) {
         <ol className="space-y-2">
           {ordered.map((g, i) => {
             const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
-            const debt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+            // Converted to primaryCurrency the same way computeCurrent's
+            // pay_down branch is (OWM-T0772) - this used to sum raw
+            // account.balance with no Bitcoin or FX normalization, so a debt
+            // held in a BTC-denominated account displayed as a sats-magnitude
+            // dollar figure.
+            const debt = linked.reduce(
+              (sum, a) => sum + Math.abs(normalizedBalance(a, prefs.primaryCurrency)),
+              0,
+            );
             const apr = Number(g.interest_rate ?? "0") || 0;
             const min = Number(g.minimum_payment ?? "0") || 0;
             return (
