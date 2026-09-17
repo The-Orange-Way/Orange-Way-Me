@@ -95,6 +95,7 @@ export function RecentTransactions() {
                     {amt >= 0 ? "+" : ""}
                     {fmt.formatCurrency(inPrimary, prefs.primaryCurrency, {
                       maximumFractionDigits: 2,
+                      unitIsExact: true,
                     })}
                   </span>
                 </Link>
