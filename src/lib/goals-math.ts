@@ -159,16 +159,19 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * 3. Two save_up goals linked to the same account each claimed the full
+ *    balance (DL-1589). Decision OWM-T0210: goals may share an account, but
+ *    the header dedupes by account ID so each account balance counts only once
+ *    toward the headline total.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
   let saved = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+  // Track account IDs already counted in `saved` so a shared account
+  // contributes its balance only once to the headline total (OWM-T0210).
+  const countedAccountIds = new Set<string>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -176,8 +179,26 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    if (g.type === "save_up" && g.strategy !== "specific_amount") {
+      // Balance-backed goal: only sum accounts not yet seen in this pass so a
+      // shared account does not inflate the headline figure.
+      const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
+      let deduped = 0;
+      for (const a of linked) {
+        if (!countedAccountIds.has(a.id)) {
+          deduped += Math.max(0, normalizedBalance(a));
+          countedAccountIds.add(a.id);
+        }
+      }
+      saved += Math.min(deduped, p.target);
+    } else {
+      // specific_amount uses a manual allocation (no linked-account balance),
+      // and pay_down measures progress against a starting balance rather than
+      // the raw account figure -- neither can double-count a shared account.
+      saved += Math.min(p.current, p.target);
+    }
   }
 
   return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
