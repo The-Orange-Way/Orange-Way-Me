@@ -442,6 +442,53 @@ jobs:
           curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
           echo "checkmark ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
 
+      - name: Verify /connections entry point shipped (OWM-T0073)
+        # Why this cannot be a raw-HTML text check: ConnectionsPage only
+        # renders once the vault is unlocked (see the isUnlocked guard in
+        # src/components/connections/ConnectionsPage.tsx), this repo does
+        # not server-render or prerender app routes (only the public
+        # marketing routes, via scripts/prerender-plugin.ts), and the
+        # button carrying the entry point sits behind that guard. An
+        # unauthenticated GET /connections returns the same SPA shell every
+        # route returns, so grepping that response proves nothing either
+        # way.
+        #
+        # What is checkable without a browser: the compiled JS the browser
+        # would run. Reuses the same routes chunk the step above already
+        # located, and looks for the button's literal text and its
+        # data-testid. A negative control (a string that cannot exist)
+        # proves the grep can actually fail, so a false green cannot hide
+        # behind a check that matches everything.
+        run: |
+          set -euo pipefail
+          ROUTES=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/routes-[^"]*\.js' | head -1 || true)
+          if [ -z "$ROUTES" ]; then
+            echo "::error::Could not find routes chunk on ${{ steps.target.outputs.verify_url }} -- cannot verify the connect entry point shipped."
+            exit 1
+          fi
+          BODY=$(curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}")
+          if [ -z "$BODY" ]; then
+            echo "::error::Routes chunk at ${{ steps.target.outputs.verify_url }}${ROUTES} fetched empty."
+            exit 1
+          fi
+          if grep -qF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' <<< "$BODY"; then
+            echo "::error::Negative control matched -- this check is broken and cannot be trusted."
+            exit 1
+          fi
+          FAILED=0
+          if ! grep -qF 'Connect a Bitcoin source' <<< "$BODY"; then
+            echo "::error::Deployed bundle is missing the \"Connect a Bitcoin source\" button text."
+            FAILED=1
+          fi
+          if ! grep -qF 'connections-add' <<< "$BODY"; then
+            echo "::error::Deployed bundle is missing the connections-add entry point marker."
+            FAILED=1
+          fi
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Connections entry point present in the deployed bundle (${{ steps.target.outputs.verify_url }})"
+
       # E2E smoke against the freshly-deployed environment. Chromium
       # only on every push so deploys stay fast; the Firefox / WebKit
       # / mobile projects in playwright.config.ts run locally (and in

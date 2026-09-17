@@ -32,10 +32,12 @@ import {
   KEY_DERIVATION_STRATEGIES,
   VAULT_VERIFIER_PLAINTEXT,
   type VaultKeyVersion,
+  buildVaultAad,
   createEncryptedHmacKey,
   decryptBlob as cryptoDecryptBlob,
   decryptHmacKey,
   decryptText as cryptoDecryptText,
+  decryptTextBound as cryptoDecryptTextBound,
   deriveHmacKey,
   deriveMek,
   deriveOrCredsKeyFromMek,
@@ -45,6 +47,7 @@ import {
   deriveOrStealthWidgetKeyBytesFromMek,
   encryptBlob as cryptoEncryptBlob,
   encryptText as cryptoEncryptText,
+  encryptTextBound as cryptoEncryptTextBound,
   generateRecoveryCode,
   importMekFromRaw,
   randomBytesB64,
@@ -84,6 +87,7 @@ import {
 import { householdHasSigningKey, mintSigningKeyForHousehold } from "@/lib/household-osk";
 import { buildHouseholdSignatureFields as buildSigFields } from "@/lib/row-signing";
 import { featureFlags } from "@/lib/feature-flags";
+import { captureException } from "@/lib/observability/sentry";
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -279,7 +283,48 @@ function assertOrAvailable(reasonRef: { current: string | null }): void {
 }
 
 type OrKeyMaterial =
-  | { ok: true; orMekBytes: Uint8Array; saltContext: string }
+  | {
+      ok: true;
+      orMekBytes: Uint8Array;
+      saltContext: string;
+      /**
+       * OWM-T0584. Present only when this key was just derived from a row
+       * that carried NONE of the three Orange Rails columns (see
+       * planOrKeyMaterial's "derive-and-pin" case) AND the caller asked for
+       * the pin to be deferred rather than written immediately.
+       *
+       * That row shape is genuinely ambiguous, not merely unlikely. A
+       * brand-new account that has never touched Orange Rails, and an
+       * account whose password rotated before DL-1506 shipped any column to
+       * record that rotation, both read back as "all three columns null"
+       * today - there is no local signal that tells them apart, because the
+       * marking mechanism (or-recovery-marking.ts) did not exist yet when
+       * the second kind of account last rotated. Pinning immediately treats
+       * every such row as the first case. For the second, the derivation
+       * below uses the CURRENT salt, which is not the salt any already
+       * synced Orange Rails row was sealed under, so the pin would commit a
+       * well-formed key that opens none of them - silently, and
+       * permanently, which is the exact DL-1506 failure this reopens.
+       *
+       * The caller cannot resolve this here: telling the two apart needs to
+       * know whether the account has any Orange Rails data at all, which is
+       * a network fact, and no network call belongs on the unlock path
+       * (rejected designs on the ticket). So the key is handed back for
+       * immediate session use either way - deriving is deterministic and
+       * cheap, and using it commits nothing - while the decision to persist
+       * it as the account's permanent pin is handed back to the caller as
+       * this field. The caller commits it once something downstream, on the
+       * customer's actual path, proves the derivation was right: see
+       * confirmOrKeyMaterialProven and its call sites in ConnectionsPage.tsx.
+       */
+      pendingPin?: {
+        userId: string;
+        mek: CryptoKey;
+        orMekBytes: Uint8Array;
+        saltContext: string;
+        epoch: number;
+      };
+    }
   | { ok: false; reason: string };
 
 /**
@@ -317,6 +362,24 @@ function sleep(ms: number): Promise<void> {
  * a well formed key that opens nothing and reports success, which is precisely
  * the failure being removed.
  */
+/**
+ * Additional authenticated data for one sealed column of vault_metadata.
+ *
+ * vault_metadata is one row per user and user_id IS its primary key, which is
+ * the whole reason these wraps can be bound in phase 1 without touching any
+ * writer: the binding value is known before the value is sealed. Row-field
+ * columns on accounts, transactions and the rest do not have that property,
+ * because the client does not hold the row uuid at encrypt time, and they are
+ * phase 2 (OWM-T0641).
+ *
+ * Pass the column name the ciphertext is actually STORED IN. Passing the
+ * wrong one produces a value that seals cleanly and then refuses to open,
+ * which is the failure this binding is designed to cause.
+ */
+function vaultMetaAad(column: string, userId: string): Uint8Array {
+  return buildVaultAad({ table: "vault_metadata", column, rowId: userId });
+}
+
 export async function resolveOrKeyMaterial(params: {
   userId: string;
   password: string;
@@ -330,8 +393,22 @@ export async function resolveOrKeyMaterial(params: {
    * passes false because it has just minted a new one.
    */
   saltMatchesExistingRows: boolean;
+  /**
+   * OWM-T0584. True asks this call, on a "derive-and-pin" plan only, to hand
+   * the pin back as `pendingPin` instead of writing it. False keeps the
+   * original behaviour of writing it immediately. unlock() passes true: it
+   * is the only caller that can ever reach a "derive-and-pin" plan (recovery
+   * always states `saltMatchesExistingRows: false`, which planOrKeyMaterial
+   * only ever resolves to "refuse"), and it is the caller with a downstream
+   * page that can prove the derivation right before it is committed.
+   * recoverWithCode passes false so this stays an explicit, checkable
+   * decision at each call site rather than a default either could drift
+   * away from silently.
+   */
+  deferPinUntilProven: boolean;
 }): Promise<OrKeyMaterial> {
-  const { userId, password, mek, row, kdfSalt, saltMatchesExistingRows } = params;
+  const { userId, password, mek, row, kdfSalt, saltMatchesExistingRows, deferPinUntilProven } =
+    params;
 
   const plan = planOrKeyMaterial(row, kdfSalt, { saltMatchesExistingRows });
 
@@ -350,7 +427,11 @@ export async function resolveOrKeyMaterial(params: {
     try {
       return {
         ok: true,
-        orMekBytes: await unwrapOrMekWithVaultMek(plan.ciphertext, mek),
+        orMekBytes: await unwrapOrMekWithVaultMek(
+          plan.ciphertext,
+          mek,
+          vaultMetaAad("enc_or_mek_ciphertext", userId),
+        ),
         saltContext: plan.saltContext,
       };
     } catch (e) {
@@ -367,6 +448,26 @@ export async function resolveOrKeyMaterial(params: {
   }
 
   const orMekBytes = await deriveOrMekBytes(password, userId, plan.saltContext);
+
+  if (deferPinUntilProven) {
+    // OWM-T0584. See the pendingPin field above for why this row shape
+    // cannot be pinned on trust. The key is still returned for immediate use
+    // - the session must not wait on a network round trip to function -
+    // only the DATABASE WRITE is withheld, for the caller to commit once it
+    // is proven.
+    return {
+      ok: true,
+      orMekBytes,
+      saltContext: plan.saltContext,
+      pendingPin: {
+        userId,
+        mek,
+        orMekBytes,
+        saltContext: plan.saltContext,
+        epoch: plan.epoch,
+      },
+    };
+  }
 
   // Return as soon as the key exists. Persisting the pin is DURABILITY work,
   // not correctness work: the bytes above are the right key for this session
@@ -418,7 +519,11 @@ async function pinOrKeyMaterial(params: {
   epoch: number;
 }): Promise<void> {
   const { userId, mek, orMekBytes, saltContext, epoch } = params;
-  const ciphertext = await wrapOrMekWithVaultMek(orMekBytes, mek);
+  const ciphertext = await wrapOrMekWithVaultMek(
+    orMekBytes,
+    mek,
+    vaultMetaAad("enc_or_mek_ciphertext", userId),
+  );
   let lastPinError: unknown = null;
 
   for (let attempt = 0; attempt < PIN_WRITE_BACKOFF_MS.length; attempt += 1) {
@@ -440,10 +545,23 @@ async function pinOrKeyMaterial(params: {
     }
   }
 
-  console.error(
-    "[vault] could not pin Orange Rails key material after retries; this account stays recoverable only while the current password is known",
-    lastPinError,
-  );
+  // Report through the observability wrapper so exhausted retries appear in
+  // the GlitchTip project (OWM-T0233 acceptance item 4). Carry ONLY the error
+  // class name and attempt count -- never key material, salt, ciphertext,
+  // address, txid, xpub or derivation path (ZKA invariant).
+  const pinErrorClass = lastPinError instanceof Error ? lastPinError.constructor.name : "unknown";
+  const pinAttempts = PIN_WRITE_BACKOFF_MS.length;
+  console.error("[vault] could not pin Orange Rails key material after retries", {
+    errorClass: pinErrorClass,
+    attempts: pinAttempts,
+  });
+  try {
+    const pinError = new Error("Orange Rails key-material pin exhausted retries");
+    captureException(pinError, { extra: { errorClass: pinErrorClass, attempts: pinAttempts } });
+  } catch {
+    // Sentry not initialised (VITE_SENTRY_DSN unset, test environment) --
+    // swallow. console.error above is the fallback signal.
+  }
 }
 
 interface VaultMetadataRow {
@@ -499,6 +617,13 @@ interface VaultContextType {
    * call fail later with something that reads like a lock.
    */
   orNamespaceDisabledReason: string | null;
+  /**
+   * OWM-T0584. Commit an Orange Rails key pin that unlock deferred pending
+   * proof. See VaultProvider's implementation for the full rationale and
+   * ConnectionsPage.tsx for its call sites. A no-op when nothing is
+   * pending - safe to call unconditionally.
+   */
+  confirmOrKeyMaterialProven: () => void;
   unlock: (password: string) => Promise<void>;
   createVault: (password: string) => Promise<CreateVaultResult>;
   finalizeVaultSetup: () => void;
@@ -635,6 +760,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // lifetime rules as the OPK seed: zeroed and nulled on lock, on sign-out and
   // on no-user, and never written to storage or sent to any server.
   const orStealthKeyBytesRef = useRef<Uint8Array | null>(null);
+  // OWM-T0584. Set only while a "derive-and-pin" key is in use but its
+  // database write has been deferred pending proof (see resolveOrKeyMaterial's
+  // pendingPin). Read and cleared by confirmOrKeyMaterialProven; cleared
+  // without writing on lock, sign-out and a fresh unlock, since a pin that
+  // was never proven for one unlock must not be written under a later one's
+  // password.
+  const pendingOrPinRef = useRef<{
+    userId: string;
+    mek: CryptoKey;
+    orMekBytes: Uint8Array;
+    saltContext: string;
+    epoch: number;
+  } | null>(null);
 
   const orDisabledReasonRef = useRef<string | null>(null); // Phase 4.2: active household + unwrapped DEK. Populated on unlock
   // when the user has a membership row + a wrap we can open with their
@@ -694,6 +832,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orDisabledReasonRef.current = null;
         setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
+        pendingOrPinRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
           handle.privateKeyBytes.fill(0);
@@ -755,6 +894,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         orDisabledReasonRef.current = null;
         setOrNamespaceDisabledReason(null);
         currentHouseholdRef.current = null;
+        pendingOrPinRef.current = null;
         kdfSaltRef.current = null;
         for (const handle of signingKeysRef.current.values()) {
           handle.privateKeyBytes.fill(0);
@@ -801,21 +941,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const mekRawArr = crypto.getRandomValues(new Uint8Array(32));
     const mek = await importMekFromRaw(mekRawArr);
 
-    const verifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
+    const verifier = await cryptoEncryptTextBound(
+      VAULT_VERIFIER_PLAINTEXT,
+      mek,
+      vaultMetaAad("verifier_ciphertext", user.id),
+    );
     // New vaults ship on the current version, which is the only version.
     const strategy = KEY_DERIVATION_STRATEGIES[CURRENT_VAULT_KEY_VERSION];
     const encMekCiphertext = await strategy.wrapMekWithPassword(
       mekRawArr.buffer as ArrayBuffer,
       password,
       kdfSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
     const recoveryCode = await generateRecoveryCode();
     const recoveryWrapped = await wrapMekWithRecovery(
       mekRawArr.buffer as ArrayBuffer,
       recoveryCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
     );
 
-    const { raw: hmacRaw, ciphertext: encHmacKey } = await createEncryptedHmacKey(mek);
+    const { raw: hmacRaw, ciphertext: encHmacKey } = await createEncryptedHmacKey(
+      mek,
+      vaultMetaAad("enc_hmac_key", user.id),
+    );
     const hmacKey = await crypto.subtle.importKey(
       "raw",
       hmacRaw as BufferSource,
@@ -837,7 +986,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orTxnsKey = await deriveOrTxnsKeyFromMek(orMekBytes, kdfSalt);
     const orOpkSeed = await deriveOrOpkSeedFromMek(orMekBytes, kdfSalt);
     const orStealthKeyBytes = await deriveOrStealthWidgetKeyBytesFromMek(orMekBytes, kdfSalt);
-    const encOrMek = await wrapOrMekWithVaultMek(orMekBytes, mek);
+    const encOrMek = await wrapOrMekWithVaultMek(
+      orMekBytes,
+      mek,
+      vaultMetaAad("enc_or_mek_ciphertext", user.id),
+    );
 
     const { error } = await vaultTable().insert({
       user_id: user.id,
@@ -982,7 +1135,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
       const mekForHkdf = await importMekForHkdf(mekBytes);
       const wrapKey = await derivePqcSecretWrapKey(mekForHkdf, saltB64);
-      const secretKeyB64 = await cryptoDecryptText(pkRow.enc_private_key, wrapKey);
+      const secretKeyB64 = await cryptoDecryptTextBound(
+        pkRow.enc_private_key,
+        wrapKey,
+        vaultMetaAad("enc_private_key", userId),
+      );
       const secretKeyBytes = base64ToBytes(secretKeyB64);
 
       // 4) Finally, unwrap the household DEK.
@@ -1034,6 +1191,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           row.enc_mek_ciphertext,
           password,
           row.kdf_salt,
+          vaultMetaAad("enc_mek_ciphertext", user.id),
         );
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1042,7 +1200,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mek = await importMekFromRaw(mekBytes);
       // Verify MEK is correct.
       try {
-        const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
+        const probe = await cryptoDecryptTextBound(
+          row.verifier_ciphertext,
+          mek,
+          vaultMetaAad("verifier_ciphertext", user.id),
+        );
         if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1054,7 +1216,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // the strategy map, so no version in the registry describes it.
       mek = await deriveMek(password, row.kdf_salt, row.kdf_iterations);
       try {
-        const probe = await cryptoDecryptText(row.verifier_ciphertext, mek);
+        const probe = await cryptoDecryptTextBound(
+          row.verifier_ciphertext,
+          mek,
+          vaultMetaAad("verifier_ciphertext", user.id),
+        );
         if (probe !== VAULT_VERIFIER_PLAINTEXT) throw new Error("verifier mismatch");
       } catch {
         void logSecurityEvent(user.id, "vault_unlock_failed");
@@ -1066,7 +1232,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     let hmacKey: CryptoKey;
     if (row.enc_hmac_key) {
-      hmacKey = await decryptHmacKey(row.enc_hmac_key, mek);
+      hmacKey = await decryptHmacKey(row.enc_hmac_key, mek, vaultMetaAad("enc_hmac_key", user.id));
     } else {
       // Legacy HMAC derivation, only reachable for pre-enc_hmac_key vaults.
       // Those predate the strategy map, so the stored iteration count is the
@@ -1101,7 +1267,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       row,
       kdfSalt: row.kdf_salt,
       saltMatchesExistingRows: !saltRotatedWhileUnpinned(row),
+      // OWM-T0584. unlock is the only caller that can reach a
+      // "derive-and-pin" plan (recoverWithCode always states
+      // saltMatchesExistingRows: false, which never resolves to that plan),
+      // and the only one with a downstream page - ConnectionsPage - that can
+      // later prove the derivation right. See pendingPin above.
+      deferPinUntilProven: true,
     });
+    // A pin deferred by a PRIOR unlock in this session must not be written
+    // under this one's password: it closed over the previous mek. Each
+    // unlock either replaces it with its own pending pin or clears it.
+    pendingOrPinRef.current = orMaterial.ok ? (orMaterial.pendingPin ?? null) : null;
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -1224,6 +1400,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         row.enc_mek_ciphertext,
         currentPassword,
         row.kdf_salt,
+        vaultMetaAad("enc_mek_ciphertext", user.id),
       );
     } catch {
       throw new Error("Current vault password is incorrect");
@@ -1269,6 +1446,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       mekBytes.buffer as ArrayBuffer,
       newPassword,
       newSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
 
     // Recovery ciphertext is unaffected — MEK bytes don't change on password change.
@@ -1329,7 +1507,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Vault must be unlocked (new architecture) to regenerate recovery code.");
 
     const newCode = await generateRecoveryCode();
-    const wrapped = await wrapMekWithRecovery(mekBytesRef.current.buffer as ArrayBuffer, newCode);
+    const wrapped = await wrapMekWithRecovery(
+      mekBytesRef.current.buffer as ArrayBuffer,
+      newCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
+    );
 
     const { error } = await vaultTable()
       .update({ recovery_ciphertext: wrapped })
@@ -1365,7 +1547,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
     let mekBytes: Uint8Array;
     try {
-      mekBytes = await unwrapMekWithRecovery(data.recovery_ciphertext, recoveryCode);
+      mekBytes = await unwrapMekWithRecovery(
+        data.recovery_ciphertext,
+        recoveryCode,
+        vaultMetaAad("recovery_ciphertext", user.id),
+      );
     } catch {
       throw new Error("Invalid recovery code");
     }
@@ -1385,25 +1571,37 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     const orMarking = recoveryOrMarking(data, data.kdf_salt);
 
     const mek = await importMekFromRaw(mekBytes);
-    const freshVerifier = await cryptoEncryptText(VAULT_VERIFIER_PLAINTEXT, mek);
+    const freshVerifier = await cryptoEncryptTextBound(
+      VAULT_VERIFIER_PLAINTEXT,
+      mek,
+      vaultMetaAad("verifier_ciphertext", user.id),
+    );
     // Recovery always promotes the vault to the current best KDF.
     const newStrategy = KEY_DERIVATION_STRATEGIES[CURRENT_VAULT_KEY_VERSION];
     const newEncMek = await newStrategy.wrapMekWithPassword(
       mekBytes.buffer as ArrayBuffer,
       newPassword,
       newSalt,
+      vaultMetaAad("enc_mek_ciphertext", user.id),
     );
-    const freshRecovery = await wrapMekWithRecovery(mekBytes.buffer as ArrayBuffer, recoveryCode);
+    const freshRecovery = await wrapMekWithRecovery(
+      mekBytes.buffer as ArrayBuffer,
+      recoveryCode,
+      vaultMetaAad("recovery_ciphertext", user.id),
+    );
 
     let encHmacKey: string | undefined;
     let hmacKey: CryptoKey;
     if (data.enc_hmac_key) {
       // Keep existing HMAC key — MEK hasn't changed, so blind indexes stay valid.
       encHmacKey = data.enc_hmac_key;
-      hmacKey = await decryptHmacKey(data.enc_hmac_key, mek);
+      hmacKey = await decryptHmacKey(data.enc_hmac_key, mek, vaultMetaAad("enc_hmac_key", user.id));
     } else {
       // Legacy: create a new HMAC key.
-      const { raw: hmacRaw, ciphertext } = await createEncryptedHmacKey(mek);
+      const { raw: hmacRaw, ciphertext } = await createEncryptedHmacKey(
+        mek,
+        vaultMetaAad("enc_hmac_key", user.id),
+      );
       encHmacKey = ciphertext;
       hmacKey = await crypto.subtle.importKey(
         "raw",
@@ -1436,8 +1634,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       const mekForHkdf = await importMekForHkdf(mekBytes);
       const oldWrapKey = await derivePqcSecretWrapKey(mekForHkdf, data.kdf_salt);
       const newWrapKey = await derivePqcSecretWrapKey(mekForHkdf, newSalt);
-      const secretKeyB64 = await cryptoDecryptText(data.enc_private_key, oldWrapKey);
-      newEncPrivateKey = await cryptoEncryptText(secretKeyB64, newWrapKey);
+      const secretKeyB64 = await cryptoDecryptTextBound(
+        data.enc_private_key,
+        oldWrapKey,
+        vaultMetaAad("enc_private_key", user.id),
+      );
+      newEncPrivateKey = await cryptoEncryptTextBound(
+        secretKeyB64,
+        newWrapKey,
+        vaultMetaAad("enc_private_key", user.id),
+      );
     }
 
     const updatePayload: Record<string, unknown> = {
@@ -1487,7 +1693,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // against it cannot reproduce anything, so an unpinned row must refuse
       // here rather than mint a replacement key and call that success.
       saltMatchesExistingRows: false,
+      // OWM-T0584. Explicit, not merely the same as omitting the field: this
+      // path can never reach "derive-and-pin" (saltMatchesExistingRows is
+      // false above, and planOrKeyMaterial only resolves that combination to
+      // "refuse"), so there is nothing here for a deferred pin to defer. Kept
+      // false rather than left to a default so a future change to either
+      // function has to touch this line to change that.
+      deferPinUntilProven: false,
     });
+    // Out of scope for OWM-T0584 (recovery mints a fresh salt and can never
+    // produce a pendingPin - see deferPinUntilProven above), but cleared
+    // defensively: a pin deferred by an earlier unlock in this session closed
+    // over that unlock's mek and must not be written under the recovered one.
+    pendingOrPinRef.current = null;
 
     mekRef.current = mek;
     mekBytesRef.current = mekBytes;
@@ -1533,6 +1751,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     orDisabledReasonRef.current = null;
     setOrNamespaceDisabledReason(null);
     currentHouseholdRef.current = null;
+    // OWM-T0584. A pin deferred while unlocked must not survive to a later
+    // unlock; that unlock computes its own pendingPin or none at all.
+    pendingOrPinRef.current = null;
     // Phase 4.4: clear HSK cache + retained salt on lock.
     kdfSaltRef.current = null;
     for (const handle of signingKeysRef.current.values()) {
@@ -1543,6 +1764,34 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setIsUnlocked(false);
     // Intentionally keep vaultKeyVersion — it reflects on-disk state and
     // should remain visible in the locked settings screen.
+  }, []);
+
+  /**
+   * OWM-T0584. Commit a deferred Orange Rails pin once the caller has proof
+   * the derivation was right for THIS account, not merely well formed.
+   *
+   * Idempotent and safe to call speculatively: a no-op when there is nothing
+   * pending, which covers every session that did not hit the ambiguous row
+   * shape (see resolveOrKeyMaterial's pendingPin) as well as a second call
+   * after the first already committed. ConnectionsPage calls this from two
+   * places - zero connections on this account (nothing exists yet to be
+   * wrong about), and the first transaction row that actually decrypts with
+   * the derived keys (direct evidence the derivation was right) - and calls
+   * it unconditionally from both, relying on this no-op behaviour rather than
+   * tracking whether it already fired.
+   *
+   * Fire-and-forget, same as the immediate-pin path in resolveOrKeyMaterial:
+   * the caller (a page render, not the unlock) has nothing to block on, and
+   * a failed write here leaves the row exactly as unpinned as it already was,
+   * which the next unlock's own pendingPin will attempt again.
+   */
+  const confirmOrKeyMaterialProven = useCallback(() => {
+    const pending = pendingOrPinRef.current;
+    if (!pending) return;
+    pendingOrPinRef.current = null;
+    void pinOrKeyMaterial(pending).catch((e) => {
+      console.error("[vault] background pin of Orange Rails key material threw (post-proof)", e);
+    });
   }, []);
 
   const encryptText = useCallback(async (plaintext: string) => {
@@ -1756,7 +2005,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       try {
         const mekForHkdf = await importMekForHkdf(mekBytesRef.current);
         const wrapKey = await derivePqcSecretWrapKey(mekForHkdf, kdfSaltRef.current);
-        const hybridPrivKeyB64 = await cryptoDecryptText(pkRow.enc_private_key, wrapKey);
+        const hybridPrivKeyB64 = await cryptoDecryptTextBound(
+          pkRow.enc_private_key,
+          wrapKey,
+          vaultMetaAad("enc_private_key", user.id),
+        );
         const hybridPrivKey = base64ToBytes(hybridPrivKeyB64);
 
         const privateKeyBytes = await unwrapHouseholdSigningKey(
@@ -1880,6 +2133,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         vaultCheckError,
         vaultKeyVersion,
         orNamespaceDisabledReason,
+        confirmOrKeyMaterialProven,
         unlock,
         createVault,
         finalizeVaultSetup,

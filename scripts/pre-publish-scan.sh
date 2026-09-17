@@ -199,13 +199,16 @@ if [[ -n "$RESERVED_TERMS" ]] && ! canon_terms_usable "$RESERVED_TERMS"; then
 fi
 
 # Withhold matched text when running in CI. A CI log on a public repository
-# is public, and the reserved-term category matches strings that are internal
-# by definition, so printing the offending line there publishes the very
-# thing this scan exists to keep out of the tree. Locally the full line is
-# what makes a finding fixable, so it is printed in full. CI is set by GitHub
-# Actions and by most other runners.
-REDACT_MATCHES="${CI:+1}"
-
+# is public, and every category exists to catch content that must not reach
+# that surface. Applying this once inside scan() means a new category cannot
+# accidentally opt out by omitting an argument. Locally the full line is what
+# makes a finding fixable, so it is printed in full.
+#
+# GitHub Actions sets both CI and GITHUB_ACTIONS. Check either so redaction
+# survives a caller that removes one of them. The self-test escape hatch is
+# deliberately narrow and must never be set on the real repository scan; it
+# lets scripts/test-leak-scan-red.sh see its invented canaries while proving
+# the local diagnostic path from inside a CI runner.
 EXIT_CODE=0
 
 # ----------------------------------------------------------------------
@@ -217,16 +220,12 @@ EXIT_CODE=0
 #   $2  grep pattern (extended regex)
 #   $3  grep flags (e.g. -i for case-insensitive). Empty string for none.
 #   $4  extra-exemption pattern (extended regex). Empty string for none.
-#   $5  "1" to print file and line only and withhold the matched text. Set it
-#       for any category whose pattern comes from the internal list. Empty for
-#       the hardcoded categories, whose matches are safe to show.
 
 scan() {
   local name="$1"
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
-  local redact="${5:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -274,9 +273,10 @@ scan() {
   local count
   count=$(printf '%s\n' "$filtered" | wc -l)
   printf "  \033[31m✗\033[0m  %s (%d findings)\n" "$name" "$count"
-  if [[ -n "$redact" ]]; then
-    # file and line only. The matched text is an internal string by
-    # definition, so it must never reach a log that may be public.
+  if [[ -n "${CI:-}${GITHUB_ACTIONS:-}" \
+    && "${LEAK_SCAN_SELF_TEST_SHOW_MATCHES:-}" != "1" ]]; then
+    # File and line only. A match is content this scanner exists to keep off
+    # a public surface, so no category may print it to a CI log.
     printf '%s\n' "$filtered" | cut -d: -f1,2 | sed 's/^/      /' | head -30
     printf "      (matched text withheld; run this scan locally to see it)\n"
   else
@@ -331,8 +331,7 @@ if [[ -n "$RESERVED_TERMS" ]]; then
   scan "Reserved terms (internal list)" \
        "$RESERVED_TERMS" \
        "-i" \
-       "$EXEMPT_RESERVED_CI" \
-       "$REDACT_MATCHES"
+       "$EXEMPT_RESERVED_CI"
 else
   printf "  \033[33m–\033[0m  Reserved-term scan skipped (set OW_RESERVED_TERMS or add .reserved-terms)\n"
 fi
@@ -407,8 +406,7 @@ scan "Dead PR references" \
 scan "Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix)" \
      "\\b100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.[0-9]{1,3}\\.[0-9]{1,3}\\b|\\.ts\\.net\\b" \
      "" \
-     "" \
-     "$REDACT_MATCHES"
+     ""
 
 # ----------------------------------------------------------------------
 # Summary

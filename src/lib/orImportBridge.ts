@@ -165,6 +165,13 @@ export interface OrImportDeps {
   userId: string;
   /** Vault MEK encrypt — same helper used by useTransactions. */
   encryptText: (plaintext: string) => Promise<string>;
+  /**
+   * Vault MEK decrypt. Optional: when present, a re-sync can identify the
+   * exact legacy "Imported transaction" placeholder and fill encrypted
+   * matching metadata on already-imported Bitcoin rows. Absent, the conflict
+   * path stays DO NOTHING, matching the pre-OWM-T0211-repair behaviour.
+   */
+  decryptText?: (ciphertext: string) => Promise<string>;
   /** Resolve OR (connection, source_wallet) → Personal accounts.id values.
    *  Empty array means "unmapped". Pulled from useConnectionAccountMap. */
   resolveAccountIds: (orConnectionId: string, sourceWalletId: string) => string[];
@@ -287,13 +294,27 @@ function truncateAddress(address: string): string {
 }
 
 /**
+ * Truncate a real on-chain transaction id for the one-line description.
+ * Eight characters at each end are enough to distinguish rows visually; the
+ * complete txid remains encrypted in enc_memo for copying and matching.
+ */
+function truncateTxid(txid: string): string {
+  const trimmed = txid.trim();
+  if (trimmed.length <= 19) return trimmed;
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-8)}`;
+}
+
+const LEGACY_IMPORT_PLACEHOLDER = "Imported transaction";
+
+/**
  * Build the description that lands in the encrypted column. We
  * prefer the OR description, fall back to counterparty (e.g.
  * "Lightning invoice from alice@example.com"), then -- OWM-T0211,
  * for a row that has neither but does carry a matched output address --
  * direction plus a truncated address ("Received to bc1q00...w9k2" /
- * "Sent from bc1q00...w9k2"), then to the raw type label, so the row
- * is never blank.
+ * "Sent from bc1q00...w9k2"). When the best-effort address is absent,
+ * the real txid is the matching fallback. Only non-chain rows with neither
+ * field continue to the raw type label and existing placeholder.
  */
 function pickDescription(tx: OrImportTransaction): string {
   if (tx.description && tx.description.trim().length > 0) return tx.description;
@@ -302,26 +323,43 @@ function pickDescription(tx: OrImportTransaction): string {
     const verb = tx.direction === "out" ? "Sent from" : "Received to";
     return `${verb} ${truncateAddress(tx.address)}`;
   }
+  if (tx.txid && tx.txid.trim().length > 0) {
+    const verb = tx.direction === "out" ? "Sent" : "Received";
+    return `${verb} tx ${truncateTxid(tx.txid)}`;
+  }
   if (tx.type) return capitalize(tx.type);
-  return "Imported transaction";
+  return LEGACY_IMPORT_PLACEHOLDER;
 }
 
 /**
  * OWM-T0211. The full address and real on-chain txid, encrypted into the
  * existing enc_memo column so the detail view can show what the
  * (necessarily truncated) description cannot -- no new column, no plaintext.
- * enc_memo is otherwise always null on first import and is never touched on
- * a re-sync (the unique index treats it as a duplicate), so this only ever
- * fires once per row and a customer's own later memo edit is never at risk.
- * Returns null when neither field is present, leaving enc_memo null exactly
- * as before this change.
+ * On first import enc_memo is otherwise null. On a re-sync the unique index
+ * still treats the row as a duplicate; the narrow repair path below is what
+ * fills a still-empty memo, and a customer's own later memo edit is appended
+ * to rather than replaced.
  */
-function buildReconciliationMemo(tx: OrImportTransaction): string | null {
+function matchingMetadataLines(tx: OrImportTransaction): string[] {
   const lines: string[] = [];
   if (tx.address && tx.address.trim().length > 0) lines.push(`Address: ${tx.address.trim()}`);
   if (tx.txid && tx.txid.trim().length > 0) lines.push(`Txid: ${tx.txid.trim()}`);
+  return lines;
+}
+
+function buildReconciliationMemo(tx: OrImportTransaction): string | null {
+  const lines = matchingMetadataLines(tx);
   if (lines.length === 0) return null;
   return lines.join("\n");
+}
+
+/** Preserve a customer memo byte-for-byte and append only absent matching lines. */
+function appendMissingMatchingMetadata(existingMemo: string, tx: OrImportTransaction): string {
+  const existingLines = new Set(existingMemo.split("\n"));
+  const missing = matchingMetadataLines(tx).filter((line) => !existingLines.has(line));
+  if (missing.length === 0) return existingMemo;
+  if (existingMemo.length === 0) return missing.join("\n");
+  return `${existingMemo}${existingMemo.endsWith("\n") ? "" : "\n"}${missing.join("\n")}`;
 }
 
 function capitalize(s: string): string {
@@ -428,6 +466,118 @@ export async function widenAccountOpeningDates(
   return { repaired, failed };
 }
 
+interface ExistingImportedRow {
+  id: string;
+  external_id: string | null;
+  enc_description: string;
+  enc_memo: string | null;
+}
+
+/**
+ * Repair encrypted metadata on duplicate Bitcoin rows without clobbering edits.
+ *
+ * The normal conflict path remains DO NOTHING so category, amount, merchant,
+ * account routing, and every other customer-editable field are never clobbered.
+ * The description changes only when it decrypts to the exact legacy placeholder;
+ * a customer-authored description survives. Missing address/txid lines are
+ * appended to the encrypted memo while preserving any customer memo. Because
+ * these fields use a random IV, the server cannot inspect them: the unlocked
+ * browser selects, decrypts, and issues the narrow encrypted-field update.
+ *
+ * Returns the number of rows whose lookup or write failed. Failures are
+ * logged and reported via onError; they are not folded into `errored` so a
+ * re-sync of already-imported history cannot surface as "import failed".
+ */
+async function repairLegacyBitcoinRows(
+  duplicateRows: Record<string, unknown>[],
+  txByExternalId: Map<string, OrImportTransaction>,
+  deps: OrImportDeps,
+): Promise<number> {
+  const decryptText = deps.decryptText;
+  if (!decryptText) return 0;
+  const candidates = duplicateRows.filter((row) => {
+    const externalId = row.external_id;
+    if (typeof externalId !== "string") return false;
+    const tx = txByExternalId.get(externalId);
+    return tx !== undefined && matchingMetadataLines(tx).length > 0;
+  });
+  if (candidates.length === 0) return 0;
+
+  const candidateByExternalId = new Map(
+    candidates.map((row) => [row.external_id as string, row] as const),
+  );
+  const externalIds = Array.from(candidateByExternalId.keys());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const txnsTable = () => (deps.supabase as any).from("transactions");
+  const { data, error } = await txnsTable()
+    .select("id, external_id, enc_description, enc_memo")
+    .eq("user_id", deps.userId)
+    .eq("external_source", EXTERNAL_SOURCE)
+    .in("external_id", externalIds);
+
+  if (error) {
+    console.error("[orImportBridge] legacy Bitcoin metadata lookup failed");
+    console.log("[orImportBridge] legacy Bitcoin metadata lookup detail", error);
+    for (const externalId of externalIds) deps.onError?.(externalId, error);
+    return externalIds.length;
+  }
+
+  let failures = 0;
+  let repaired = 0;
+  for (const existing of (data ?? []) as ExistingImportedRow[]) {
+    const externalId = existing.external_id;
+    if (!externalId) continue;
+    const candidate = candidateByExternalId.get(externalId);
+    const tx = txByExternalId.get(externalId);
+    if (!candidate || !tx) continue;
+
+    const patch: Record<string, unknown> = {};
+    try {
+      const description = await decryptText(existing.enc_description);
+      if (description.trim() === LEGACY_IMPORT_PLACEHOLDER) {
+        patch.enc_description = candidate.enc_description;
+      }
+    } catch (err) {
+      failures += 1;
+      console.error("[orImportBridge] legacy Bitcoin description could not be decrypted");
+      console.log("[orImportBridge] legacy Bitcoin description decrypt detail", err);
+      deps.onError?.(externalId, err);
+    }
+
+    if (existing.enc_memo === null) {
+      if (candidate.enc_memo != null) patch.enc_memo = candidate.enc_memo;
+    } else {
+      try {
+        const currentMemo = await decryptText(existing.enc_memo);
+        const mergedMemo = appendMissingMatchingMetadata(currentMemo, tx);
+        if (mergedMemo !== currentMemo) patch.enc_memo = await deps.encryptText(mergedMemo);
+      } catch (err) {
+        failures += 1;
+        console.error("[orImportBridge] legacy Bitcoin memo could not be extended");
+        console.log("[orImportBridge] legacy Bitcoin memo repair detail", err);
+        deps.onError?.(externalId, err);
+      }
+    }
+
+    if (!("enc_description" in patch) && !("enc_memo" in patch)) continue;
+    Object.assign(patch, deps.buildSignatureFields?.() ?? {});
+
+    const { error: updateError } = await txnsTable().update(patch).eq("id", existing.id);
+    if (updateError) {
+      failures += 1;
+      console.error("[orImportBridge] legacy Bitcoin metadata update failed");
+      console.log("[orImportBridge] legacy Bitcoin metadata update detail", updateError);
+      deps.onError?.(externalId, updateError);
+      continue;
+    }
+    repaired += 1;
+  }
+  if (repaired > 0) {
+    console.log("[orImportBridge] repaired legacy Bitcoin labels", { repaired });
+  }
+  return failures;
+}
+
 /**
  * Build the encrypted row payload the transactions table accepts.
  * Mirrors `useTransactions.buildEncryptedRow` minus the
@@ -438,9 +588,9 @@ export async function widenAccountOpeningDates(
  *     overwritten.
  *   - `enc_memo`: null on first import UNLESS the OR payload carried
  *     an address or txid (OWM-T0211, see buildReconciliationMemo),
- *     in which case those are written here once. Same re-sync
- *     protection applies: a later user edit to memo is never
- *     overwritten.
+ *     in which case those are written here once. A later user edit
+ *     to memo is never overwritten; a re-sync may append missing
+ *     Address/Txid lines through the repair path.
  *   - `hmac_*`: null. Computed when the user later sets a
  *     merchant/category via the standard transaction edit flow.
  *   - `is_split_parent`, `split_parent_id`, `transfer_group_id`,
@@ -494,12 +644,10 @@ async function buildRow(
  * surface a toast or progress UI.
  *
  * Batching: rows are upserted in chunks of 100 to stay well under
- * Supabase's payload limits. We use `upsert(..., { onConflict:
- * 'user_id,external_source,external_id', ignoreDuplicates: true })`
- * so that re-syncing the same OR batch is a no-op AND any user
- * edits to a previously-imported row survive untouched (the
- * `ignoreDuplicates` flag is the load-bearing piece — without
- * it, upsert would clobber edits).
+ * Supabase's payload limits. We use `ignoreDuplicates: true` so a re-sync
+ * cannot clobber customer edits. Duplicate Bitcoin rows then take a separate,
+ * narrow repair path: only the exact legacy placeholder description and its
+ * encrypted matching detail are updated.
  */
 export async function importOrTransactions(
   orConnectionId: string,
@@ -525,6 +673,7 @@ export async function importOrTransactions(
   // were actually inserted (vs. silently skipped as duplicates).
   const amountKey = (accountId: string, externalId: string) => `${accountId}::${externalId}`;
   const amountByKey = new Map<string, number>();
+  const txByExternalId = new Map(txs.map((tx) => [tx.id, tx] as const));
 
   // Pre-resolve mappings so per-tx work is just a Map lookup.
   // Cache by source_wallet_id since multiple txs share a wallet.
@@ -690,6 +839,24 @@ export async function importOrTransactions(
     // from `data` — perfect for our "imported" counter and balance delta.
     const inserted = Array.isArray(data) ? data.length : 0;
     result.imported += inserted;
+    const insertedKeys = new Set(
+      ((data ?? []) as Array<{ account_id: string; external_id: string | null }>).flatMap((row) =>
+        row.account_id && row.external_id ? [amountKey(row.account_id, row.external_id)] : [],
+      ),
+    );
+    const duplicateRows = chunk.filter((row) => {
+      const accountId = row.account_id;
+      const externalId = row.external_id;
+      return (
+        typeof accountId === "string" &&
+        typeof externalId === "string" &&
+        !insertedKeys.has(amountKey(accountId, externalId))
+      );
+    });
+    // Failures stay in the log / onError sink. They are not added to
+    // `errored`: a re-sync of already-imported Bitcoin history must not
+    // toast as "import failed" when only the placeholder repair missed.
+    await repairLegacyBitcoinRows(duplicateRows, txByExternalId, deps);
     // Accumulate the signed amount for each actually-inserted row so the
     // caller can update the account's stored balance by the net delta.
     for (const row of (data ?? []) as Array<{
