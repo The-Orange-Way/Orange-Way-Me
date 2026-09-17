@@ -78,4 +78,8 @@ describe("classifyDeleteReadback", () => {
     expect(classifyDeleteReadback(null, "conn-123")).toBe("unconfirmed");
     expect(classifyDeleteReadback(undefined, "conn-123")).toBe("unconfirmed");
   });
+
+  it("is unconfirmed when the list is known to omit private rows", () => {
+    expect(classifyDeleteReadback([], "conn-private", false)).toBe("unconfirmed");
+  });
 });

@@ -14,7 +14,10 @@ import { describe, expect, it } from "vitest";
 
 import { bankSyncHasWarning, type BankSyncOutcome } from "../BankSyncDialog";
 
-const CLEAN: BankSyncOutcome = { imported: 3, total: 3, unmapped: 0, errored: 0, unitMismatch: 0 };
+// OWM-T0092 dropped the count fields from this outcome: a count the page had
+// not read back was the defect. The refusal count stays, because the guard
+// did observe the refusal.
+const CLEAN: BankSyncOutcome = { ledgerReadBack: true, unitMismatch: 0 };
 
 describe("bankSyncHasWarning", () => {
   it("is false when nothing was refused", () => {
@@ -26,8 +29,8 @@ describe("bankSyncHasWarning", () => {
   });
 
   it("is true even when every row otherwise imported cleanly", () => {
-    // The exact shape of OWM-T0740: imported === total, errored 0, unmapped
-    // 0, and still one refused credit that must not read as a plain success.
+    // The exact shape of OWM-T0740: the ledger read back cleanly and still
+    // one refused credit that must not read as a plain success.
     expect(bankSyncHasWarning({ ...CLEAN, unitMismatch: 2 })).toBe(true);
   });
 });
