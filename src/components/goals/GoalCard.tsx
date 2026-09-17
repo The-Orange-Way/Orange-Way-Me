@@ -38,7 +38,7 @@ export function GoalCard({ goal, accounts, txns }: Props) {
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
   const prog = computeProgress(goal, accounts);
-  const monthly = averageMonthlyContribution(goal, txns);
+  const monthly = averageMonthlyContribution(goal, txns, 3, prefs.primaryCurrency);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
 
   const Icon = goal.type === "save_up" ? PiggyBank : Banknote;
