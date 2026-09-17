@@ -434,13 +434,13 @@ jobs:
       - name: Verify deploy
         run: |
           sleep 8
-          ROUTES=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/routes-[^"]*\.js' | head -1 || true)
-          if [ -z "$ROUTES" ]; then
-            echo "::warning::Could not find routes chunk on ${{ steps.target.outputs.verify_url }}"
+          ASSET=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/[^"]*\.js' | head -1 || true)
+          if [ -z "$ASSET" ]; then
+            echo "::warning::Could not find any JS asset reference on ${{ steps.target.outputs.verify_url }}"
             exit 0
           fi
-          curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}" >/dev/null
-          echo "checkmark ${{ steps.target.outputs.verify_url }} routes chunk fetched OK"
+          curl -s "${{ steps.target.outputs.verify_url }}${ASSET}" >/dev/null
+          echo "checkmark ${{ steps.target.outputs.verify_url }} JS asset fetched OK"
 
       - name: Verify /connections entry point shipped (OWM-T0073)
         # Why this cannot be a raw-HTML text check: ConnectionsPage only
@@ -459,16 +459,25 @@ jobs:
         # data-testid. A negative control (a string that cannot exist)
         # proves the grep can actually fail, so a false green cannot hide
         # behind a check that matches everything.
+        # OW-T0388 2026-09-17: broadened from one guessed /assets/routes-*.js
+        # filename to every JS asset the page references, because the build
+        # no longer guarantees that one name (see vite.config.ts manualChunks
+        # comment). Same negative control, same two required markers, just
+        # searched across all referenced assets instead of a single guess.
         run: |
           set -euo pipefail
-          ROUTES=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/routes-[^"]*\.js' | head -1 || true)
-          if [ -z "$ROUTES" ]; then
-            echo "::error::Could not find routes chunk on ${{ steps.target.outputs.verify_url }} -- cannot verify the connect entry point shipped."
+          ASSETS=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/[^"]*\.js' | sort -u)
+          if [ -z "$ASSETS" ]; then
+            echo "::error::Could not find any JS asset reference on ${{ steps.target.outputs.verify_url }} -- cannot verify the connect entry point shipped."
             exit 1
           fi
-          BODY=$(curl -s "${{ steps.target.outputs.verify_url }}${ROUTES}")
+          BODY=""
+          for asset in $ASSETS; do
+            BODY="$BODY
+          $(curl -s "${{ steps.target.outputs.verify_url }}${asset}")"
+          done
           if [ -z "$BODY" ]; then
-            echo "::error::Routes chunk at ${{ steps.target.outputs.verify_url }}${ROUTES} fetched empty."
+            echo "::error::JS assets at ${{ steps.target.outputs.verify_url }} fetched empty."
             exit 1
           fi
           if grep -qF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' <<< "$BODY"; then
@@ -477,11 +486,11 @@ jobs:
           fi
           FAILED=0
           if ! grep -qF 'Connect a Bitcoin source' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the \"Connect a Bitcoin source\" button text."
+            echo "::error::Deployed bundle is missing the \"Connect a Bitcoin source\" button text (checked every JS asset referenced by the page)."
             FAILED=1
           fi
           if ! grep -qF 'connections-add' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the connections-add entry point marker."
+            echo "::error::Deployed bundle is missing the connections-add entry point marker (checked every JS asset referenced by the page)."
             FAILED=1
           fi
           if [ "$FAILED" -ne 0 ]; then
