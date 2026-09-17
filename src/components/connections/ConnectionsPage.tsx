@@ -847,10 +847,10 @@ export function ConnectionsPage() {
         setBankSyncConnId(conn.id);
       },
       private: () => handleStealthSync(conn),
-      "or-sync": () => syncOrdinary(),
+      "or-sync": () => syncOrdinary(subaccount),
     });
 
-    async function syncOrdinary() {
+    async function syncOrdinary(acct: string) {
       setSyncingId(conn.id);
       try {
         // OWM-T0544. No key is exported here any more. requestOrSync asks
@@ -858,7 +858,7 @@ export function ConnectionsPage() {
         // private arm above now stops a press rather than starting a key
         // handover: it reaches this call and is refused, instead of exporting two
         // vault keys for a request or-sync answers with a 400.
-        const res = await requestOrSync(subaccount, [conn], orSyncKeys);
+        const res = await requestOrSync(acct, [conn], orSyncKeys);
 
         // DL-1051: a status toast must be driven by positive evidence that this
         // connection was actually processed. or-sync only returns an entry for a
