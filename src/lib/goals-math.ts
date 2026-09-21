@@ -337,7 +337,7 @@ export function balanceHistory(
   // value has to apply to the deltas walked off it (OWM-T0772), or the chart
   // mixes a converted anchor with un-converted flow for any goal whose linked
   // accounts are not already in primaryCurrency. unitIsExact must travel with
-  // each account too (Auditor finding on PR #879): without it, convert()
+  // each account too: without it, convert()
   // guesses the unit from the transaction amount's shape, and a manually
   // entered whole-number BTC amount (e.g. "1" or "2") is misread as sats -
   // about a 1e8x undercount in the chart for that account's flow.
