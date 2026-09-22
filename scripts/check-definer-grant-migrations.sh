@@ -131,6 +131,20 @@
 #    a violation here, deliberately: default privilege changes apply only to
 #    objects created AFTER the statement runs, so it cannot retroactively
 #    remove EXECUTE that postgres already holds on an existing function.
+#
+# RULE 2: UNREVOKED REPLACE OF A HARDENED SECURITY DEFINER FUNCTION (OWM-T0599)
+# CREATE OR REPLACE FUNCTION resets a function's EXECUTE grant to PUBLIC by
+# Postgres default, even if it had previously been revoked down to
+# service_role. Rule 1 above only matches an explicit GRANT line, so a
+# migration that replaces one of the four functions named in
+# HARDENED_DEFINER_FUNCTIONS with no GRANT line anywhere passes rule 1 clean.
+# Rule 2 closes that: an added CREATE OR REPLACE FUNCTION of a hardened
+# function is refused unless a matching REVOKE EXECUTE for the same function
+# is also present in the same migration file, case and whitespace
+# insensitive. Scope is PR-time text scan only, same as rule 1: it does not
+# touch the live-database jobs in definer-grant-gate.yml, which stay as the
+# after-the-fact backstop for a grant that lands with no commit behind it at
+# all.
 
 set -uo pipefail
 
