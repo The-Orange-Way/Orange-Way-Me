@@ -62,9 +62,11 @@
 # Diffs <base-ref>...<head-ref> for files under supabase/migrations, and scans
 # every line added by the PR (not the whole file, so an untouched grant in a
 # migration that already existed is not re-flagged by an unrelated edit to the
-# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, or a
+# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, a
 # REVOKE ... FROM naming postgres on a function pg_cron calls (see CRON
-# CALLING ROLE PROTECTION below).
+# CALLING ROLE PROTECTION below), or an added CREATE OR REPLACE of a hardened
+# SECURITY DEFINER function with no matching REVOKE in the same file (see
+# RULE 2 below).
 #
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
