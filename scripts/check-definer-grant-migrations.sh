@@ -163,6 +163,12 @@ ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\t
 # CALLING ROLE PROTECTION above.
 PROTECTED_CRON_FUNCTIONS=$'expire_time_boxed_household_roles()\npurge_expired_old_household_key_wraps()'
 
+# RULE 2 target list: SECURITY DEFINER functions whose EXECUTE grant must
+# never be left at CREATE's PUBLIC default. Declared exactly once so a second
+# rule never gets a second, driftable copy of these four names (CTO condition
+# 3 on OWM-T0599: two copies of this list is a failure, not a style choice).
+HARDENED_DEFINER_FUNCTIONS=$'has_role\nadvance_household_rotation_job\nexpire_time_boxed_household_roles\npurge_expired_old_household_key_wraps'
+
 if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   echo "::error::CANNOT CHECK: base ref '${BASE_REF}' is not resolvable in this checkout. Was fetch-depth set to 0?" >&2
   exit 2
