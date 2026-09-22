@@ -187,6 +187,7 @@ fi
 VIOLATIONS=()
 ALLOWED_HITS=0
 CRON_REVOKE_HITS=0
+RULE2_VIOLATIONS=()
 
 # Words that begin a TYPE rather than a parameter name. Used to decide whether
 # the first token of an argument is a name to drop or part of the type itself,
