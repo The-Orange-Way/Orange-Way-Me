@@ -50,6 +50,13 @@
 #                                               -> must exit 0. The allowlist
 #      is per function signature, not per keyword, so the same privilege
 #      written a different way must still be allowed
+#  19) CREATE OR REPLACE FUNCTION of a hardened SECDEF function with no
+#      accompanying REVOKE                     -> must exit 1 (rule 2).
+#      Postgres resets EXECUTE to PUBLIC on replace, so this is a silent
+#      widening if nothing catches it
+#  20) the same replace, but the migration also revokes and re-grants
+#      properly, the pattern the repo's own history already uses
+#                                               -> must exit 0 (rule 2 PASS)
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
