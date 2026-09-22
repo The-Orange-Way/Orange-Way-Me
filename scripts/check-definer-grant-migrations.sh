@@ -71,11 +71,14 @@
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
 #           the changed lines grant EXECUTE to anon or PUBLIC outside the
-#           allowlist, and none revoke EXECUTE from postgres on a protected
-#           cron-called function
+#           allowlist, none revoke EXECUTE from postgres on a protected
+#           cron-called function, and no hardened SECURITY DEFINER function is
+#           replaced with no matching revoke
 #   exit 1  VIOLATION                 a changed migration line grants EXECUTE
-#           to anon or PUBLIC on a function not on the allowlist, or revokes
-#           EXECUTE from postgres on a protected cron-called function
+#           to anon or PUBLIC on a function not on the allowlist, revokes
+#           EXECUTE from postgres on a protected cron-called function, or adds
+#           a CREATE OR REPLACE of a hardened SECURITY DEFINER function with
+#           no matching REVOKE in the same migration file
 #
 # The allowlist below MUST be kept identical to the one in
 # check-definer-grants.sh. It is duplicated rather than sourced because this
