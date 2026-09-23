@@ -1,5 +1,5 @@
 /**
- * GoalDetailPage — single goal with progress chart, projection, amortization
+ * GoalDetailPage - single goal with progress chart, projection, amortization
  * (pay-down), and edit/pause/complete/delete actions.
  */
 import { useMemo, useState } from "react";
@@ -51,6 +51,7 @@ import {
   averageMonthlyContribution,
   balanceHistory,
   computeProgress,
+  normalizedBalance,
   projectCompletionDate,
 } from "@/lib/goals-math";
 import { GoalFormDialog } from "./GoalFormDialog";
@@ -117,10 +118,10 @@ export function GoalDetailPage({ id }: { id: string }) {
     );
   }
 
-  const prog = computeProgress(goal, accounts);
+  const prog = computeProgress(goal, accounts, prefs.primaryCurrency);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
-  const history = balanceHistory(goal, accounts, txns);
+  const history = balanceHistory(goal, accounts, txns, prefs.primaryCurrency);
 
   const linked = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
   const linkedTxns = txns
@@ -128,10 +129,14 @@ export function GoalDetailPage({ id }: { id: string }) {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 20);
 
-  // Pay down amortization preview
+  // Pay down amortization preview. Converted to primaryCurrency the same way
+  // computeCurrent's pay_down branch is (OWM-T0772) - this used to sum raw
+  // account.balance with no Bitcoin or FX normalization at all, so a debt
+  // held in a BTC-denominated account priced the amortization preview off a
+  // sats-magnitude number.
   const debt =
     goal.type === "pay_down"
-      ? linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0)
+      ? linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a, prefs.primaryCurrency)), 0)
       : 0;
   const apr = Number(goal.interest_rate ?? "0") || 0;
   const minPayment = Number(goal.minimum_payment ?? "0") || 0;

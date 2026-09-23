@@ -1,5 +1,5 @@
 /**
- * GoalCard — list-view tile for a single goal.
+ * GoalCard - list-view tile for a single goal.
  */
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -37,7 +37,7 @@ export function GoalCard({ goal, accounts, txns }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
-  const prog = computeProgress(goal, accounts);
+  const prog = computeProgress(goal, accounts, prefs.primaryCurrency);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
 
