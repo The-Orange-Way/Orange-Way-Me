@@ -94,26 +94,23 @@ describe("summariseGoals", () => {
   });
 
   /*
-   * DL-1589 IS STILL OPEN AND THIS TEST SAYS SO OUT LOUD.
+   * DL-1589, NOW FIXED (OWM-T0674 / OWM-T0210). Two goals linked to one
+   * account on the all_balance strategy no longer each claim the account's
+   * whole balance: the account is counted once, and the combined target
+   * keeps every sharing goal's own target so the percentage stays honest.
    *
-   * Two goals linked to one account each claim that whole balance on the
-   * all_balance strategy, so the account is counted once per goal. That is a
-   * product decision about whether goals may share an account at all, and is
-   * deliberately NOT fixed here.
-   *
-   * On the demo fixture this pins the improvement and the residue together:
-   * the header moves from 82,000 to 49,000 against a real balance of 41,000.
-   * The remaining 8,000 is DL-1589. If someone closes that ticket, this
-   * expectation SHOULD fail, and the right response is to update it, not to
-   * loosen it.
+   * On the demo fixture this is the full fix: the header reads 41,000 of
+   * 108,000, the real balance against the combined target, matching the
+   * product ruling's own example.
    */
-  it("still counts a shared account once per goal, which is DL-1589 and not fixed here", () => {
+  it("counts a shared account once across the goals that share it", () => {
     const house = goal({ id: "a", target_amount: "100000", linked_account_ids: ["savings"] });
     const trip = goal({ id: "b", target_amount: "8000", linked_account_ids: ["savings"] });
     const s = summariseGoals([house, trip], [account("savings", "41000")]);
 
-    expect(s.saved).toBe(49000);
+    expect(s.saved).toBe(41000);
     expect(s.target).toBe(108000);
     expect(s.counted).toBe(2);
+    expect(s.pct).toBeCloseTo(41000 / 108000);
   });
 });
