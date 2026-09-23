@@ -57,6 +57,23 @@ jobs:
             "$RUNNER_TEMP/push-base-self-test.log" \
             || { echo "::error::the push-base self test printed no result line, so it did not run to the end. A self test that cannot say how many cases ran has verified nothing."; exit 1; }
 
+      - name: Pre-push gate check4 (merge-identity) self test
+        # Check 4's identity scan re-flagged GitHub's own merge-commit
+        # committer identity (noreply@github.com) as a leak whenever a
+        # branch forward-merged dev, because those merge commits become
+        # newly reachable in the push range even though they were already
+        # public. This drives the real scripts/pre-push-gate.sh against a
+        # real forward-merge fixture and against a reconstructed pre-fix
+        # copy, so a regression here is caught the same way the push-base
+        # regression above is: a red run that proves the test can still see
+        # the bug, not just a green run that assumes it.
+        run: |
+          set -euo pipefail
+          bash scripts/test-pre-push-gate-check4.sh | tee "$RUNNER_TEMP/pre-push-gate-check4-self-test.log"
+          grep -qE '^[0-9]+ passed, 0 failed, [0-9]+ ran of [0-9]+ expected$' \
+            "$RUNNER_TEMP/pre-push-gate-check4-self-test.log" \
+            || { echo "::error::the pre-push-gate check4 self test printed no result line, so it did not run to the end. A self test that cannot say how many cases ran has verified nothing."; exit 1; }
+
       - name: Leak scan red run self test
         # Every category withholds matched text in CI, and a scanner that has
         # been silenced produces output identical to a clean tree. This drives
