@@ -16,10 +16,12 @@ name: promotion pin guard
 # catch that one regression.
 #
 # It does not run scheduled-promotion.yml. It reads it as text and asserts
-# the two properties the pin depends on:
+# the three properties the pin depends on:
 #   1. The promotion is opened with --head "${BRANCH}", never --head dev.
 #   2. The release ref (refs/heads/${BRANCH}) is created strictly before
 #      `gh pr create` runs, so the branch exists by the time it is used.
+#   3. BRANCH is never reassigned to a floating ref. A BRANCH="dev" alias
+#      passes assertions 1 and 2 while silently breaking the pin.
 
 on:
   pull_request:
@@ -96,3 +98,42 @@ jobs:
           fi
 
           echo "OK: refs/heads/\${BRANCH} is created at line ${REF_LINE}, before gh pr create at line ${PR_LINE}."
+
+      - name: Assert BRANCH is never aliased to a floating ref
+        run: |
+          set -euo pipefail
+          FILE=".github/workflows/scheduled-promotion.yml"
+
+          # Assertions 1 and 2 check the textual form of the promotion
+          # invocation. Neither catches a silent alias like
+          #   BRANCH="dev"
+          # that leaves --head "${BRANCH}" and refs/heads/${BRANCH}
+          # unchanged while reintroducing the unpinned-promotion regression
+          # (OWM-T0432, auditor challenge OW-C1007).
+          #
+          # Assertion: every non-comment line that assigns to the bare shell
+          # variable BRANCH must start with the release/prod- prefix. There
+          # must also be at least one such assignment, or the cut step is
+          # missing entirely.
+          #
+          # grep -n outputs LINE_NUM:LINE_CONTENT.
+          # grep -E '^[0-9]+:[[:space:]]*BRANCH=' keeps only lines where the
+          # content (after the line number) starts with optional whitespace
+          # then BRANCH=, i.e. bare variable assignments at the start of a
+          # statement. Variables named RELEASE_BRANCH= etc. do not match.
+          ASSIGNMENTS=$(grep -nF 'BRANCH=' "${FILE}" | grep -E '^[0-9]+:[[:space:]]*BRANCH=' || true)
+
+          if [ -z "${ASSIGNMENTS}" ]; then
+            echo "::error::${FILE} contains no BRANCH= assignment. The release branch cannot be cut without one."
+            exit 1
+          fi
+
+          ALIASED=$(printf '%s\n' "${ASSIGNMENTS}" | grep -vF 'BRANCH="release/prod-' || true)
+          if [ -n "${ALIASED}" ]; then
+            echo "::error::${FILE} assigns BRANCH to a value that does not start with \"release/prod-\". A floating ref (dev, main, HEAD) passes the --head \"\${BRANCH}\" check while silently reintroducing the unpinned-promotion regression this guard exists to prevent:"
+            printf '%s\n' "${ALIASED}"
+            exit 1
+          fi
+
+          COUNT=$(printf '%s\n' "${ASSIGNMENTS}" | wc -l | tr -d ' ')
+          echo "OK: ${COUNT} BRANCH assignment(s) found; all resolve to release/prod- names."
