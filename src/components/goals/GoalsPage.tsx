@@ -43,6 +43,28 @@ export function GoalsPage() {
 
   const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
 
+  /**
+   * For each active goal, the names of other active goals that share at least
+   * one linked account. Used to render the "Shared with" label on GoalCard
+   * so users understand why the header total may be lower than a naive sum.
+   */
+  const sharedGoalNames = useMemo(() => {
+    const result = new Map<string, string[]>();
+    const active = goals.filter((g) => !g.is_completed);
+    for (const g of active) {
+      if (g.linked_account_ids.length === 0) continue;
+      const shared = active
+        .filter(
+          (other) =>
+            other.id !== g.id &&
+            other.linked_account_ids.some((id) => g.linked_account_ids.includes(id)),
+        )
+        .map((other) => other.name);
+      if (shared.length > 0) result.set(g.id, shared);
+    }
+    return result;
+  }, [goals]);
+
   async function handleCreate(draft: GoalDraft) {
     await createGoal(draft);
   }
@@ -124,7 +146,7 @@ export function GoalsPage() {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {saveUp.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} sharedWithGoalNames={sharedGoalNames.get(g.id)} />
                 ))}
               </div>
             </section>
@@ -138,7 +160,7 @@ export function GoalsPage() {
               <PayoffPlanWidget goals={payDown} accounts={accounts} />
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {payDown.map((g) => (
-                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} />
+                  <GoalCard key={g.id} goal={g} accounts={accounts} txns={txns} sharedWithGoalNames={sharedGoalNames.get(g.id)} />
                 ))}
               </div>
             </section>
