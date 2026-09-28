@@ -1,5 +1,5 @@
 /**
- * GoalsProgressWidget — top 3 active goals + link to /goals.
+ * GoalsProgressWidget - top 3 active goals + link to /goals.
  */
 import { useMemo } from "react";
 import { Link } from "@tanstack/react-router";
@@ -50,9 +50,16 @@ export function GoalsProgressWidget() {
         ) : (
           <div className="space-y-3">
             {top.map((g) => {
-              const p = computeProgress(g, accounts);
-              const linkedAcct = accounts.find((a) => g.linked_account_ids.includes(a.id));
-              const goalCurrency = linkedAcct?.currency ?? prefs.primaryCurrency;
+              // OWM-T0772: this used to call computeProgress(g, accounts) with
+              // no currency, and format the raw sats-normalized result labeled
+              // with a linked account's own currency (e.g. "BTC") rather than
+              // the user's primaryCurrency. A quarter-Bitcoin-linked goal read
+              // as a sats-magnitude number captioned "BTC" instead of a dollar
+              // figure. target_amount carries no currency of its own and is
+              // implicitly typed in primaryCurrency (same assumption every
+              // other goals screen makes), so this now converts and formats
+              // in primaryCurrency like GoalCard, GoalDetailPage and GoalsPage.
+              const p = computeProgress(g, accounts, prefs.primaryCurrency);
               return (
                 <Link
                   key={g.id}
@@ -87,8 +94,8 @@ export function GoalsProgressWidget() {
                     <>
                       <Progress value={p.pct * 100} className="mt-2 h-1.5" />
                       <div className="mt-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
-                        <span>{fmt.formatCurrency(p.current, goalCurrency)}</span>
-                        <span>of {fmt.formatCurrency(p.target, goalCurrency)}</span>
+                        <span>{fmt.formatCurrency(p.current, prefs.primaryCurrency)}</span>
+                        <span>of {fmt.formatCurrency(p.target, prefs.primaryCurrency)}</span>
                       </div>
                     </>
                   )}
