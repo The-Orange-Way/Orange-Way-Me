@@ -92,7 +92,9 @@ describe("netWorthSeries: a stamped account's own transaction converts in the sa
     // format_version 0/absent: the writer never recorded the unit, so the
     // magnitude heuristic still applies and this must not change.
     const accounts = [account({ id: "a1", currency: "BTC", balance: "50000", type: "investment" })];
-    const txns = [txn({ id: "t1", account_id: "a1", amount: "50000", date: "2026-09-10", currency: "BTC" })];
+    const txns = [
+      txn({ id: "t1", account_id: "a1", amount: "50000", date: "2026-09-10", currency: "BTC" }),
+    ];
     const series = netWorthSeries(accounts, txns, "USD", 1);
     // 50000 sats balance, 50000 sats transaction: both read as sats either way,
     // so the series is unaffected by this fix on an unstamped account.
@@ -128,7 +130,9 @@ describe("cashFlowByMonth: a stamped account's transaction income is not 1e8 too
     ];
     const today = new Date();
     const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-15`;
-    const txns = [txn({ id: "t1", account_id: "a1", amount: "1", date: thisMonth, currency: "BTC" })];
+    const txns = [
+      txn({ id: "t1", account_id: "a1", amount: "1", date: thisMonth, currency: "BTC" }),
+    ];
     const months = cashFlowByMonth(accounts, txns, "USD", 1);
     expect(months[months.length - 1].income).toBeCloseTo(65_000, 0);
   });
