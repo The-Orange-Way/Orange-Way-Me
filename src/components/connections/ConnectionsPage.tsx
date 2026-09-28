@@ -1580,14 +1580,14 @@ export function ConnectionsPage() {
         if (!deletedConnectionIdsRef.current.has(conn.id)) {
           console.error("[Connections] delete 404 on unrecognised id", err);
           setConnections(snapshot);
-          toast.error("Couldn't disconnect. Give it a moment and try again.");
+          toast.error(humanizeError(err, "Couldn't disconnect. Give it a moment and try again."));
           return;
         }
         // Known-deleted id: the 404 was expected here, fall through to cleanup and success toast.
       } else {
         console.error("[Connections] delete failed", err);
         setConnections(snapshot);
-        toast.error("Couldn't disconnect. Give it a moment and try again.");
+        toast.error(humanizeError(err, "Couldn't disconnect. Give it a moment and try again."));
         return;
       }
     }
