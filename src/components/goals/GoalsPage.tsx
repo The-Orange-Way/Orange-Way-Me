@@ -1,5 +1,5 @@
 /**
- * GoalsPage — list view, grouped by Save Up / Pay Down / Completed,
+ * GoalsPage - list view, grouped by Save Up / Pay Down / Completed,
  * with header summary and create button.
  */
 import { useState, useMemo } from "react";
@@ -41,7 +41,10 @@ export function GoalsPage() {
   const payDown = goals.filter((g) => g.type === "pay_down" && !g.is_completed);
   const completed = goals.filter((g) => g.is_completed);
 
-  const totals = useMemo(() => summariseGoals(goals, accounts), [goals, accounts]);
+  const totals = useMemo(
+    () => summariseGoals(goals, accounts, prefs.primaryCurrency),
+    [goals, accounts, prefs.primaryCurrency],
+  );
 
   async function handleCreate(draft: GoalDraft) {
     await createGoal(draft);
