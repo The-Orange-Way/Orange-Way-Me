@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { orderPayDown } from "@/lib/goals-math";
+import { normalizedBalance, orderPayDown } from "@/lib/goals-math";
 import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import { Link } from "@tanstack/react-router";
@@ -44,7 +44,10 @@ export function PayoffPlanWidget({ goals, accounts }: Props) {
         <ol className="space-y-2">
           {ordered.map((g, i) => {
             const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
-            const debt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+            const debt = linked.reduce(
+              (sum, a) => sum + Math.abs(normalizedBalance(a, prefs.primaryCurrency)),
+              0,
+            );
             const apr = Number(g.interest_rate ?? "0") || 0;
             const min = Number(g.minimum_payment ?? "0") || 0;
             return (
