@@ -407,6 +407,49 @@ jobs:
           sentry-cli releases set-commits --auto "$RELEASE" || true
           sentry-cli releases finalize "$RELEASE"
 
+      - name: Verify /connections entry point in built bundle (OWM-T0073)
+        # Runs pre-deploy so a missing entry point blocks the Cloudflare upload
+        # rather than reporting after the fact.
+        #
+        # Why dist/assets/*.js and not the deployed URL: TanStack Router
+        # autoCodeSplitting emits /connections as a lazy chunk not referenced
+        # by name in the page HTML (it is loaded on navigation, not at entry
+        # time). The previous post-deploy version extracted only HTML-named JS
+        # files and missed the connections chunk on every run. dist/assets/*.js
+        # covers every chunk the build emitted, lazy route chunks included.
+        # Negative control proves the grep can fail. See OW-T0398.
+        run: |
+          set -euo pipefail
+          if [ -z "$(find dist/assets -maxdepth 1 -name '*.js' -print -quit 2>/dev/null)" ]; then
+            echo "::error::dist/assets/ contains no JS files -- build may have failed silently."
+            exit 1
+          fi
+          js_count=$(find dist/assets -maxdepth 1 -name '*.js' | wc -l | tr -d ' ')
+          echo "Checking ${js_count} JS chunk(s) in dist/assets/"
+          if grep -rlqF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' dist/assets/*.js 2>/dev/null; then
+            echo "::error::Negative control matched -- this check is broken and cannot be trusted."
+            exit 1
+          fi
+          FAILED=0
+          chunk=$(grep -rlF 'Connect a Bitcoin source' dist/assets/*.js 2>/dev/null || true)
+          if [ -z "$chunk" ]; then
+            echo "::error::Built bundle missing \"Connect a Bitcoin source\" button text (checked dist/assets/*.js)."
+            FAILED=1
+          else
+            echo "\"Connect a Bitcoin source\" found in $chunk"
+          fi
+          chunk=$(grep -rlF 'connections-add' dist/assets/*.js 2>/dev/null || true)
+          if [ -z "$chunk" ]; then
+            echo "::error::Built bundle missing connections-add entry point marker (checked dist/assets/*.js)."
+            FAILED=1
+          else
+            echo "connections-add found in $chunk"
+          fi
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Connections entry point verified in the built bundle (dist/assets/)"
+
       - name: Pick Pages project for this branch
         id: target
         run: |
@@ -441,62 +484,6 @@ jobs:
           fi
           curl -s "${{ steps.target.outputs.verify_url }}${ASSET}" >/dev/null
           echo "checkmark ${{ steps.target.outputs.verify_url }} JS asset fetched OK"
-
-      - name: Verify /connections entry point shipped (OWM-T0073)
-        # Why this cannot be a raw-HTML text check: ConnectionsPage only
-        # renders once the vault is unlocked (see the isUnlocked guard in
-        # src/components/connections/ConnectionsPage.tsx), this repo does
-        # not server-render or prerender app routes (only the public
-        # marketing routes, via scripts/prerender-plugin.ts), and the
-        # button carrying the entry point sits behind that guard. An
-        # unauthenticated GET /connections returns the same SPA shell every
-        # route returns, so grepping that response proves nothing either
-        # way.
-        #
-        # What is checkable without a browser: the compiled JS the browser
-        # would run. Reuses the same routes chunk the step above already
-        # located, and looks for the button's literal text and its
-        # data-testid. A negative control (a string that cannot exist)
-        # proves the grep can actually fail, so a false green cannot hide
-        # behind a check that matches everything.
-        # OW-T0388 2026-09-17: broadened from one guessed /assets/routes-*.js
-        # filename to every JS asset the page references, because the build
-        # no longer guarantees that one name (see vite.config.ts manualChunks
-        # comment). Same negative control, same two required markers, just
-        # searched across all referenced assets instead of a single guess.
-        run: |
-          set -euo pipefail
-          ASSETS=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/[^"]*\.js' | sort -u)
-          if [ -z "$ASSETS" ]; then
-            echo "::error::Could not find any JS asset reference on ${{ steps.target.outputs.verify_url }} -- cannot verify the connect entry point shipped."
-            exit 1
-          fi
-          BODY=""
-          for asset in $ASSETS; do
-            BODY="$BODY
-          $(curl -s "${{ steps.target.outputs.verify_url }}${asset}")"
-          done
-          if [ -z "$BODY" ]; then
-            echo "::error::JS assets at ${{ steps.target.outputs.verify_url }} fetched empty."
-            exit 1
-          fi
-          if grep -qF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' <<< "$BODY"; then
-            echo "::error::Negative control matched -- this check is broken and cannot be trusted."
-            exit 1
-          fi
-          FAILED=0
-          if ! grep -qF 'Connect a Bitcoin source' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the \"Connect a Bitcoin source\" button text (checked every JS asset referenced by the page)."
-            FAILED=1
-          fi
-          if ! grep -qF 'connections-add' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the connections-add entry point marker (checked every JS asset referenced by the page)."
-            FAILED=1
-          fi
-          if [ "$FAILED" -ne 0 ]; then
-            exit 1
-          fi
-          echo "Connections entry point present in the deployed bundle (${{ steps.target.outputs.verify_url }})"
 
       # E2E smoke against the freshly-deployed environment. Chromium
       # only on every push so deploys stay fast; the Firefox / WebKit
