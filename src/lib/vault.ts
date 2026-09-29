@@ -214,6 +214,142 @@ export async function decryptText(ciphertextB64: string, key: CryptoKey): Promis
   return new TextDecoder().decode(pt);
 }
 
+// ---------- AEAD binding: additional authenticated data (OWM-T0206 phase 1) ----------
+//
+// WHY THIS EXISTS. AES-GCM proves a ciphertext has not been altered. It does
+// not prove the ciphertext is still where we put it. Without additional data
+// bound in, any value sealed under a key opens under that same key no matter
+// which row or which column it is sitting in, so a database-level copy of
+// enc_or_mek_ciphertext over enc_hmac_key produces a row that still reads
+// healthy and opens cleanly. Binding the location into the AAD makes that
+// transplant fail to open, which is the whole of OWM-T0206.
+//
+// THE FORMULA IS A DECISION, NOT A FREE CHOICE. Settled 2026-09-04 and
+// amended the same day under review. Do not change the shape here without
+// reopening that decision: a value already sealed under one shape does not
+// open under another, so an edit to this string is a data migration.
+//
+//     <domain>/v1|<schema>.<table>|<column>|<row id>
+//
+// Every field is load-bearing:
+//   domain      owm or owb. One shape across both products.
+//   /v1         a version tag, so a future shape change fails loudly instead
+//               of opening something under the wrong rules.
+//   schema.table  NOT optional, and this is the part the amendment added.
+//               Measured on DEV: enc_name exists in 5 tables, enc_currency in
+//               2, enc_type in 2. Under phase 2's client-minted ids the same
+//               uuid in two tables is trivial to arrange, so id-plus-column
+//               alone would still let a ciphertext move between tables.
+//   column      required by the 2026-08-28 security review. Without it every
+//               sealed field in one row is interchangeable.
+//   row id      for vault_metadata this is user_id, which IS the primary key,
+//               which is why these five wraps can land in phase 1 with no
+//               writer changes. Row-field columns bind the row uuid and are
+//               phase 2 (OWM-T0641).
+//
+// household_id was considered and deliberately excluded: it buys nothing once
+// the row id is bound, and would turn any future move of a row between
+// households into a re-seal.
+//
+// CONSEQUENCE, write it on the migration checklist: renaming an encrypted
+// table or column, or moving it to another schema, is now a DATA MIGRATION.
+// Every ciphertext in that column stops opening.
+
+export const VAULT_AAD_DOMAIN = "owm";
+
+/**
+ * Marks a ciphertext as carrying bound additional data.
+ *
+ * The prefix is what lets old and new rows coexist without a migration. A
+ * value written before this change has no prefix, so decryptTextBound opens
+ * it on the legacy path with no AAD; a value written after it does, so the
+ * AAD is required and a transplant fails. That is deliberate and it is the
+ * only reason existing vaults keep unlocking.
+ */
+export const BOUND_ENVELOPE_PREFIX = "v1.";
+
+/**
+ * Build the additional authenticated data for one sealed column.
+ *
+ * The pipe is the separator because it cannot appear in an unquoted Postgres
+ * identifier or in a uuid, so no combination of table, column and id can be
+ * made to collide with a different one by choosing clever names.
+ */
+export function buildVaultAad(params: {
+  table: string;
+  column: string;
+  rowId: string;
+  schema?: string;
+  domain?: string;
+}): Uint8Array {
+  const schema = params.schema ?? "public";
+  const domain = params.domain ?? VAULT_AAD_DOMAIN;
+  if (!params.table || !params.column || !params.rowId) {
+    // Refusing beats sealing under an empty field. An AAD of
+    // "owm/v1|public.vault_metadata||<id>" would bind nothing about the
+    // column while looking exactly like a bound value at rest.
+    throw new Error("buildVaultAad: table, column and rowId are all required");
+  }
+  const aad = `${domain}/v1|${schema}.${params.table}|${params.column}|${params.rowId}`;
+  return new TextEncoder().encode(aad);
+}
+
+/**
+ * Seal with additional data bound in, and stamp the envelope.
+ *
+ * The aad parameter is REQUIRED, with no default. A default would silently
+ * produce an unbound ciphertext at the one call site the author forgot, and
+ * that value would look identical to a correctly bound one until someone
+ * transplanted it.
+ */
+export async function encryptTextBound(
+  plaintext: string,
+  key: CryptoKey,
+  aad: Uint8Array,
+): Promise<string> {
+  const iv = randomBytes(12);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as BufferSource, additionalData: aad as BufferSource },
+    key,
+    new TextEncoder().encode(plaintext),
+  );
+  const combined = new Uint8Array(12 + ct.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(ct), 12);
+  return BOUND_ENVELOPE_PREFIX + b64encode(combined);
+}
+
+/**
+ * Open a value that may or may not be bound, and decide which by the envelope
+ * rather than by what the caller expects.
+ *
+ * Reading the marker off the stored value is the point. If we instead decided
+ * from a flag or a version column, an attacker who can write the database
+ * could clear that flag and downgrade a bound ciphertext to an unbound read,
+ * which would hand back exactly the transplant this change exists to stop.
+ * The marker travels with the ciphertext, so stripping it corrupts it.
+ */
+export async function decryptTextBound(
+  ciphertextB64: string,
+  key: CryptoKey,
+  aad: Uint8Array,
+): Promise<string> {
+  if (!ciphertextB64.startsWith(BOUND_ENVELOPE_PREFIX)) {
+    // Written before this change. Opens exactly as it always did.
+    return decryptText(ciphertextB64, key);
+  }
+  const combined = b64decode(ciphertextB64.slice(BOUND_ENVELOPE_PREFIX.length));
+  if (combined.length < 12) throw new Error("Invalid ciphertext");
+  const iv = combined.slice(0, 12);
+  const data = combined.slice(12);
+  const pt = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv as BufferSource, additionalData: aad as BufferSource },
+    key,
+    data,
+  );
+  return new TextDecoder().decode(pt);
+}
+
 export async function encryptBlob(
   plaintext: ArrayBuffer | Uint8Array,
   key: CryptoKey,
@@ -320,17 +456,19 @@ export async function generateRecoveryCode(): Promise<string> {
 export async function wrapMekWithRecovery(
   mekRawBytes: ArrayBuffer,
   recoveryCode: string,
+  aad: Uint8Array,
 ): Promise<string> {
   const kek = await deriveRecoveryKek(recoveryCode);
-  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+  return encryptTextBound(b64encode(new Uint8Array(mekRawBytes)), kek, aad);
 }
 
 export async function unwrapMekWithRecovery(
   wrappedB64: string,
   recoveryCode: string,
+  aad: Uint8Array,
 ): Promise<Uint8Array> {
   const kek = await deriveRecoveryKek(recoveryCode);
-  const b64 = await decryptText(wrappedB64, kek);
+  const b64 = await decryptTextBound(wrappedB64, kek, aad);
   return b64decode(b64);
 }
 
@@ -386,20 +524,22 @@ export async function wrapMekWithPassword(
   mekRawBytes: ArrayBuffer,
   password: string,
   saltB64: string,
+  aad: Uint8Array,
   iterations: number = PBKDF2_ITERATIONS,
 ): Promise<string> {
   const kek = await deriveMek(password, saltB64, iterations);
-  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+  return encryptTextBound(b64encode(new Uint8Array(mekRawBytes)), kek, aad);
 }
 
 export async function unwrapMekWithPassword(
   ciphertextB64: string,
   password: string,
   saltB64: string,
+  aad: Uint8Array,
   iterations: number = PBKDF2_ITERATIONS,
 ): Promise<Uint8Array> {
   const kek = await deriveMek(password, saltB64, iterations);
-  const b64 = await decryptText(ciphertextB64, kek);
+  const b64 = await decryptTextBound(ciphertextB64, kek, aad);
   return b64decode(b64);
 }
 
@@ -410,9 +550,10 @@ export async function unwrapMekWithPassword(
  */
 export async function createEncryptedHmacKey(
   mek: CryptoKey,
+  aad: Uint8Array,
 ): Promise<{ raw: Uint8Array; ciphertext: string }> {
   const raw = crypto.getRandomValues(new Uint8Array(32));
-  const ciphertext = await encryptText(b64encode(raw), mek);
+  const ciphertext = await encryptTextBound(b64encode(raw), mek, aad);
   return { raw, ciphertext };
 }
 
@@ -439,11 +580,12 @@ export async function createEncryptedHmacKey(
 export async function wrapOrMekWithVaultMek(
   orMekBytes: Uint8Array,
   mek: CryptoKey,
+  aad: Uint8Array,
 ): Promise<string> {
   if (orMekBytes.length !== 32) {
     throw new Error("Orange Rails MEK must be 32 bytes");
   }
-  return encryptText(b64encode(orMekBytes), mek);
+  return encryptTextBound(b64encode(orMekBytes), mek, aad);
 }
 
 /**
@@ -463,8 +605,9 @@ export async function wrapOrMekWithVaultMek(
 export async function unwrapOrMekWithVaultMek(
   ciphertextB64: string,
   mek: CryptoKey,
+  aad: Uint8Array,
 ): Promise<Uint8Array> {
-  const b64 = await decryptText(ciphertextB64, mek);
+  const b64 = await decryptTextBound(ciphertextB64, mek, aad);
   const raw = b64decode(b64);
   if (raw.length !== 32) {
     throw new Error("Sealed Orange Rails MEK is not 32 bytes; refusing to use it");
@@ -472,8 +615,12 @@ export async function unwrapOrMekWithVaultMek(
   return raw;
 }
 
-export async function decryptHmacKey(ciphertextB64: string, mek: CryptoKey): Promise<CryptoKey> {
-  const b64 = await decryptText(ciphertextB64, mek);
+export async function decryptHmacKey(
+  ciphertextB64: string,
+  mek: CryptoKey,
+  aad: Uint8Array,
+): Promise<CryptoKey> {
+  const b64 = await decryptTextBound(ciphertextB64, mek, aad);
   const raw = b64decode(b64);
   return crypto.subtle.importKey(
     "raw",
@@ -541,18 +688,20 @@ export async function wrapMekWithPasswordArgon2id(
   mekRawBytes: ArrayBuffer,
   password: string,
   saltB64: string,
+  aad: Uint8Array,
 ): Promise<string> {
   const kek = await deriveMekArgon2id(password, saltB64);
-  return encryptText(b64encode(new Uint8Array(mekRawBytes)), kek);
+  return encryptTextBound(b64encode(new Uint8Array(mekRawBytes)), kek, aad);
 }
 
 export async function unwrapMekWithPasswordArgon2id(
   ciphertextB64: string,
   password: string,
   saltB64: string,
+  aad: Uint8Array,
 ): Promise<Uint8Array> {
   const kek = await deriveMekArgon2id(password, saltB64);
-  const b64 = await decryptText(ciphertextB64, kek);
+  const b64 = await decryptTextBound(ciphertextB64, kek, aad);
   return b64decode(b64);
 }
 
@@ -800,8 +949,18 @@ export const CURRENT_VAULT_KEY_VERSION: VaultKeyVersion = 1;
 export interface KeyDerivationStrategy {
   deriveMek: (password: string, saltB64: string) => Promise<CryptoKey>;
   deriveMekRawBytes: (password: string, saltB64: string) => Promise<ArrayBuffer>;
-  wrapMekWithPassword: (mek: ArrayBuffer, password: string, saltB64: string) => Promise<string>;
-  unwrapMekWithPassword: (ct: string, password: string, saltB64: string) => Promise<Uint8Array>;
+  wrapMekWithPassword: (
+    mek: ArrayBuffer,
+    password: string,
+    saltB64: string,
+    aad: Uint8Array,
+  ) => Promise<string>;
+  unwrapMekWithPassword: (
+    ct: string,
+    password: string,
+    saltB64: string,
+    aad: Uint8Array,
+  ) => Promise<Uint8Array>;
 }
 
 /**

@@ -5,9 +5,11 @@
  * with no address and no usable id, even though both are already sitting
  * decrypted in the browser as part of the sealed NormalizedTransaction
  * payload. These tests pin the fix: a direction+address description, the
- * full address and real txid landing in enc_memo, and every existing
- * fallback (description, counterparty, type, blank) staying exactly as it
- * was for rows that carry none of the new fields.
+ * txid fallback when the best-effort address is empty, the full address
+ * and real txid landing in enc_memo, the re-sync repair of the exact
+ * legacy placeholder, and every existing fallback (description,
+ * counterparty, type, blank) staying exactly as it was for rows that
+ * carry none of the new fields.
  */
 
 import { describe, it, expect } from "vitest";
@@ -166,7 +168,36 @@ describe("orImportBridge, Bitcoin txid/address (OWM-T0211)", () => {
     expect(captured.rows[0].enc_memo).toBeNull();
   });
 
-  it("writes only the txid line when address is absent but txid is present", async () => {
+  it("names an address-less inbound row by its real txid", async () => {
+    const { client, captured } = makeFakeSupabase();
+    const txid = "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899";
+    await importOrTransactions(
+      "conn-1",
+      [baseTx({ txid })],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { ...baseDeps, supabase: client as any },
+    );
+    expect(captured.rows[0].enc_description).toBe("enc(Received tx aaaabbbb...77888899)");
+    expect(captured.rows[0].enc_memo).toBe(`enc(Txid: ${txid})`);
+  });
+
+  it("names an address-less outbound row by its real txid", async () => {
+    const { client, captured } = makeFakeSupabase();
+    await importOrTransactions(
+      "conn-1",
+      [
+        baseTx({
+          direction: "out",
+          txid: "111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000",
+        }),
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { ...baseDeps, supabase: client as any },
+    );
+    expect(captured.rows[0].enc_description).toBe("enc(Sent tx 11112222...ffff0000)");
+  });
+
+  it("writes only the txid line when address is absent but a short txid is present", async () => {
     const { client, captured } = makeFakeSupabase();
     await importOrTransactions(
       "conn-1",
@@ -174,6 +205,7 @@ describe("orImportBridge, Bitcoin txid/address (OWM-T0211)", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       { ...baseDeps, supabase: client as any },
     );
+    expect(captured.rows[0].enc_description).toBe("enc(Received tx deadbeef00)");
     expect(captured.rows[0].enc_memo).toBe("enc(Txid: deadbeef00)");
   });
 
@@ -198,5 +230,258 @@ describe("orImportBridge, Bitcoin txid/address (OWM-T0211)", () => {
         expect(value).not.toContain("aaaabbbbccccddddeeeeffff0000111122223333");
       }
     }
+  });
+
+  it("repairs a conflicting legacy placeholder without clobbering customer edits", async () => {
+    const captured = {
+      patches: [] as Array<{ id: string; patch: Record<string, unknown> }>,
+      upsertOptions: null as Record<string, unknown> | null,
+      lookups: 0,
+    };
+    const address = "bc1q00xyzexampleaddress0000000w9k2";
+    const txid = "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899";
+    const existingRows = [
+      {
+        id: "ledger-legacy",
+        external_id: "blind-index-1",
+        enc_description: "enc(Imported transaction)",
+        enc_memo: "enc(Customer note)",
+      },
+      {
+        id: "ledger-edited",
+        external_id: "blind-index-2",
+        enc_description: "enc(My renamed transaction)",
+        enc_memo: null,
+      },
+    ];
+    const client = {
+      from(table: string) {
+        if (table === "accounts") {
+          return {
+            select(_cols: string) {
+              return {
+                in(_col: string, _ids: string[]) {
+                  return Promise.resolve({ data: [], error: null });
+                },
+              };
+            },
+          };
+        }
+        return {
+          upsert(_rows: Record<string, unknown>[], options: Record<string, unknown>) {
+            captured.upsertOptions = options;
+            return {
+              select(_cols: string) {
+                // Conflict path: unique index swallowed both rows.
+                return Promise.resolve({ data: [], error: null });
+              },
+            };
+          },
+          select() {
+            const query = {
+              eq() {
+                return query;
+              },
+              in() {
+                captured.lookups += 1;
+                return Promise.resolve({ data: existingRows, error: null });
+              },
+            };
+            return query;
+          },
+          update(patch: Record<string, unknown>) {
+            return {
+              eq(_column: string, id: string) {
+                captured.patches.push({ id, patch });
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const unwrap = async (value: string) => value.replace(/^enc\(/, "").replace(/\)$/, "");
+    const result = await importOrTransactions(
+      "conn-1",
+      [
+        baseTx({ id: "blind-index-1", address, txid }),
+        baseTx({ id: "blind-index-2", address, txid }),
+      ],
+      {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        supabase: client as any,
+        ...baseDeps,
+        decryptText: unwrap,
+      },
+    );
+
+    expect(captured.upsertOptions).toMatchObject({ ignoreDuplicates: true });
+    expect(captured.lookups).toBe(1);
+    expect(captured.patches).toEqual([
+      {
+        id: "ledger-legacy",
+        patch: {
+          enc_description: "enc(Received to bc1q00...w9k2)",
+          enc_memo: `enc(Customer note\nAddress: ${address}\nTxid: ${txid})`,
+        },
+      },
+      {
+        id: "ledger-edited",
+        patch: {
+          enc_memo: `enc(Address: ${address}\nTxid: ${txid})`,
+        },
+      },
+    ]);
+    expect(result.imported).toBe(0);
+    expect(result.errored).toBe(0);
+    for (const { patch } of captured.patches) {
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === "enc_memo" || key === "enc_description") continue;
+        if (typeof value === "string") {
+          expect(value).not.toContain(address);
+          expect(value).not.toContain(txid);
+        }
+      }
+    }
+  });
+
+  it("leaves already-imported rows alone when the vault decryptor is not supplied", async () => {
+    const captured = { lookups: 0, patches: 0 };
+    const client = {
+      from(table: string) {
+        if (table === "accounts") {
+          return {
+            select(_cols: string) {
+              return {
+                in(_col: string, _ids: string[]) {
+                  return Promise.resolve({ data: [], error: null });
+                },
+              };
+            },
+          };
+        }
+        return {
+          upsert(_rows: Record<string, unknown>[]) {
+            return {
+              select(_cols: string) {
+                return Promise.resolve({ data: [], error: null });
+              },
+            };
+          },
+          select() {
+            captured.lookups += 1;
+            return {
+              eq() {
+                return this;
+              },
+              in() {
+                return Promise.resolve({ data: [], error: null });
+              },
+            };
+          },
+          update() {
+            captured.patches += 1;
+            return {
+              eq() {
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    const result = await importOrTransactions(
+      "conn-1",
+      [baseTx({ address: "bc1q00xyzexampleaddress0000000w9k2" })],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { ...baseDeps, supabase: client as any },
+    );
+
+    expect(captured.lookups).toBe(0);
+    expect(captured.patches).toBe(0);
+    expect(result.imported).toBe(0);
+    expect(result.errored).toBe(0);
+  });
+
+  it("re-stamps household signature fields on a legacy repair write", async () => {
+    const captured = { patches: [] as Array<{ id: string; patch: Record<string, unknown> }> };
+    const client = {
+      from(table: string) {
+        if (table === "accounts") {
+          return {
+            select(_cols: string) {
+              return {
+                in(_col: string, _ids: string[]) {
+                  return Promise.resolve({ data: [], error: null });
+                },
+              };
+            },
+          };
+        }
+        return {
+          upsert(_rows: Record<string, unknown>[]) {
+            return {
+              select(_cols: string) {
+                return Promise.resolve({ data: [], error: null });
+              },
+            };
+          },
+          select() {
+            const query = {
+              eq() {
+                return query;
+              },
+              in() {
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: "ledger-legacy",
+                      external_id: "blind-index-1",
+                      enc_description: "enc(Imported transaction)",
+                      enc_memo: null,
+                    },
+                  ],
+                  error: null,
+                });
+              },
+            };
+            return query;
+          },
+          update(patch: Record<string, unknown>) {
+            return {
+              eq(_column: string, id: string) {
+                captured.patches.push({ id, patch });
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+
+    await importOrTransactions(
+      "conn-1",
+      [baseTx({ address: "bc1q00xyzexampleaddress0000000w9k2" })],
+      {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        supabase: client as any,
+        ...baseDeps,
+        decryptText: async (value) => value.replace(/^enc\(/, "").replace(/\)$/, ""),
+        buildSignatureFields: () => ({
+          household_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          signature_b64: "repair-sig",
+          signature_key_version: 1,
+        }),
+      },
+    );
+
+    expect(captured.patches).toHaveLength(1);
+    expect(captured.patches[0].patch).toMatchObject({
+      household_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      signature_b64: "repair-sig",
+      signature_key_version: 1,
+    });
   });
 });

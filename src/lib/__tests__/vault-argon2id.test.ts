@@ -7,7 +7,15 @@ import {
   encryptText,
   decryptText,
   randomBytesB64,
+  buildVaultAad,
 } from "@/lib/vault";
+
+/** These tests are about the argon2id KDF, not about binding, so one AAD serves them all. */
+const AAD = buildVaultAad({
+  table: "vault_metadata",
+  column: "enc_mek_ciphertext",
+  rowId: "00000000-0000-4000-8000-000000000001",
+});
 
 const toHex = (bytes: Uint8Array | ArrayBuffer): string => {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -47,8 +55,13 @@ describe("vault argon2id (v1)", () => {
     const salt = randomBytesB64(16);
     const password = "correct-horse-battery-staple";
     const mek = crypto.getRandomValues(new Uint8Array(32));
-    const wrapped = await wrapMekWithPasswordArgon2id(mek.buffer as ArrayBuffer, password, salt);
-    const recovered = await unwrapMekWithPasswordArgon2id(wrapped, password, salt);
+    const wrapped = await wrapMekWithPasswordArgon2id(
+      mek.buffer as ArrayBuffer,
+      password,
+      salt,
+      AAD,
+    );
+    const recovered = await unwrapMekWithPasswordArgon2id(wrapped, password, salt, AAD);
     expect(toHex(recovered)).toBe(toHex(mek));
   });
 
@@ -59,9 +72,10 @@ describe("vault argon2id (v1)", () => {
       mek.buffer as ArrayBuffer,
       "correct-horse-battery-staple",
       salt,
+      AAD,
     );
     await expect(
-      unwrapMekWithPasswordArgon2id(wrapped, "wrong-password-14c", salt),
+      unwrapMekWithPasswordArgon2id(wrapped, "wrong-password-14c", salt, AAD),
     ).rejects.toThrow();
   });
 });

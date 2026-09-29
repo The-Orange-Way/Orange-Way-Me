@@ -29,7 +29,12 @@ permissions:
 
 jobs:
   auditor-approval-gate:
-    name: Auditor approval gate
+    # Deliberately NOT named "Auditor approval gate": that name is reserved
+    # for the check-run this job creates explicitly via the Checks API below.
+    # Giving the job itself that name made GitHub's own automatic job-status
+    # check-run collide with it, which is how a stale pre-review FAIL
+    # survived next to later passing runs (OWM-T0766).
+    name: Evaluate Auditor approval (internal job status, not the gate check)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -79,6 +84,9 @@ jobs:
               },
             });
 
-            if (!approved) {
-              core.setFailed(reason);
-            }
+            // Deliberately no core.setFailed here. The explicit check-run
+            // created above is the single source of the verdict; failing
+            // this job too would fail ITS OWN automatic check-run, which is
+            // exactly the stale-red-check bug this fix removes (OWM-T0766).
+            // core.info still puts the reason in the job log for humans.
+            core.info(`Auditor approval gate: ${approved ? 'PASS' : 'FAIL'} - ${reason}`);

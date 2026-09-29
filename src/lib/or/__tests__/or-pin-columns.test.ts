@@ -45,12 +45,25 @@ import {
   importMekFromRaw,
   randomBytesB64,
   unwrapOrMekWithVaultMek,
+  buildVaultAad,
 } from "@/lib/vault";
 
 import { CURRENT_OR_KEY_EPOCH } from "../or-key-material";
 import { computeOrPinColumns, type OrPinSourceRow } from "../or-pin-columns";
 
 const USER_ID = "11111111-2222-3333-4444-555555555555";
+
+/**
+ * What the helper seals under. Reading it back means naming the same row and
+ * column the helper bound it to, which is the property worth asserting here:
+ * a pin that opened under any other AAD would mean the helper had bound it
+ * somewhere else.
+ */
+const OR_MEK_AAD = buildVaultAad({
+  table: "vault_metadata",
+  column: "enc_or_mek_ciphertext",
+  rowId: USER_ID,
+});
 const PASSWORD = "old-password-correct-horse-14c";
 
 const toHex = (bytes: Uint8Array): string =>
@@ -156,6 +169,7 @@ describe("computeOrPinColumns", () => {
     const sealedKey = await unwrapOrMekWithVaultMek(
       fixture.columns?.enc_or_mek_ciphertext ?? "",
       vaultMek,
+      OR_MEK_AAD,
     );
 
     expect(toHex(sealedKey)).toBe(toHex(fixture.kAgainstOld));
@@ -238,6 +252,7 @@ describe("computeOrPinColumns", () => {
     const sealedKey = await unwrapOrMekWithVaultMek(
       fixture.rotatedWhileUnpinned?.enc_or_mek_ciphertext ?? "",
       vaultMek,
+      OR_MEK_AAD,
     );
 
     // The bytes are the ones the current salt produces, and they are NOT the

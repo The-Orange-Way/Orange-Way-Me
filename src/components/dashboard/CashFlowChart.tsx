@@ -79,6 +79,7 @@ export function CashFlowChart() {
                   tickFormatter={(v) =>
                     fmt.formatCurrency(Number(v), prefs.primaryCurrency, {
                       maximumFractionDigits: 0,
+                      unitIsExact: true,
                     })
                   }
                   tick={{ fontSize: 11 }}
@@ -87,7 +88,7 @@ export function CashFlowChart() {
                 <Tooltip
                   formatter={
                     ((v: number, name: string) => [
-                      fmt.formatCurrency(v, prefs.primaryCurrency),
+                      fmt.formatCurrency(v, prefs.primaryCurrency, { unitIsExact: true }),
                       name,
                     ]) as never
                   }

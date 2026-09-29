@@ -195,7 +195,7 @@ jobs:
                 echo "::error title=Automation branch is not an ancestor of prod::${BACKMERGE_BRANCH} is not an ancestor of ${SOURCE_BRANCH}, and open pull request #${pr_number} (${pr_url}) depends on it. Resolve or close that pull request, then delete the branch and re-run: git push origin --delete ${BACKMERGE_BRANCH}"
                 exit 1
               fi
-              deleted_sha="$(git rev-parse "origin/${BACKMERGE_BRANCH}")"
+              deleted_sha="$(git ls-remote origin "refs/heads/${BACKMERGE_BRANCH}" | cut -f1)"
               echo "${BACKMERGE_BRANCH} is not an ancestor of ${SOURCE_BRANCH} and no open pull request depends on it. Self-healing: deleting the branch (was ${deleted_sha})."
               git push origin --delete "${BACKMERGE_BRANCH}"
               {
@@ -214,11 +214,16 @@ jobs:
         if: steps.compare.outputs.count != '0'
         run: |
           set -euo pipefail
-          # Fast-forward only. No --force, ever. The branch is always exactly
-          # the prod tip, and prod only moves forward, so this is a
-          # fast-forward. If it is ever rejected, prod was rewritten, and a
-          # loud failure here is the correct outcome rather than a force-push
-          # that would hide it.
+          # No --force, ever, either way. Normally the automation branch is
+          # an ancestor of prod, so this push is a genuine fast-forward. The
+          # guard above can also self-heal by deleting a stray automation
+          # branch first (logged loudly there as "Self-healed a stray
+          # automation branch"), and in that case this push recreates the
+          # branch fresh at the prod tip rather than fast-forwarding it.
+          # What never changes: prod itself is never rewritten. If this
+          # push is ever rejected, prod moved between the compare step and
+          # here, and a loud failure is the correct outcome rather than a
+          # force-push that would hide it.
           git push origin "${{ steps.compare.outputs.prod_sha }}:refs/heads/${BACKMERGE_BRANCH}"
 
       - name: Build the pull request body

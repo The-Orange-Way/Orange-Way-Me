@@ -17,6 +17,8 @@
 #
 # Override (escape hatch — emits a loud warning, do not use casually):
 #   PR_THIS_BYPASS=1 git push
+# Scanner-only override (when gitleaks genuinely is not installed):
+#   PR_THIS_ALLOW_NO_GITLEAKS=1 git push
 #
 # Install on a fresh clone:
 #   bash scripts/install-hooks.sh
@@ -108,30 +110,36 @@ else
 fi
 
 # ---- Shared helper: the base a push is measured against ----
-# The base commit a push is measured against, so a scan sees only the commits
-# this push adds and not history already on the remote. Prints the base sha, or
-# nothing when the pushed tip shares no history with the remote (an orphan or
-# the very first commit) -- callers scan from the root in that case instead of
-# excluding a base. Both the reserved-term scan and the gitleaks scan use this
-# so they cannot drift on what "the base" means.
+# push_base lives in scripts/push-base.sh so the rule can be tested on its
+# own, the same arrangement as scripts/canon-terms.sh. Both the reserved-term
+# scan and the gitleaks scan call it, so they cannot drift on what "the base"
+# means. The preference order, and why a rebase needs an ancestor test, are
+# documented in that file.
 #
-# Preference order:
-#   1. The remote ref's current tip (from pre-push stdin), when the remote
-#      already has this branch. That is the precise base of an incremental
-#      push; using the mainline merge-base instead would re-scan the branch's
-#      own earlier commits and could re-trip on a finding already pushed there.
-#   2. The merge-base with origin/dev, then origin/main, for a new remote ref.
-#   3. Nothing (orphan / initial commit): no shared history to subtract.
-push_base() {
-  local sha="$1" remote="${2:-$ZERO_SHA}"
-  if [ "$remote" != "$ZERO_SHA" ] && git cat-file -e "${remote}^{commit}" 2>/dev/null; then
-    printf '%s' "$remote"
-    return
+# Sourced with a broken-library guard rather than assumed. A missing or
+# truncated library would otherwise leave push_base undefined, which is the
+# absence-reads-as-green shape every defect in this gate has had.
+PUSH_BASE_LIB="$REPO_ROOT/scripts/push-base.sh"
+if [ ! -f "$PUSH_BASE_LIB" ]; then
+  red "✗ scripts/push-base.sh is missing, so no scan can work out what this push adds."
+  red "  Restore the file. Do not reach for PR_THIS_BYPASS=1: that switches off every other check too."
+  FAIL=1
+else
+  # shellcheck source=scripts/push-base.sh
+  . "$PUSH_BASE_LIB"
+  if ! declare -f push_base >/dev/null 2>&1; then
+    red "✗ scripts/push-base.sh was sourced but does not define push_base. The library is broken, and no scan can work out what this push adds."
+    FAIL=1
   fi
-  git merge-base "$sha" origin/dev 2>/dev/null ||
-    git merge-base "$sha" origin/main 2>/dev/null ||
-    true
-}
+fi
+
+# A stub, so the scan loops below cannot call an undefined function while FAIL
+# is already set. It prints nothing, which every caller already reads as "no
+# shared history to subtract" and handles by scanning from the root: the widest
+# scan available, never the narrowest.
+if ! declare -f push_base >/dev/null 2>&1; then
+  push_base() { :; }
+fi
 
 # ---- Check 3: reserved-term leaks ----
 # The reserved-term list is NOT hardcoded here: committing the list would
@@ -310,7 +318,11 @@ done
 # makes this probe measure "does the scanner exist" instead of "is it on
 # PATH right now".
 resolve_gitleaks() {
-  if [ -x "$HOME/.local/bin/gitleaks" ]; then
+  # HOME is normally set by git, but absence testing and stripped-down
+  # automation environments may omit it. Under set -u, expanding a missing
+  # HOME here used to abort the whole gate before the fail-closed branch could
+  # print its refusal and named override.
+  if [ -n "${HOME:-}" ] && [ -x "$HOME/.local/bin/gitleaks" ]; then
     printf '%s' "$HOME/.local/bin/gitleaks"
     return 0
   fi
@@ -379,10 +391,13 @@ fi
 # adds. Merge commits are skipped, exactly as the CI seat-line-check job does,
 # so local and server enforcement cannot drift.
 SEAT_PATTERN='^Seat: [a-z0-9-]+$'
-# GitHub injects a Claude co-author trailer on squash/rebase merges; that is a
-# public identifier, not a seat, so it is dropped before the last-line check,
-# mirroring the reserved-term scan's exemption so the two cannot drift.
-SEAT_COAUTHOR_EXEMPT='^[[:space:]]*Co-authored-by:.*<noreply@anthropic\.com>[[:space:]]*$'
+# GitHub injects a Claude co-author trailer on squash/rebase merges, and the
+# standard Claude Code attribution footer adds a second line
+# (Claude-Session: <url>) right after it. Both are public identifiers, not a
+# seat, so both are dropped before the last-line check, mirroring the CI
+# seat-line-check job's exemption so the two cannot drift (OWM-T0769: the
+# Claude-Session line alone used to fail this check on its own).
+SEAT_COAUTHOR_EXEMPT='^[[:space:]]*(Co-authored-by:.*<noreply@anthropic\.com>|Claude-Session:[[:space:]]*https://claude\.ai/.*)[[:space:]]*$'
 SEAT_FAIL=0
 for i in "${!LOCAL_SHAS[@]}"; do
   sha="${LOCAL_SHAS[$i]}"
@@ -401,7 +416,8 @@ for i in "${!LOCAL_SHAS[@]}"; do
       | grep -vE '^[[:space:]]*$' | tail -1 || true)"
     if ! printf '%s\n' "$last_line" | grep -qE "$SEAT_PATTERN"; then
       red "✗ Commit ${commit:0:8} lacks a valid Seat: trailer as its last body line."
-      red "  End the commit body with 'Seat: <your-seat>' (matches ^Seat: [a-z0-9-]+\$)."
+      red "  End the commit body with a BARE seat name, e.g. 'Seat: developer-owm'"
+      red "  (no org prefix -- DL-0347 ruled bare canonical, matches ^Seat: [a-z0-9-]+\$)."
       FAIL=1
       SEAT_FAIL=1
     fi

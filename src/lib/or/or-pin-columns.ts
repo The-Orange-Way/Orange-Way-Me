@@ -23,7 +23,12 @@
  * assert on values rather than on mocks agreeing with each other.
  */
 
-import { deriveOrMekBytes, importMekFromRaw, wrapOrMekWithVaultMek } from "@/lib/vault";
+import {
+  buildVaultAad,
+  deriveOrMekBytes,
+  importMekFromRaw,
+  wrapOrMekWithVaultMek,
+} from "@/lib/vault";
 
 import { planOrKeyMaterial, type OrKeyMaterialRow } from "./or-key-material";
 
@@ -110,7 +115,15 @@ export async function computeOrPinColumns({
     const orMekBytes = await deriveOrMekBytes(password, userId, orPlan.saltContext);
     try {
       return {
-        enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(orMekBytes, vaultMek),
+        enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(
+          orMekBytes,
+          vaultMek,
+          buildVaultAad({
+            table: "vault_metadata",
+            column: "enc_or_mek_ciphertext",
+            rowId: userId,
+          }),
+        ),
         // The OLD salt. These subkeys were established against it and must
         // not move when kdf_salt does.
         or_subkey_salt: orPlan.saltContext,
