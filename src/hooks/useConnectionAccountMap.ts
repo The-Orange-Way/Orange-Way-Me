@@ -69,13 +69,13 @@ export function useConnectionAccountMap() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<ConnectionAccountMapRow[] | null> => {
     if (!user || !isUnlocked) {
       if (!user) console.warn("[CAM] cam-resolve-skipped: no user");
       else console.warn("[CAM] cam-resolve-skipped: locked vault");
       setRows([]);
       setLoading(false);
-      return;
+      return [];
     }
     setLoading(true);
     setError(null);
@@ -113,8 +113,10 @@ export function useConnectionAccountMap() {
         `[CAM] cam-refresh-complete: returned=${data?.length ?? 0} decoded=${decoded.length}`,
       );
       setRows(decoded);
+      return decoded;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load mapping");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -177,7 +179,8 @@ export function useConnectionAccountMap() {
         }
       }
 
-      await refresh();
+      const readback = await refresh();
+      if (readback === null) throw new Error("We couldn't confirm the destination mappings.");
     },
     [user, rows, encryptText, refresh],
   );
@@ -192,7 +195,8 @@ export function useConnectionAccountMap() {
       if (!user) return;
       const { error: e } = await camTable().delete().eq("or_connection_id", orConnectionId);
       if (e) throw new Error(e.message);
-      await refresh();
+      const readback = await refresh();
+      if (readback === null) throw new Error("We couldn't confirm the destination mappings.");
     },
     [user, refresh],
   );
