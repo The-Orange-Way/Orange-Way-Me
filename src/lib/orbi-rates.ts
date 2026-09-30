@@ -1,35 +1,50 @@
 /**
- * ORBI rate provider — Orange Way Phase 1 integration.
+ * ORBI rate provider -- Orange Way Phase 1 integration.
  *
  * Reads multi-source volume-weighted-median Bitcoin rates from the Orange
- * Rails Bitcoin Index (ORBI). The anon key is safe to ship in the browser
- * bundle — RLS on the Orange Rails production database blocks every write
- * path; reads return only CONFIRMED rates.
+ * Rails Bitcoin Index (ORBI) via the OWM orbi-rate edge function. The
+ * Orange Rails credentials live in Supabase secrets server-side; the
+ * browser never touches the Orange Rails project directly.
  *
- * Env (build time):
- *   VITE_ORBI_SUPABASE_URL
- *   VITE_ORBI_SUPABASE_ANON_KEY
+ * Env (build time, already in bundle for other OWM features):
+ *   VITE_SUPABASE_URL              OWM Supabase project URL
+ *   VITE_SUPABASE_PUBLISHABLE_KEY  OWM anon key
  *
  * Wired in via:
- *   - src/lib/fx-rates.ts — convert() reads the cached live rate for BTC↔fiat
- *   - src/routes/__root.tsx — bootstraps a refresh on app load and every 60s
+ *   - src/lib/fx-rates.ts         convert() reads the cached live rate for BTC/fiat
+ *   - src/routes/__root.tsx       bootstraps a refresh on app load and every 60s
+ *
+ * OW-T0389: VITE_ORBI_SUPABASE_URL and VITE_ORBI_SUPABASE_ANON_KEY removed.
+ * The Orange Rails anon key no longer appears in the browser bundle.
  */
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+// ── Edge function transport ------------------------------------------------
 
-let orbiClient: SupabaseClient | null = null;
-
-function getORBIClient(): SupabaseClient {
-  if (orbiClient) return orbiClient;
-  const url = import.meta.env.VITE_ORBI_SUPABASE_URL as string | undefined;
-  const key = import.meta.env.VITE_ORBI_SUPABASE_ANON_KEY as string | undefined;
-  if (!url || !key) throw new Error("ORBI not configured");
-  orbiClient = createClient(url, key, {
-    auth: { persistSession: false },
-    global: { headers: { "x-orbi-client": "owm/0.1.0" } },
-  });
-  return orbiClient;
+function edgeFunctionBase(): string | null {
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  return url ? `${url}/functions/v1/orbi-rate` : null;
 }
+
+function edgeFunctionHeaders(): HeadersInit {
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
+async function callEdgeFunction(params: Record<string, string>): Promise<unknown> {
+  const base = edgeFunctionBase();
+  if (!base) return null;
+  try {
+    const resp = await fetch(`${base}?${new URLSearchParams(params).toString()}`, {
+      headers: edgeFunctionHeaders(),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// ── Public types -----------------------------------------------------------
 
 export interface ORBIRate {
   id: string;
@@ -40,73 +55,37 @@ export interface ORBIRate {
   composite: boolean;
 }
 
-function partitionBucketTs(effectiveAt: Date): string {
-  const minuteFloor = Math.floor(effectiveAt.getTime() / 60_000) * 60_000;
-  return new Date(minuteFloor - 60_000).toISOString();
-}
+// ── Rate fetchers ----------------------------------------------------------
 
 export async function fetchBTCRate(target: string, effectiveAt: Date): Promise<ORBIRate | null> {
-  let client: SupabaseClient;
-  try {
-    client = getORBIClient();
-  } catch {
-    return null;
-  }
-  const bucketTs = partitionBucketTs(effectiveAt);
-
-  const { data, error } = await client
-    .from("exchange_rates")
-    .select("id, rate, tier, bucket_ts, provider_count, composite")
-    .eq("source_currency", "BTC")
-    .eq("target_currency", target.toUpperCase())
-    .eq("product", "ORBI-M")
-    .eq("granularity", "1m")
-    .eq("status", "CONFIRMED")
-    .eq("bucket_ts", bucketTs)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return {
-    id: data.id,
-    rate: Number(data.rate),
-    tier: data.tier as ORBIRate["tier"],
-    bucketTs: data.bucket_ts,
-    providerCount: data.provider_count,
-    composite: data.composite,
-  };
+  const data = await callEdgeFunction({
+    mode: "point",
+    quote: target.toUpperCase(),
+    at: effectiveAt.toISOString(),
+  });
+  return toORBIRate(data);
 }
 
 export async function fetchLatestBTCRate(target: string): Promise<ORBIRate | null> {
-  let client: SupabaseClient;
-  try {
-    client = getORBIClient();
-  } catch {
-    return null;
-  }
-  const { data, error } = await client
-    .from("exchange_rates")
-    .select("id, rate, tier, bucket_ts, provider_count, composite")
-    .eq("source_currency", "BTC")
-    .eq("target_currency", target.toUpperCase())
-    .eq("product", "ORBI-M")
-    .eq("granularity", "1m")
-    .eq("status", "CONFIRMED")
-    .order("bucket_ts", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
+  const data = await callEdgeFunction({ mode: "latest", quote: target.toUpperCase() });
+  return toORBIRate(data);
+}
+
+function toORBIRate(data: unknown): ORBIRate | null {
+  if (!data || typeof data !== "object") return null;
+  const r = data as Record<string, unknown>;
+  if (r.rate === undefined || r.rate === null) return null;
   return {
-    id: data.id,
-    rate: Number(data.rate),
-    tier: data.tier as ORBIRate["tier"],
-    bucketTs: data.bucket_ts,
-    providerCount: data.provider_count,
-    composite: data.composite,
+    id: String(r.id ?? ""),
+    rate: Number(r.rate),
+    tier: r.tier as ORBIRate["tier"],
+    bucketTs: String(r.bucketTs ?? ""),
+    providerCount: Number(r.providerCount ?? 0),
+    composite: Boolean(r.composite),
   };
 }
 
-// ── In-memory cache so synchronous code paths (fx-rates.convert) can read
-// the latest known rate without re-fetching. Updated by refreshLiveBTCRate.
+// ── In-memory cache --------------------------------------------------------
 
 interface LiveRateSnapshot {
   rate: number;
@@ -137,8 +116,7 @@ export async function refreshLiveBTCRate(target: string): Promise<LiveRateSnapsh
   return snap;
 }
 
-// ── Bulk range read for the client-side rate-series cache (OWM-T0746). See
-// src/lib/rate-series-cache.ts for the cache that consumes this.
+// ── Bulk range read --------------------------------------------------------
 
 export interface ORBIMatrixRow {
   targetCurrency: string;
@@ -161,25 +139,18 @@ export async function fetchRateMatrix(
   endDate: Date,
   granularity: string = "1d",
 ): Promise<ORBIMatrixRow[]> {
-  let client: SupabaseClient;
-  try {
-    client = getORBIClient();
-  } catch {
-    return [];
-  }
-  const { data, error } = await client
-    .from("exchange_rates")
-    .select("target_currency, rate, bucket_ts")
-    .eq("source_currency", "BTC")
-    .eq("product", "ORBI-M")
-    .eq("granularity", granularity)
-    .eq("status", "CONFIRMED")
-    .gte("bucket_ts", startDate.toISOString())
-    .lte("bucket_ts", endDate.toISOString());
-  if (error || !data) return [];
-  return data.map((row) => ({
-    targetCurrency: String(row.target_currency).toUpperCase(),
-    rate: Number(row.rate),
-    bucketTs: row.bucket_ts as string,
-  }));
+  const data = await callEdgeFunction({
+    mode: "series",
+    from: startDate.toISOString(),
+    to: endDate.toISOString(),
+    granularity,
+  });
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+    .map((row) => ({
+      targetCurrency: String(row.targetCurrency ?? "").toUpperCase(),
+      rate: Number(row.rate),
+      bucketTs: String(row.bucketTs ?? ""),
+    }));
 }
