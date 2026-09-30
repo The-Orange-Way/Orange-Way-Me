@@ -20,6 +20,10 @@ function createSupabaseClient() {
       storage: typeof window !== "undefined" ? localStorage : undefined,
       persistSession: true,
       autoRefreshToken: true,
+      // Declared explicitly so a library default change or dependency
+      // bump can never silently switch us to the implicit flow, which
+      // would put real access/refresh tokens in the URL fragment.
+      flowType: "pkce",
     },
   });
 }
