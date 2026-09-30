@@ -31,13 +31,15 @@ interface Props {
   goal: Goal;
   accounts: Account[];
   txns: DecryptedTxn[];
+  sharedWith?: string[];
 }
 
-export function GoalCard({ goal, accounts, txns }: Props) {
+export function GoalCard({ goal, accounts, txns, sharedWith = [] }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
   const prog = computeProgress(goal, accounts);
+  const displayedCurrent = Math.min(prog.current, prog.target);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
 
@@ -95,7 +97,7 @@ export function GoalCard({ goal, accounts, txns }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                <span className="font-semibold text-base">{fmtUSD(displayedCurrent)}</span>
                 <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
@@ -108,6 +110,10 @@ export function GoalCard({ goal, accounts, txns }: Props) {
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>
             </div>
+          )}
+
+          {sharedWith.length > 0 && (
+            <p className="text-xs text-muted-foreground">Shared with {sharedWith.join(", ")}</p>
           )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
