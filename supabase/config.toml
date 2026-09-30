@@ -28,6 +28,14 @@ verify_jwt = false
 [functions.or-webhook-receiver]
 verify_jwt = false
 
+# e2e-mint-session authenticates the caller by a shared E2E_MINT_TOKEN
+# bearer header (test-only flow to mint a session for authenticated
+# E2E runs), NOT by a logged-in user's Supabase JWT. Without this
+# override, the gateway 401s the request before the function body
+# runs, so the authenticated E2E flow can never succeed.
+[functions.e2e-mint-session]
+verify_jwt = false
+
 # ============================================================
 # Auth hooks
 # ============================================================
