@@ -26,6 +26,7 @@ import { numberLocale } from "@/lib/locale";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedCategory } from "@/hooks/useCategories";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
+import { extractMemoTxid, blockExplorerUrl } from "@/lib/memoTxid";
 import {
   useBudgetForMonth,
   type BudgetRecord,
@@ -396,7 +397,7 @@ export function TransactionsList({
                               </dd>
                             </div>
                             <Detail label="Date" value={format(parseISO(t.date), "MMM d, yyyy")} />
-                            {t.memo && <Detail label="Memo" value={t.memo} fullWidth />}
+                            {t.memo && <MemoDetail memo={t.memo} />}
                             {t.tags && t.tags.length > 0 && (
                               <Detail label="Tags" value={t.tags.join(", ")} fullWidth />
                             )}
@@ -471,6 +472,37 @@ function Detail({
     <div className={fullWidth ? "col-span-2" : undefined}>
       <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
       <dd className="text-sm">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * OWM-T0211. Same layout as a fullWidth Detail, but a memo that carries a
+ * real Bitcoin txid (see src/lib/memoTxid.ts) also gets a link to a public
+ * block explorer. A memo with no txid, or an obviously-not-a-txid value,
+ * renders exactly as Detail would have.
+ */
+function MemoDetail({ memo }: { memo: string }) {
+  const txid = extractMemoTxid(memo);
+  return (
+    <div className="col-span-2">
+      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">Memo</dt>
+      <dd className="text-sm">
+        {memo}
+        {txid && (
+          <>
+            {" "}
+            <a
+              href={blockExplorerUrl(txid)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline underline-offset-2"
+            >
+              View on block explorer
+            </a>
+          </>
+        )}
+      </dd>
     </div>
   );
 }
