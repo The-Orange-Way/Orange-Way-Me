@@ -128,11 +128,20 @@ export function computeProgress(goal: Goal, accounts: Account[]): GoalProgress {
 }
 
 export interface GoalsSummary {
-  /** Sum of each measurable goal's progress, capped at that goal's own target. */
+  /**
+   * Sum of what backs the active, measurable goals. An account linked by
+   * only one goal contributes that goal's own current, capped at its target
+   * (DL-1603). An account linked by more than one active save_up goal is
+   * shared, and contributes its own balance once rather than once per goal
+   * (DL-1589).
+   */
   saved: number;
   /** Sum of the measurable goals' targets. */
   target: number;
-  /** 0..1. Cannot exceed 1, because every term of `saved` is capped at its own target. */
+  /**
+   * 0..1. Capped defensively at 1: a shared account's raw balance is not
+   * bounded by any single goal's target the way an unshared goal's is.
+   */
   pct: number;
   /** How many active goals contributed to the figures above. */
   counted: number;
@@ -159,16 +168,37 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * DL-1589, fixed here: two save_up + all_balance goals linked to the same
+ * account each summed that account's whole balance, so a shared account was
+ * counted once per sharing goal instead of once. Product ruled on OWM-T0210
+ * that sharing an account stays supported. What changes is that the header
+ * now counts a shared account's own balance once, instead of the sum of each
+ * sharing goal's capped current; an account backing exactly one goal keeps
+ * the DL-1603 cap unchanged, which is the distinction the first cut of this
+ * fix missed (it dropped the cap for every save_up goal, shared or not).
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
+  // Only save_up + all_balance goals draw their current from a raw sum of
+  // linked account balances (see computeCurrent); a save_up + specific_amount
+  // goal carries a manual allocation instead and a pay_down goal tracks debt
+  // paid off, so neither can double-claim an account the way two all_balance
+  // goals sharing one can. Count how many active, trackable goals of that
+  // kind link each account: 2+ means the account is shared (DL-1589), exactly
+  // 1 keeps the ordinary per-goal cap (DL-1603).
+  const sharingGoalCount = new Map<string, number>();
+  for (const g of goals) {
+    if (g.is_completed || g.type !== "save_up" || g.strategy === "specific_amount") continue;
+    if (computeProgress(g, accounts).untrackableReason) continue;
+    for (const id of g.linked_account_ids) {
+      sharingGoalCount.set(id, (sharingGoalCount.get(id) ?? 0) + 1);
+    }
+  }
+
   let saved = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+  const countedSharedAccounts = new Set<string>();
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -176,11 +206,34 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    const sharedIds =
+      g.type === "save_up" && g.strategy !== "specific_amount"
+        ? g.linked_account_ids.filter((id) => (sharingGoalCount.get(id) ?? 0) > 1)
+        : [];
+
+    if (sharedIds.length === 0) {
+      // The ordinary case: nothing this goal links is shared, so its own
+      // capped current (DL-1603) is exactly what it contributes.
+      saved += Math.min(p.current, p.target);
+      continue;
+    }
+
+    // At least one linked account is shared with another active goal. Count
+    // each such account's own balance once, however many goals link it. A
+    // goal that also links a private (non-shared) account is rare in
+    // practice, since goals here normally link one account, and is out of
+    // scope for OWM-T0210: this counts only its shared accounts.
+    for (const id of sharedIds) {
+      if (countedSharedAccounts.has(id)) continue;
+      countedSharedAccounts.add(id);
+      const acc = accounts.find((a) => a.id === id);
+      if (acc) saved += Math.max(0, Number(acc.balance) || 0);
+    }
   }
 
-  return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
+  return { saved, target, pct: target > 0 ? Math.min(1, saved / target) : 0, counted, active };
 }
 
 /**
