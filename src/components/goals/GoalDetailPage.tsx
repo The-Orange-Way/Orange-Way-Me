@@ -51,6 +51,7 @@ import {
   averageMonthlyContribution,
   balanceHistory,
   computeProgress,
+  normalizedBalance,
   projectCompletionDate,
 } from "@/lib/goals-math";
 import { GoalFormDialog } from "./GoalFormDialog";
@@ -117,10 +118,10 @@ export function GoalDetailPage({ id }: { id: string }) {
     );
   }
 
-  const prog = computeProgress(goal, accounts);
+  const prog = computeProgress(goal, accounts, prefs.primaryCurrency);
   const monthly = averageMonthlyContribution(goal, txns);
   const projDate = projectCompletionDate(goal, prog.current, monthly);
-  const history = balanceHistory(goal, accounts, txns);
+  const history = balanceHistory(goal, accounts, txns, prefs.primaryCurrency);
 
   const linked = accounts.filter((a) => goal.linked_account_ids.includes(a.id));
   const linkedTxns = txns
@@ -131,7 +132,7 @@ export function GoalDetailPage({ id }: { id: string }) {
   // Pay down amortization preview
   const debt =
     goal.type === "pay_down"
-      ? linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0)
+      ? linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a, prefs.primaryCurrency)), 0)
       : 0;
   const apr = Number(goal.interest_rate ?? "0") || 0;
   const minPayment = Number(goal.minimum_payment ?? "0") || 0;

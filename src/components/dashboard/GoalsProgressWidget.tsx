@@ -50,7 +50,7 @@ export function GoalsProgressWidget() {
         ) : (
           <div className="space-y-3">
             {top.map((g) => {
-              const p = computeProgress(g, accounts);
+              const p = computeProgress(g, accounts, prefs.primaryCurrency);
               const linkedAcct = accounts.find((a) => g.linked_account_ids.includes(a.id));
               const goalCurrency = linkedAcct?.currency ?? prefs.primaryCurrency;
               return (
