@@ -12,7 +12,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { planSyncRoute, type SyncRouteCandidate } from "../sync-route";
+import {
+  dispatchSync,
+  planSyncRoute,
+  type SyncDispatchHandlers,
+  type SyncRouteCandidate,
+} from "../sync-route";
 
 describe("planSyncRoute", () => {
   it("sends a bank connection to the bank dialog", () => {
@@ -67,5 +72,82 @@ describe("planSyncRoute", () => {
     // switch. The switch belongs inside handleStealthSync, above the key
     // export, where an off switch refuses rather than redirects.
     expect(planSyncRoute.length).toBe(1);
+  });
+});
+
+/**
+ * dispatchSync is the other half of the same decision: given a route, run
+ * that handler and no other. The defect this pins (OWM-T0590) is not a wrong
+ * route from planSyncRoute, it is a missing arm at the call site: delete the
+ * private branch from handleSync and the press falls through to requestOrSync.
+ * requestOrSync refuses, so no key leaves, but the user gets "Sync failed"
+ * instead of the private scan. Injected handlers let a test catch that
+ * without rendering ConnectionsPage.
+ */
+function recordingHandlers(): { ran: string[]; handlers: SyncDispatchHandlers } {
+  const ran: string[] = [];
+  return {
+    ran,
+    handlers: {
+      bank: () => {
+        ran.push("bank");
+      },
+      private: () => {
+        ran.push("private");
+      },
+      "or-sync": () => {
+        ran.push("or-sync");
+      },
+    },
+  };
+}
+
+describe("dispatchSync", () => {
+  it("runs the private handler and not the or-sync handler for route private", () => {
+    // THE DEFECT, OWM-T0590. A private Sync press must not reach the handler
+    // that calls requestOrSync. That call still refuses, so this is a UX
+    // regression rather than a key leak, but it is the regression the ticket
+    // exists to make a failing test.
+    const { ran, handlers } = recordingHandlers();
+    void dispatchSync("private", handlers);
+    expect(ran).toEqual(["private"]);
+  });
+
+  it("runs the or-sync handler and not the private handler for route or-sync", () => {
+    const { ran, handlers } = recordingHandlers();
+    void dispatchSync("or-sync", handlers);
+    expect(ran).toEqual(["or-sync"]);
+  });
+
+  it("runs the bank handler and neither of the others", () => {
+    const { ran, handlers } = recordingHandlers();
+    void dispatchSync("bank", handlers);
+    expect(ran).toEqual(["bank"]);
+  });
+
+  it("returns the private handler's promise so the caller can await the scan", async () => {
+    // If dispatchSync forgets to return the handler result, handleSync's
+    // `await dispatchSync(...)` resolves before the scan has started, and a
+    // test with only sync handlers would still pass.
+    const ran: string[] = [];
+    await dispatchSync("private", {
+      bank: () => {
+        ran.push("bank");
+      },
+      private: async () => {
+        await Promise.resolve();
+        ran.push("private");
+      },
+      "or-sync": () => {
+        ran.push("or-sync");
+      },
+    });
+    expect(ran).toEqual(["private"]);
+  });
+
+  it("cannot be given the kill switch as an input", () => {
+    // Same structural pin as planSyncRoute. A third parameter would read as
+    // undefined in every test above and all of them would still pass.
+    expect(dispatchSync.length).toBe(2);
   });
 });

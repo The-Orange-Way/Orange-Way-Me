@@ -65,7 +65,7 @@ import { openOrConnect, type OrLinkSourceWallet } from "@/lib/or/widget";
 import { describeLinkResult } from "@/lib/or/link-result";
 import { buildDeletePlan, classifyDeleteReadback } from "@/lib/or/connection-delete";
 import { planSyncAll, reportSyncAll, type SyncAllResultEntry } from "@/lib/or/sync-all";
-import { planSyncRoute } from "@/lib/or/sync-route";
+import { dispatchSync, planSyncRoute } from "@/lib/or/sync-route";
 import { requestOrSync } from "@/lib/or/or-sync-request";
 import {
   describeStealthProgress,
@@ -804,154 +804,162 @@ export function ConnectionsPage() {
     // (OWM-T0530, OWM-T0528, OWM-T0533).
     const route = planSyncRoute(conn);
 
+    // WHICH handler runs is dispatchSync's job (OWM-T0590). The if-chain that
+    // used to live here was the untested call site: delete the private arm
+    // and the press fell through to requestOrSync, which refuses (no key
+    // leak) but the user got "Sync failed" instead of the private scan.
+    // Handlers are injected so a unit test can assert the private one ran
+    // and the or-sync one did not, without rendering this page.
+    //
     // Bank (Quiltt) connections use the OPK sealed-box path, not the
     // Bitcoin-source or-sync path. Route them to the BankSyncDialog which
     // fetches OPK-sealed rows via or-transactions-list, unseals with the
     // vault OPK key, and imports. The or-sync path below is for
     // Bitcoin sources (Blink/Strike/etc.) only.
-    if (route === "bank") {
-      setBankSyncConnId(conn.id);
-      return;
-    }
-
+    //
     // Stealth connections are scanned by the OR widget in this browser, never
     // by or-sync: they live in the stealth store, and or-sync selects from the
-    // `connections` table, which does not contain this row. Routing them below
-    // would ask a function that cannot see this row whether this row is up to
-    // date. Same shape as the bank branch above: a provider whose sync lives
-    // somewhere else gets sent there.
+    // `connections` table, which does not contain this row. Routing them to
+    // or-sync would ask a function that cannot see this row whether this row
+    // is up to date. Same shape as the bank branch: a provider whose sync
+    // lives somewhere else gets sent there.
     //
-    // Do NOT read the branch below as a safe fallthrough. This comment used to
-    // say or-sync "matches nothing and honestly returns { synced: 0 }". That
-    // was never measured and it is wrong. Observed on production 2026-08-18,
-    // signed in, with the network recorded: one request, or-sync via the
-    // proxy, answered 400 "stealth connections cannot be synced via this
-    // endpoint". It is a rejection, not an empty success, and it is raised
-    // before or-sync ever selects anything.
+    // Do NOT read the or-sync handler as a safe fallthrough. This comment
+    // used to say or-sync "matches nothing and honestly returns { synced: 0 }".
+    // That was never measured and it is wrong. Observed on production
+    // 2026-08-18, signed in, with the network recorded: one request, or-sync
+    // via the proxy, answered 400 "stealth connections cannot be synced via
+    // this endpoint". It is a rejection, not an empty success, and it is
+    // raised before or-sync ever selects anything.
     //
     // DL-1047 / DL-1378 / OWM-T0530: the kill switch is deliberately NOT
-    // consulted in this condition. It is read at the press inside
+    // consulted in this dispatch. It is read at the press inside
     // handleStealthSync, which awaits refreshRuntimeFlags and refuses ABOVE
     // the credentials key export. An off switch has to refuse a private
-    // connection; it must never redirect one onto the branch below, which is
-    // the only branch in this handler that exports vault keys.
+    // connection; it must never redirect one onto the or-sync handler, which
+    // is the only handler here that exports vault keys.
     //
     // Routing on is_stealth alone also matches planSyncAll, which has always
     // held private connections back from or-sync unconditionally. This path
     // was the one that disagreed.
-    if (route === "private") {
-      await handleStealthSync(conn);
-      return;
-    }
+    await dispatchSync(route, {
+      bank: () => {
+        setBankSyncConnId(conn.id);
+      },
+      private: () => handleStealthSync(conn),
+      "or-sync": () => syncOrdinary(subaccount),
+    });
 
-    setSyncingId(conn.id);
-    try {
-      // OWM-T0544. No key is exported here any more. requestOrSync asks
-      // planSyncRoute itself and refuses above its own export, so deleting the
-      // private arm above now stops a press rather than starting a key
-      // handover: it reaches this call and is refused, instead of exporting two
-      // vault keys for a request or-sync answers with a 400.
-      const res = await requestOrSync(subaccount, [conn], orSyncKeys);
+    async function syncOrdinary(acct: string) {
+      setSyncingId(conn.id);
+      try {
+        // OWM-T0544. No key is exported here any more. requestOrSync asks
+        // planSyncRoute itself and refuses above its own export, so deleting the
+        // private arm above now stops a press rather than starting a key
+        // handover: it reaches this call and is refused, instead of exporting two
+        // vault keys for a request or-sync answers with a 400.
+        const res = await requestOrSync(acct, [conn], orSyncKeys);
 
-      // DL-1051: a status toast must be driven by positive evidence that this
-      // connection was actually processed. or-sync only returns an entry for a
-      // connection it attempted; if the id we requested is absent, the
-      // connection was never touched (for example a stealth connection with no
-      // resumable scan). Absence is the whole signal: do not infer stealth on
-      // the client, and do not claim "up to date" for work that never ran.
-      const attempted = res.connections.find((c) => c.connection_id === conn.id);
-      if (!attempted) {
-        toast.info("Nothing was synced for this connection yet.");
+        // DL-1051: a status toast must be driven by positive evidence that this
+        // connection was actually processed. or-sync only returns an entry for a
+        // connection it attempted; if the id we requested is absent, the
+        // connection was never touched (for example a stealth connection with no
+        // resumable scan). Absence is the whole signal: do not infer stealth on
+        // the client, and do not claim "up to date" for work that never ran.
+        const attempted = res.connections.find((c) => c.connection_id === conn.id);
+        if (!attempted) {
+          toast.info("Nothing was synced for this connection yet.");
+          await refreshList();
+          setTxRefreshKey((k) => k + 1);
+          return;
+        }
+
+        const errs = res.connections.filter((c) => c.error);
+        if (errs.length > 0) {
+          const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
+          const suffix =
+            errs.length > 1
+              ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
+              : "";
+          if (res.synced > 0) {
+            toast.warning(
+              `Synced ${res.synced}; ${errs.length} connection${errs.length === 1 ? "" : "s"} had trouble: ${firstMsg}${suffix}`,
+            );
+          } else {
+            toast.error(
+              `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
+            );
+          }
+          console.warn(
+            "[Connections] partial sync failures",
+            errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
+          );
+        } else if (res.synced === 0) {
+          toast.info("Up to date. No new transactions.");
+        } else {
+          toast.success(
+            `Synced ${res.synced} transaction${res.synced === 1 ? "" : "s"} from ${
+              conn.decrypted_label ||
+              institutionByConn.get(conn.id) ||
+              friendlyProviderName(conn.provider_type)
+            }`,
+          );
+        }
+
+        // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
+        // itself just fetched, so a connection whose rows were fetched on an
+        // EARLIER press reports 0 forever and never gets imported. That is not
+        // hypothetical: one tester's 146 transactions were fetched five minutes
+        // before her account and wallet mapping existed, so the first press had
+        // nowhere to file them, and every press since has honestly answered 0.
+        //
+        // This is the same defect DL-1116 already fixed on the stealth path, one
+        // path over, and for the same reason: a sync that finds nothing new
+        // still has to reconcile what is already stored.
+        //
+        // Gated on errs.length === 0, matching handleSyncAll's !c.error filter.
+        // `attempted` only proves or-sync tried this connection, not that the
+        // attempt succeeded; running the import after a just-failed attempt
+        // for this same connection still reconciles whatever was already
+        // stored (the helper is dedup based, not delta based), but it produces
+        // a confusing second toast on every failed sync and an extra round
+        // trip that buys nothing.
+        if (user && errs.length === 0) {
+          try {
+            const importResult = await importSyncedTransactionsForConnection(conn);
+            if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
+              handleEditMapping(conn);
+            }
+          } catch (importErr) {
+            console.error("[Connections] OR import bridge failed", importErr);
+            try {
+              captureException(importErr, {
+                tags: { area: "or-import-bridge" },
+                extra: { connectionId: conn.id },
+              });
+            } catch {
+              // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
+            }
+            toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
+          }
+        }
+
         await refreshList();
         setTxRefreshKey((k) => k + 1);
-        return;
-      }
-
-      const errs = res.connections.filter((c) => c.error);
-      if (errs.length > 0) {
-        const firstMsg = humanizeError(errs[0]?.error ?? "", "Something went wrong.");
-        const suffix =
-          errs.length > 1
-            ? ` (and ${errs.length - 1} other${errs.length - 1 === 1 ? "" : "s"})`
-            : "";
-        if (res.synced > 0) {
-          toast.warning(
-            `Synced ${res.synced}; ${errs.length} connection${errs.length === 1 ? "" : "s"} had trouble: ${firstMsg}${suffix}`,
-          );
-        } else {
-          toast.error(
-            `${errs.length} connection${errs.length === 1 ? "" : "s"} couldn't sync: ${firstMsg}${suffix}`,
-          );
-        }
-        console.warn(
-          "[Connections] partial sync failures",
-          errs.map((e) => ({ connection_id: e.connection_id, error: e.error })),
-        );
-      } else if (res.synced === 0) {
-        toast.info("Up to date. No new transactions.");
-      } else {
-        toast.success(
-          `Synced ${res.synced} transaction${res.synced === 1 ? "" : "s"} from ${
-            conn.decrypted_label ||
-            institutionByConn.get(conn.id) ||
-            friendlyProviderName(conn.provider_type)
-          }`,
-        );
-      }
-
-      // OWM-T0717. NOT gated on res.synced. or-sync reports only what it
-      // itself just fetched, so a connection whose rows were fetched on an
-      // EARLIER press reports 0 forever and never gets imported. That is not
-      // hypothetical: one tester's 146 transactions were fetched five minutes
-      // before her account and wallet mapping existed, so the first press had
-      // nowhere to file them, and every press since has honestly answered 0.
-      //
-      // This is the same defect DL-1116 already fixed on the stealth path, one
-      // path over, and for the same reason: a sync that finds nothing new
-      // still has to reconcile what is already stored.
-      //
-      // Gated on errs.length === 0, matching handleSyncAll's !c.error filter.
-      // `attempted` only proves or-sync tried this connection, not that the
-      // attempt succeeded; running the import after a just-failed attempt
-      // for this same connection still reconciles whatever was already
-      // stored (the helper is dedup based, not delta based), but it produces
-      // a confusing second toast on every failed sync and an extra round
-      // trip that buys nothing.
-      if (user && errs.length === 0) {
+      } catch (err) {
+        console.error("[Connections] sync failed", err);
         try {
-          const importResult = await importSyncedTransactionsForConnection(conn);
-          if (importResult.unmapped > 0 && importResult.unmappedWalletIds.length > 0) {
-            handleEditMapping(conn);
-          }
-        } catch (importErr) {
-          console.error("[Connections] OR import bridge failed", importErr);
-          try {
-            captureException(importErr, {
-              tags: { area: "or-import-bridge" },
-              extra: { connectionId: conn.id },
-            });
-          } catch {
-            // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-          }
-          toast.error(`Couldn't add transactions to your ledger. ${humanizeError(importErr)}`);
+          captureException(err, {
+            tags: { area: "connections-sync" },
+            extra: { connectionId: conn.id },
+          });
+        } catch {
+          // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
         }
+        toast.error(`Sync failed. ${humanizeError(err)}`);
+      } finally {
+        setSyncingId(null);
       }
-
-      await refreshList();
-      setTxRefreshKey((k) => k + 1);
-    } catch (err) {
-      console.error("[Connections] sync failed", err);
-      try {
-        captureException(err, {
-          tags: { area: "connections-sync" },
-          extra: { connectionId: conn.id },
-        });
-      } catch {
-        // Sentry not initialised (VITE_SENTRY_DSN unset) — swallow.
-      }
-      toast.error(`Sync failed. ${humanizeError(err)}`);
-    } finally {
-      setSyncingId(null);
     }
   }
 
