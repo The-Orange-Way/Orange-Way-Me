@@ -50,6 +50,13 @@
 #                                               -> must exit 0. The allowlist
 #      is per function signature, not per keyword, so the same privilege
 #      written a different way must still be allowed
+#  19) CREATE OR REPLACE FUNCTION of a hardened SECDEF function with no
+#      accompanying REVOKE                     -> must exit 1 (rule 2).
+#      Postgres resets EXECUTE to PUBLIC on replace, so this is a silent
+#      widening if nothing catches it
+#  20) the same replace, but the migration also revokes and re-grants
+#      properly, the pattern the repo's own history already uses
+#                                               -> must exit 0 (rule 2 PASS)
 #
 # Run from the repo root: bash scripts/check-definer-grant-migrations-selftest.sh
 
@@ -290,6 +297,37 @@ SQL
 git add -A
 git commit -q -m "case18"
 check_case "GRANT ALL on an allowlisted function" 0 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 19: CREATE OR REPLACE of a hardened function with no accompanying
+# REVOKE must be refused. Postgres resets EXECUTE to PUBLIC on replace.
+git checkout -q -b case19 main
+cat > supabase/migrations/0002_unrevoked_replace.sql <<'SQL'
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
+RETURNS boolean
+LANGUAGE sql SECURITY DEFINER
+AS $$ SELECT true $$;
+SQL
+git add -A
+git commit -q -m "case19"
+check_case "CREATE OR REPLACE of hardened function with no REVOKE" 1 "$(git rev-parse HEAD)"
+git checkout -q main
+
+# Case 20: the same replace, but the migration also revokes and re-grants
+# properly (the pattern the repo's own history already uses). Must pass.
+git checkout -q -b case20 main
+cat > supabase/migrations/0002_revoked_replace.sql <<'SQL'
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role text)
+RETURNS boolean
+LANGUAGE sql SECURITY DEFINER
+AS $$ SELECT true $$;
+
+REVOKE EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(_user_id uuid, _role text) TO authenticated;
+SQL
+git add -A
+git commit -q -m "case20"
+check_case "CREATE OR REPLACE of hardened function WITH matching REVOKE" 0 "$(git rev-parse HEAD)"
 git checkout -q main
 
 if [ "$FAILURES" -gt 0 ]; then
