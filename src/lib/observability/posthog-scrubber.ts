@@ -12,6 +12,7 @@
  */
 
 import { redactValueShapes } from "./value-shapes";
+import { isKeyMaterialFieldName } from "./key-material-names";
 
 /**
  * Property keys whose VALUES are scrubbed unconditionally. Match by
@@ -20,6 +21,19 @@ import { redactValueShapes } from "./value-shapes";
  * This is a KEY-NAME list. It cannot see a sensitive value that arrives
  * under an innocuous name; that case is handled by redactValueShapes,
  * which both this scrubber and sentry.ts import from value-shapes.ts.
+ *
+ * These are the BUSINESS-DATA hints, and they are broad on purpose: an
+ * analytics payload has no legitimate need for a merchant or an account
+ * label, so over-blanking here costs a data point and nothing else.
+ *
+ * Wallet key-material names are ALSO checked, but not from this list: they
+ * live in key-material-names.ts, which the error reporter reads as well, so
+ * a name can no longer be added on one path and forgotten on the other.
+ * shouldScrubKey consults that inventory IN ADDITION to this list rather
+ * than instead of it. The key-material entries that remain below are
+ * therefore redundant, and they stay redundant deliberately: dropping them
+ * in the same change that introduces the shared inventory would make a
+ * coverage regression indistinguishable from a successful refactor.
  */
 export const SCRUB_VALUE_KEY_HINTS = [
   "account",
@@ -171,6 +185,12 @@ function scrubUrl(input: unknown): unknown {
 
 function shouldScrubKey(key: string): boolean {
   const k = key.toLowerCase();
+  // Shared key-material inventory first: it is the list both scrubbers must
+  // agree on, and checking it here is what makes them agree.
+  if (isKeyMaterialFieldName(k)) return true;
+  // Then this file's own business-data hints, and then the whole-token
+  // matches. All three are consulted, so this function can only ever redact
+  // MORE than it did before the shared inventory existed, never less.
   if (SCRUB_VALUE_KEY_HINTS.some((hint) => k.includes(hint))) return true;
   return keyTokens(key).some((t) => SCRUB_VALUE_KEY_EXACT.has(t));
 }
@@ -281,13 +301,22 @@ export function resetScrubberDroppedEventCount(): void {
 
 /**
  * Exported as the `before_send` argument to `posthog.init`. PostHog
- * types this as `(event: CaptureResult | null) => CaptureResult | null`.
- * On the normal path we return the event with scrubbed properties rather
- * than dropping it; dropping silently would hide a bug where a route
- * renders sensitive data in the URL.
+ * types this as `(event: CaptureResult | null) => CaptureResult | null`,
+ * and returning null drops the event.
  *
- * The one case where we DO drop is a scrubbing failure. See the catch
- * below: that path fails closed on purpose.
+ * An event that scrubs cleanly is ALWAYS returned, never dropped:
+ * dropping it silently would hide a bug where a route renders sensitive
+ * data in the URL, and we would rather see the redacted evidence of that
+ * bug than see nothing.
+ *
+ * FAIL CLOSED on the other path. If scrubbing throws partway through
+ * walking a payload, drop the event rather than let a half-scrubbed one
+ * reach the network. A dropped analytics event costs a data point; a
+ * half-scrubbed one costs the customer the guarantee this hook exists to
+ * make. Catching here also settles a question that would otherwise have
+ * to be re-answered on every SDK bump, since a hook that throws could
+ * plausibly be treated either as "drop it" or as "send it unscrubbed",
+ * and those are opposite outcomes: this hook does not throw.
  */
 export function scrubPostHogEvent(event: CaptureResult | null): CaptureResult | null {
   if (!event) return event;
