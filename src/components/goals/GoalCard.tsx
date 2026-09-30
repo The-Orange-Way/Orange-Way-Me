@@ -31,9 +31,11 @@ interface Props {
   goal: Goal;
   accounts: Account[];
   txns: DecryptedTxn[];
+  /** Names of other active goals that share at least one linked account. */
+  sharedWithGoalNames?: string[];
 }
 
-export function GoalCard({ goal, accounts, txns }: Props) {
+export function GoalCard({ goal, accounts, txns, sharedWithGoalNames }: Props) {
   const { prefs } = useDashboardPrefs();
   const fmt = useLocaleFormat();
   const fmtUSD = (n: number) => fmt.formatCurrency(n, prefs.primaryCurrency);
@@ -108,6 +110,12 @@ export function GoalCard({ goal, accounts, txns }: Props) {
                 <span className="font-medium tabular-nums">{Math.round(prog.pct * 100)}%</span>
               </div>
             </div>
+          )}
+
+          {sharedWithGoalNames && sharedWithGoalNames.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Shared with {sharedWithGoalNames.join(", ")}
+            </p>
           )}
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
