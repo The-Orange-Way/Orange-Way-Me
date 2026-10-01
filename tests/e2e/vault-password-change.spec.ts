@@ -13,9 +13,6 @@ const VAULT_PW = process.env.E2E_VAULT_PASSWORD ?? "";
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "";
 
-// Serial so tests share the single fixture account without races.
-test.describe.configure({ mode: "serial" });
-
 // -- helpers --
 
 /**
@@ -122,18 +119,20 @@ async function readVaultRow(page: Page): Promise<VaultRow> {
 
 // -- tests --
 
-test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
-  // Skip the whole suite on pull_request CI: the spec runs in the chromium project
-  // and handles its own sign-in (not via the authenticated project), so auth.setup.ts
-  // alone does not gate it. On pull_request the push-only secrets resolve to '' in
-  // ci.yml, and attempting a sign-in with empty credentials would fail rather than
-  // skip. test.skip() at describe scope marks every test in this suite as skipped
-  // when the condition is true (Auditor finding B2 / OW-T0398).
-  test.skip(
-    !EMAIL || !PASSWORD || !VAULT_PW,
-    "Push-context credentials absent; spec runs on push CI only",
-  );
+// Serial so tests share the single fixture account without races.
+test.describe.configure({ mode: "serial" });
 
+// Skip the whole file on pull_request CI: the spec handles its own sign-in (not via
+// the authenticated project), so auth.setup.ts alone does not gate it. On pull_request
+// the push-only secrets resolve to '' in ci.yml, and attempting a sign-in with empty
+// credentials would fail rather than skip. test.skip() at file scope marks every test
+// in this file as skipped when the condition is true (Auditor finding B2 / OW-T0398).
+test.skip(
+  !EMAIL || !PASSWORD || !VAULT_PW,
+  "Push-context credentials absent; spec runs on push CI only",
+);
+
+test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
   // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
   // carry typed values; without an artifact-upload step exposure is runner-only,
   // but there is no benefit to capturing them for a spec that runs correctly (M1).
