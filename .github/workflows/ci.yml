@@ -236,13 +236,18 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173
           PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
-          # Credentials for the push-only AEAD vault spec (vault-password-change.spec.ts).
-          # The spec gates on OWM_E2E_SUPABASE_SECRET_KEY: when absent (pull_request runs),
-          # HAS_SERVICE_KEY is false and every test in that file is skipped gracefully.
-          # When present (push runs with configured secrets), the spec runs DB assertions
-          # that confirm enc_mek_ciphertext and verifier_ciphertext carry the v1. prefix.
+          # Public Supabase project config (not secrets). vault-password-change.spec.ts
+          # reads these directly from process.env at test-run time (not import.meta.env),
+          # so they must be set on THIS step, not only on the earlier Build step.
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Credentials for the authenticated project and the push-only AEAD vault spec.
+          # Same names auth.setup.ts already reads (E2E_USER_EMAIL / E2E_USER_PASSWORD /
+          # E2E_VAULT_PASSWORD) -- this is the one shared source every authenticated spec
+          # uses, do not rename per-spec again. Gated to push events only (Auditor finding
+          # B2, OW-T0398): on pull_request these resolve to '', auth.setup.ts skip()s, and
+          # the whole authenticated suite (including this spec) skips cleanly instead of
+          # attempting a real sign-in with no credentials.
           E2E_USER_EMAIL: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_EMAIL || '' }}
           E2E_USER_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_PASSWORD || '' }}
           E2E_VAULT_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_VAULT_PASSWORD || '' }}
