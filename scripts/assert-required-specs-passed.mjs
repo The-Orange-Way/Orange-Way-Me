@@ -12,84 +12,91 @@
 // AEAD vault spec was skipped but an unrelated marketing-forms spec executed".
 // A required, when-scoped spec closes that gap.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync } from "node:fs";
 
-const [, , requiredPath, resultsPath, eventName] = process.argv
+const [, , requiredPath, resultsPath, eventName] = process.argv;
 if (!requiredPath || !resultsPath || !eventName) {
-  console.error(
-    'usage: assert-required-specs-passed.mjs <required-specs.json> <results.json> <event-name>',
-  )
-  process.exit(1)
+  console.error("usage: assert-required-specs-passed.mjs <required> <results> <event>");
+  process.exit(1);
 }
 
-let required
+let required;
 try {
-  required = JSON.parse(readFileSync(requiredPath, 'utf8')).required ?? []
+  required = JSON.parse(readFileSync(requiredPath, "utf8")).required ?? [];
 } catch (err) {
-  console.error(`::error::could not read/parse ${requiredPath}: ${err.message}`)
-  process.exit(1)
+  console.error(`::error::could not read/parse ${requiredPath}: ${err.message}`);
+  process.exit(1);
 }
 
-const applicable = required.filter((entry) => entry.when === eventName)
+const applicable = required.filter((entry) => entry.when === eventName);
 if (applicable.length === 0) {
-  console.log(`no required spec applies to event '${eventName}'; nothing to check`)
-  process.exit(0)
+  console.log(`no required spec applies to event '${eventName}'; nothing to check`);
+  process.exit(0);
 }
 
-let report
+let report;
 try {
-  report = JSON.parse(readFileSync(resultsPath, 'utf8'))
+  report = JSON.parse(readFileSync(resultsPath, "utf8"));
 } catch (err) {
-  console.error(`::error::could not read/parse ${resultsPath}: ${err.message}`)
-  process.exit(1)
+  console.error(`::error::could not read/parse ${resultsPath}: ${err.message}`);
+  process.exit(1);
 }
 
 // Walk the reporter's suite tree. Suites nest arbitrarily deep (file suite ->
 // describe suites -> ...); specs sit at the leaves.
 function* walkSpecs(suite) {
-  for (const spec of suite.specs ?? []) yield spec
-  for (const child of suite.suites ?? []) yield* walkSpecs(child)
+  for (const spec of suite.specs ?? []) {
+    yield spec;
+  }
+  for (const child of suite.suites ?? []) {
+    yield* walkSpecs(child);
+  }
 }
 
 function testStatus(test) {
-  if (test.status) return test.status
-  const results = test.results ?? []
-  return results.length ? results[results.length - 1].status : 'unknown'
+  if (test.status) {
+    return test.status;
+  }
+  const results = test.results ?? [];
+  return results.length ? results[results.length - 1].status : "unknown";
 }
 
-let failed = false
+let failed = false;
 
 for (const { file } of applicable) {
-  const base = file.split('/').pop()
-  const matchingSpecs = []
+  const base = file.split("/").pop();
+  const matchingSpecs = [];
   for (const suite of report.suites ?? []) {
     for (const spec of walkSpecs(suite)) {
-      const specFile = spec.file ?? ''
-      if (specFile === file || specFile.endsWith(base)) matchingSpecs.push(spec)
+      const specFile = spec.file ?? "";
+      if (specFile === file || specFile.endsWith(base)) {
+        matchingSpecs.push(spec);
+      }
     }
   }
 
-  const tests = matchingSpecs.flatMap((spec) => spec.tests ?? [])
+  const tests = matchingSpecs.flatMap((spec) => spec.tests ?? []);
   if (tests.length === 0) {
-    console.error(
-      `::error::required spec '${file}' (when=${eventName}) did not run -- 0 tests found in ${resultsPath}`,
-    )
-    failed = true
-    continue
+    const msg = `required spec '${file}' (when=${eventName}) did not run`;
+    console.error(`::error::${msg}: 0 tests found in ${resultsPath}`);
+    failed = true;
+    continue;
   }
 
-  const notPassed = tests.filter((test) => testStatus(test) !== 'expected')
+  const notPassed = tests.filter((test) => testStatus(test) !== "expected");
   if (notPassed.length > 0) {
-    console.error(
-      `::error::required spec '${file}' (when=${eventName}) has ${notPassed.length}/${tests.length} test(s) not passed (status: ${notPassed
-        .map(testStatus)
-        .join(', ')})`,
-    )
-    failed = true
-    continue
+    const statuses = notPassed.map(testStatus).join(", ");
+    const counts = `${notPassed.length}/${tests.length}`;
+    const msg = `required spec '${file}' (${eventName}) has ${counts} test(s) not passed`;
+    console.error(`::error::${msg} (status: ${statuses})`);
+    failed = true;
+    continue;
   }
 
-  console.log(`required spec '${file}' (when=${eventName}): ${tests.length}/${tests.length} test(s) passed`)
+  const total = tests.length;
+  console.log(`required spec '${file}' (${eventName}): ${total}/${total} test(s) passed`);
 }
 
-if (failed) process.exit(1)
+if (failed) {
+  process.exit(1);
+}
