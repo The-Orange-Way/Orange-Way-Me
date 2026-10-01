@@ -270,6 +270,13 @@ jobs:
           fi
           echo "Playwright executed $EXPECTED spec(s)."
 
+      - name: Guard required specs actually passed (tests/e2e/required-specs.json)
+        # OW-T0398 CTO ruling 2026-10-01, item 3: the zero-spec guard above only
+        # proves SOMETHING ran. This proves the push-only AEAD vault spec named
+        # in required-specs.json ran AND every one of its tests passed, so a
+        # push run cannot go green behind a skipped or failing required spec.
+        run: node scripts/assert-required-specs-passed.mjs tests/e2e/required-specs.json playwright-report/results.json "${{ github.event_name }}"
+
   migration-hygiene:
     name: Migration filename hygiene
     runs-on: ubuntu-latest
