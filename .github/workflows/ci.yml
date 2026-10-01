@@ -241,11 +241,11 @@ jobs:
           # HAS_SERVICE_KEY is false and every test in that file is skipped gracefully.
           # When present (push runs with configured secrets), the spec runs DB assertions
           # that confirm enc_mek_ciphertext and verifier_ciphertext carry the v1. prefix.
-          OWM_DEV_E2E_EMAIL: ${{ secrets.OWM_DEV_E2E_EMAIL }}
-          OWM_DEV_E2E_PASSWORD: ${{ secrets.OWM_DEV_E2E_PASSWORD }}
-          OWM_DEV_E2E_VAULT_PASSWORD: ${{ secrets.OWM_DEV_E2E_VAULT_PASSWORD }}
-          OWM_E2E_SUPABASE_SECRET_KEY: ${{ secrets.OWM_E2E_SUPABASE_SECRET_KEY }}
-          OWM_E2E_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          E2E_USER_EMAIL: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_EMAIL || '' }}
+          E2E_USER_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_PASSWORD || '' }}
+          E2E_VAULT_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_VAULT_PASSWORD || '' }}
 
       # DL-0779 shape: a Playwright run that collects and skips every spec
       # still exits 0, so this reads the JSON report and fails the job
