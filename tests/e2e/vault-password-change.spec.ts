@@ -119,20 +119,19 @@ async function readVaultRow(page: Page): Promise<VaultRow> {
 
 // -- tests --
 
-// Serial so tests share the single fixture account without races.
-test.describe.configure({ mode: "serial" });
-
-// Skip the whole file on pull_request CI: the spec handles its own sign-in (not via
-// the authenticated project), so auth.setup.ts alone does not gate it. On pull_request
-// the push-only secrets resolve to '' in ci.yml, and attempting a sign-in with empty
-// credentials would fail rather than skip. test.skip() at file scope marks every test
-// in this file as skipped when the condition is true (Auditor finding B2 / OW-T0398).
-test.skip(
-  !EMAIL || !PASSWORD || !VAULT_PW,
-  "Push-context credentials absent; spec runs on push CI only",
-);
-
 test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
+  // Serial: tests share a single fixture account; races corrupt the vault row.
+  test.describe.configure({ mode: "serial" });
+  // Skip all tests when push-context credentials are absent. On pull_request CI,
+  // E2E_USER_EMAIL / E2E_USER_PASSWORD / E2E_VAULT_PASSWORD resolve to '' in ci.yml.
+  // A file-scope test.skip(boolean) does not reliably propagate through a following
+  // test.describe() in Playwright 1.60: the tests ran with empty credentials and
+  // failed instead of skipping (Auditor finding B2, OW-T0398). Inside the describe
+  // block is the documented, tested pattern.
+  test.skip(
+    !EMAIL || !PASSWORD || !VAULT_PW,
+    "Push-context credentials absent; spec runs on push CI only",
+  );
   // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
   // carry typed values; without an artifact-upload step exposure is runner-only,
   // but there is no benefit to capturing them for a spec that runs correctly (M1).
