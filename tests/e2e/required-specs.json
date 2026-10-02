@@ -1,0 +1,5 @@
+{
+  "required": [
+    { "file": "tests/e2e/vault-password-change.spec.ts", "when": "push" }
+  ]
+}
