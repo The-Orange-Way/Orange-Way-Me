@@ -421,6 +421,50 @@ jobs:
             exit 0
           fi
 
+      - name: Verify /connections entry point shipped (OWM-T0073)
+        # Checks the local dist/ output BEFORE uploading to Cloudflare, so a
+        # missing button text blocks the deploy rather than being discovered
+        # after the fact (OW-T0398).
+        #
+        # Why not a raw-HTML text check: ConnectionsPage renders only when
+        # the vault is unlocked (isUnlocked guard), and an unauthenticated
+        # GET /connections returns the SPA shell that proves nothing either way.
+        #
+        # Why dist/assets/ and not the live URL: TanStack Router
+        # autoCodeSplitting emits the /connections route as a separate lazy
+        # chunk that is NOT listed in the page HTML script tags -- it is
+        # requested on demand when the user navigates to /connections.
+        # The previous post-deploy check fetched HTML-referenced assets only
+        # and therefore always saw zero assets, making it a silent false-green.
+        # dist/assets/ contains every chunk the build emitted (including all
+        # lazy route chunks), so grep -rqF finds both markers reliably.
+        #
+        # Negative control proves grep can fail so a false green cannot hide
+        # behind a check that matches everything.
+        run: |
+          set -euo pipefail
+          if [ -z "$(find dist/assets -name '*.js' | head -1)" ]; then
+            echo "::error::No JS files found in dist/assets -- build may have failed."
+            exit 1
+          fi
+          if grep -rqF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' dist/assets/ 2>/dev/null; then
+            echo "::error::Negative control matched -- this check is broken and cannot be trusted."
+            exit 1
+          fi
+          FAILED=0
+          if ! grep -rqF 'Connect a Bitcoin source' dist/assets/ 2>/dev/null; then
+            echo "::error::dist/assets is missing the \"Connect a Bitcoin source\" button text."
+            FAILED=1
+          fi
+          if ! grep -rqF 'connections-add' dist/assets/ 2>/dev/null; then
+            echo "::error::dist/assets is missing the connections-add entry point marker."
+            FAILED=1
+          fi
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Connections entry point verified in dist/assets (pre-deploy)"
+
       - name: Deploy to ${{ steps.target.outputs.project }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -441,62 +485,6 @@ jobs:
           fi
           curl -s "${{ steps.target.outputs.verify_url }}${ASSET}" >/dev/null
           echo "checkmark ${{ steps.target.outputs.verify_url }} JS asset fetched OK"
-
-      - name: Verify /connections entry point shipped (OWM-T0073)
-        # Why this cannot be a raw-HTML text check: ConnectionsPage only
-        # renders once the vault is unlocked (see the isUnlocked guard in
-        # src/components/connections/ConnectionsPage.tsx), this repo does
-        # not server-render or prerender app routes (only the public
-        # marketing routes, via scripts/prerender-plugin.ts), and the
-        # button carrying the entry point sits behind that guard. An
-        # unauthenticated GET /connections returns the same SPA shell every
-        # route returns, so grepping that response proves nothing either
-        # way.
-        #
-        # What is checkable without a browser: the compiled JS the browser
-        # would run. Reuses the same routes chunk the step above already
-        # located, and looks for the button's literal text and its
-        # data-testid. A negative control (a string that cannot exist)
-        # proves the grep can actually fail, so a false green cannot hide
-        # behind a check that matches everything.
-        # OW-T0388 2026-09-17: broadened from one guessed /assets/routes-*.js
-        # filename to every JS asset the page references, because the build
-        # no longer guarantees that one name (see vite.config.ts manualChunks
-        # comment). Same negative control, same two required markers, just
-        # searched across all referenced assets instead of a single guess.
-        run: |
-          set -euo pipefail
-          ASSETS=$(curl -s ${{ steps.target.outputs.verify_url }} | grep -oE '/assets/[^"]*\.js' | sort -u)
-          if [ -z "$ASSETS" ]; then
-            echo "::error::Could not find any JS asset reference on ${{ steps.target.outputs.verify_url }} -- cannot verify the connect entry point shipped."
-            exit 1
-          fi
-          BODY=""
-          for asset in $ASSETS; do
-            BODY="$BODY
-          $(curl -s "${{ steps.target.outputs.verify_url }}${asset}")"
-          done
-          if [ -z "$BODY" ]; then
-            echo "::error::JS assets at ${{ steps.target.outputs.verify_url }} fetched empty."
-            exit 1
-          fi
-          if grep -qF 'OWM_T0073_STRING_THAT_MUST_NEVER_MATCH' <<< "$BODY"; then
-            echo "::error::Negative control matched -- this check is broken and cannot be trusted."
-            exit 1
-          fi
-          FAILED=0
-          if ! grep -qF 'Connect a Bitcoin source' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the \"Connect a Bitcoin source\" button text (checked every JS asset referenced by the page)."
-            FAILED=1
-          fi
-          if ! grep -qF 'connections-add' <<< "$BODY"; then
-            echo "::error::Deployed bundle is missing the connections-add entry point marker (checked every JS asset referenced by the page)."
-            FAILED=1
-          fi
-          if [ "$FAILED" -ne 0 ]; then
-            exit 1
-          fi
-          echo "Connections entry point present in the deployed bundle (${{ steps.target.outputs.verify_url }})"
 
       # E2E smoke against the freshly-deployed environment. Chromium
       # only on every push so deploys stay fast; the Firefox / WebKit
