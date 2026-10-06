@@ -132,7 +132,10 @@ test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
     // push events only). test.skip() at test-body scope is reliable in all
     // Playwright versions; the describe-scope form was inconsistent in Playwright
     // 1.60 with serial describes (OW-T0398 CI observation).
-    if (!EMAIL || !PASSWORD || !VAULT_PW) { test.skip(); return; }
+    if (!EMAIL || !PASSWORD || !VAULT_PW) {
+      test.skip();
+      return;
+    }
     await signInAndUnlock(page);
     await openChangeVaultPasswordDialog(page);
     await submitChange(page, "definitely-wrong-password", VAULT_PW);
@@ -147,7 +150,10 @@ test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
     // push events only). test.skip() at test-body scope is reliable in all
     // Playwright versions; the describe-scope form was inconsistent in Playwright
     // 1.60 with serial describes (OW-T0398 CI observation).
-    if (!EMAIL || !PASSWORD || !VAULT_PW) { test.skip(); return; }
+    if (!EMAIL || !PASSWORD || !VAULT_PW) {
+      test.skip();
+      return;
+    }
     // CTO ruling OW-T0398 2026-10-01: use a same-value change (current === new ===
     // E2E_VAULT_PASSWORD). The dialog has no same-value guard (verified at
     // ChangeVaultPasswordDialog.submit and VaultContext.changeVaultPassword). A
