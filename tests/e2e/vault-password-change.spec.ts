@@ -122,22 +122,17 @@ async function readVaultRow(page: Page): Promise<VaultRow> {
 test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
   // Serial: tests share a single fixture account; races corrupt the vault row.
   test.describe.configure({ mode: "serial" });
-  // Skip all tests when push-context credentials are absent. On pull_request CI,
-  // E2E_USER_EMAIL / E2E_USER_PASSWORD / E2E_VAULT_PASSWORD resolve to '' in ci.yml.
-  // A file-scope test.skip(boolean) does not reliably propagate through a following
-  // test.describe() in Playwright 1.60: the tests ran with empty credentials and
-  // failed instead of skipping (Auditor finding B2, OW-T0398). Inside the describe
-  // block is the documented, tested pattern.
-  test.skip(
-    !EMAIL || !PASSWORD || !VAULT_PW,
-    "Push-context credentials absent; spec runs on push CI only",
-  );
   // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
   // carry typed values; without an artifact-upload step exposure is runner-only,
   // but there is no benefit to capturing them for a spec that runs correctly (M1).
   test.use({ trace: "off", screenshot: "off" });
 
   test("wrong current password is rejected and dialog stays open", async ({ page }) => {
+    // Push-context credentials absent on pull_request CI (E2E_* secrets gated to
+    // push events only). test.skip() at test-body scope is reliable in all
+    // Playwright versions; the describe-scope form was inconsistent in Playwright
+    // 1.60 with serial describes (OW-T0398 CI observation).
+    if (!EMAIL || !PASSWORD || !VAULT_PW) { test.skip(); return; }
     await signInAndUnlock(page);
     await openChangeVaultPasswordDialog(page);
     await submitChange(page, "definitely-wrong-password", VAULT_PW);
@@ -148,6 +143,11 @@ test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
   });
 
   test("same-value vault password change writes v1. and re-unlocks", async ({ page }) => {
+    // Push-context credentials absent on pull_request CI (E2E_* secrets gated to
+    // push events only). test.skip() at test-body scope is reliable in all
+    // Playwright versions; the describe-scope form was inconsistent in Playwright
+    // 1.60 with serial describes (OW-T0398 CI observation).
+    if (!EMAIL || !PASSWORD || !VAULT_PW) { test.skip(); return; }
     // CTO ruling OW-T0398 2026-10-01: use a same-value change (current === new ===
     // E2E_VAULT_PASSWORD). The dialog has no same-value guard (verified at
     // ChangeVaultPasswordDialog.submit and VaultContext.changeVaultPassword). A
