@@ -69,6 +69,19 @@ Deno.serve(async (req: Request) => {
   const to = url.searchParams.get("to");
   const granularity = url.searchParams.get("granularity") ?? "1d";
 
+  if (mode !== "latest" && mode !== "point" && mode !== "series") {
+    return jsonResponse({ error: "invalid mode" }, 400, corsHeaders);
+  }
+  if (!/^[A-Z0-9]{2,10}$/.test(quote)) {
+    return jsonResponse({ error: "invalid quote" }, 400, corsHeaders);
+  }
+  if (!/^[0-9]{1,3}[mhdw]$/.test(granularity)) {
+    return jsonResponse({ error: "invalid granularity" }, 400, corsHeaders);
+  }
+  if ([at, from, to].some((t) => t !== null && !isIsoTimestamp(t))) {
+    return jsonResponse({ error: "invalid timestamp" }, 400, corsHeaders);
+  }
+
   try {
     if (mode === "series") {
       // Always PostgREST: ZKA requires no quote filter (see module doc).
@@ -244,4 +257,10 @@ function shapeRate(r: Record<string, unknown>) {
 function minuteBucket(effectiveAt: Date): string {
   const minuteFloor = Math.floor(effectiveAt.getTime() / 60_000) * 60_000;
   return new Date(minuteFloor - 60_000).toISOString();
+}
+
+/** True for an ISO-8601 timestamp with a timezone, e.g. 2026-01-31T12:00:00.000Z. */
+function isIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T[\d:.]+(Z|[+-]\d{2}:\d{2})$/.test(value)) return false;
+  return !Number.isNaN(Date.parse(value));
 }
