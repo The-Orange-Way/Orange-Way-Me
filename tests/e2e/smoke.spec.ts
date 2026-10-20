@@ -1,5 +1,6 @@
 import { test, expect, type ConsoleMessage } from "@playwright/test";
 import { isFilteredConsoleMessage } from "./console-filter";
+import { stubOrbiRate } from "./orbi-rate-stub";
 
 /**
  * Smoke tests — catches CF Pages deployment regressions.
@@ -33,28 +34,8 @@ test.describe("landing page", () => {
 
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
-    // The rate proxy (orbi-rate) is a Supabase edge function that only exists on a
-    // deployed project. This job serves the PR build on loopback, so the smoke must
-    // not depend on that function being deployed or configured. Answer the call
-    // locally with "no rate"; the proxy has its own tests.
-    await page.route("**/functions/v1/orbi-rate*", (route) => {
-      const request = route.request();
-      const requested = request.headers()["access-control-request-headers"];
-      const cors = {
-        "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET, OPTIONS",
-        "access-control-allow-headers": requested ?? "authorization, apikey",
-      };
-      if (request.method() === "OPTIONS") {
-        return route.fulfill({ status: 204, headers: cors });
-      }
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        headers: cors,
-        body: "null",
-      });
-    });
+    // The rate proxy does not exist on the dev project until this change merges.
+    await stubOrbiRate(page);
     page.on("console", (msg: ConsoleMessage) => {
       if (msg.type() === "error") {
         consoleErrors.push(msg.text());
