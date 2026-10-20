@@ -183,11 +183,7 @@ async function seriesViaPostgREST(
   corsHeaders: Record<string, string>,
 ): Promise<Response> {
   if (!from || !to) {
-    return jsonResponse(
-      { error: "from and to are required for mode=series" },
-      400,
-      corsHeaders,
-    );
+    return jsonResponse({ error: "from and to are required for mode=series" }, 400, corsHeaders);
   }
 
   const params = new URLSearchParams();
@@ -200,10 +196,9 @@ async function seriesViaPostgREST(
   params.append("select", "target_currency,rate,bucket_ts");
   params.append("order", "bucket_ts.asc");
 
-  const resp = await fetch(
-    `${ORBI_DB_URL}/rest/v1/exchange_rates?${params.toString()}`,
-    { headers: orbiDbHeaders() },
-  );
+  const resp = await fetch(`${ORBI_DB_URL}/rest/v1/exchange_rates?${params.toString()}`, {
+    headers: orbiDbHeaders(),
+  });
 
   if (!resp.ok) {
     console.error(`[orbi-rate] PostgREST series ${resp.status}`);
