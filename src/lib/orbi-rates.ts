@@ -2,13 +2,13 @@
  * ORBI rate provider -- Orange Way Phase 1 integration.
  *
  * Reads multi-source volume-weighted-median Bitcoin rates from the Orange
- * Rails Bitcoin Index (ORBI) via the OWM orbi-rate edge function. The
+ * Rails Bitcoin Index (ORBI) via the orbi-rate edge function. The
  * Orange Rails credentials live in Supabase secrets server-side; the
  * browser never touches the Orange Rails project directly.
  *
- * Env (build time, already in bundle for other OWM features):
- *   VITE_SUPABASE_URL              OWM Supabase project URL
- *   VITE_SUPABASE_PUBLISHABLE_KEY  OWM anon key
+ * Env (build time, already in bundle for other app features):
+ *   VITE_SUPABASE_URL              App Supabase project URL
+ *   VITE_SUPABASE_PUBLISHABLE_KEY  App anon key
  *
  * Wired in via:
  *   - src/lib/fx-rates.ts         convert() reads the cached live rate for BTC/fiat
