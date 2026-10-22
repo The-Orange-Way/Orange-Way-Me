@@ -14,6 +14,7 @@ import type { Page, Route } from "@playwright/test";
  * These specs check pages, not the proxy.
  */
 const ORBI_RATE_URL = /\/functions\/v1\/orbi-rate(?:\?|$)/;
+const WIDGET_URL = /^https:\/\/[^./]+\.orangeway\.app\/widget(?:\?|$)/;
 
 export async function stubOrbiRate(page: Page): Promise<{ hits: () => number }> {
   let hits = 0;
@@ -34,6 +35,16 @@ export async function stubOrbiRate(page: Page): Promise<{ hits: () => number }> 
       contentType: "application/json",
       headers: cors,
       body: "null",
+    });
+  });
+  // A widget request to an orangeway.app host answers 429 to CI runners (seen in the
+  // OW-T0389 E2E runs). These specs check pages, not that widget, so answer it locally.
+  await page.route(WIDGET_URL, (route: Route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      headers: { "access-control-allow-origin": "*" },
+      body: "",
     });
   });
   return { hits: () => hits };
