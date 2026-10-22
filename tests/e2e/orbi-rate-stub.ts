@@ -15,8 +15,10 @@ import type { Page, Route } from "@playwright/test";
  */
 const ORBI_RATE_URL = /\/functions\/v1\/orbi-rate(?:\?|$)/;
 
-export async function stubOrbiRate(page: Page): Promise<void> {
+export async function stubOrbiRate(page: Page): Promise<{ hits: () => number }> {
+  let hits = 0;
   await page.route(ORBI_RATE_URL, (route: Route) => {
+    hits += 1;
     const request = route.request();
     const requested = request.headers()["access-control-request-headers"];
     const cors = {
@@ -34,4 +36,5 @@ export async function stubOrbiRate(page: Page): Promise<void> {
       body: "null",
     });
   });
+  return { hits: () => hits };
 }
