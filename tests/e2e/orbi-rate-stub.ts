@@ -16,10 +16,8 @@ import type { Page, Route } from "@playwright/test";
 const ORBI_RATE_URL = /\/functions\/v1\/orbi-rate(?:\?|$)/;
 const WIDGET_URL = /^https:\/\/[^./]+\.orangeway\.app\/widget(?:\?|$)/;
 
-export async function stubOrbiRate(page: Page): Promise<{ hits: () => number }> {
-  let hits = 0;
+export async function stubOrbiRate(page: Page): Promise<void> {
   await page.route(ORBI_RATE_URL, (route: Route) => {
-    hits += 1;
     const request = route.request();
     const requested = request.headers()["access-control-request-headers"];
     const cors = {
@@ -47,5 +45,4 @@ export async function stubOrbiRate(page: Page): Promise<{ hits: () => number }> 
       body: "",
     });
   });
-  return { hits: () => hits };
 }
