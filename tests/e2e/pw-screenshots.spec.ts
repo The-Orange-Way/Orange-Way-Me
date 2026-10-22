@@ -71,19 +71,10 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     let consoleErrors: string[] = [];
-    let stubHits: () => number = () => 0;
-    let failedResponses: string[] = [];
     test.beforeEach(async ({ page }) => {
       consoleErrors = [];
-      failedResponses = [];
       // The rate proxy does not exist on the dev project until this change merges.
-      stubHits = (await stubOrbiRate(page)).hits;
-      page.on("response", (res) => {
-        if (res.status() < 400) return;
-        const u = new URL(res.url());
-        const host = u.hostname.replace(/^[^.]+/, "*");
-        failedResponses.push(`${res.status()} ${host}${u.pathname}`);
-      });
+      await stubOrbiRate(page);
       page.on("console", (msg: ConsoleMessage) => {
         if (msg.type() === "error") consoleErrors.push(msg.text());
       });
@@ -132,9 +123,7 @@ for (const vp of VIEWPORTS) {
             !isFilteredConsoleMessage(e) &&
             !(route.path === "/auth" && e.includes("status of 401")),
         );
-        const seen = failedResponses.join(" | ") || "none";
-        const detail = `stubHits=${stubHits()}, status 400+: ${seen}`;
-        expect(significantErrors, `${route.label} no console errors (${detail})`).toEqual([]);
+        expect(significantErrors, `${route.label} no console errors`).toEqual([]);
       });
     }
   });
