@@ -97,7 +97,7 @@ export function GoalCard({ goal, accounts, txns, sharedWithGoalNames }: Props) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-baseline justify-between font-mono tabular-nums text-sm">
-                <span className="font-semibold text-base">{fmtUSD(prog.current)}</span>
+                <span className="font-semibold text-base">{fmtUSD(Math.min(prog.current, prog.target))}</span>
                 <span className="text-muted-foreground">of {fmtUSD(prog.target)}</span>
               </div>
               <Progress value={prog.pct * 100} className="h-2" />
