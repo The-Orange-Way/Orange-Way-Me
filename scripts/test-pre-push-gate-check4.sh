@@ -4,7 +4,7 @@
 # identity when a branch forward-merges dev, and proves this test can still
 # see a real failure.
 #
-# Run locally:  bash scripts/test-pre-push-gate-check4.sh
+# Run locally: bash scripts/test-pre-push-gate-check4.sh
 # Runs in CI as a step of .github/workflows/leak-check.yml.
 #
 # Why this exists. OWM-T0413 hit PUSH REFUSED on a branch that had done
