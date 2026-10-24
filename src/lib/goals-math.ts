@@ -159,16 +159,19 @@ export interface GoalsSummary {
  *    own target is what makes "progress across your goals" mean anything: money
  *    past a goal's finish line is not progress toward a different goal.
  *
- * Deliberately NOT handled here: two goals linked to the same account each
- * claim that whole balance, so one balance is still counted once per goal
- * (DL-1589). That needs a product decision on whether goals may share an
- * account at all, and deduping by account here would pre-empt it.
+ * 3. Two save_up goals linked to the same account each claimed the full
+ *    balance (DL-1589). Decision OWM-T0210: goals may share an account, but
+ *    the header dedupes by account ID so each account balance counts only once
+ *    toward the headline total.
  */
 export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary {
-  let saved = 0;
+  let savedFromOthers = 0;
   let target = 0;
   let counted = 0;
   let active = 0;
+
+  const accountById = new Map<string, Account>(accounts.map((a) => [a.id, a]));
+  const balanceBacked: Goal[] = [];
 
   for (const g of goals) {
     if (g.is_completed) continue;
@@ -176,10 +179,104 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
     const p = computeProgress(g, accounts);
     if (p.untrackableReason) continue;
     counted += 1;
-    saved += Math.min(p.current, p.target);
     target += p.target;
+
+    if (g.type === "save_up" && g.strategy !== "specific_amount") {
+      // Balance-backed goals are processed separately via connected components
+      // so the result is order-independent (see below).
+      balanceBacked.push(g);
+    } else {
+      // specific_amount uses a manual allocation (no linked-account balance),
+      // and pay_down uses starting-balance arithmetic -- neither can
+      // double-count a shared account.
+      savedFromOthers += Math.min(p.current, p.target);
+    }
   }
 
+  // Build connected components among balance-backed goals that share accounts.
+  // Two goals are in the same component if they share at least one linked
+  // account. For each component the total saved is capped at the sum of the
+  // component's unique account balances (OWM-T0210).
+  //
+  // This is order-independent: we never allocate an account to the first goal
+  // that claims it. Instead, each goal's individual saved (min of its balance
+  // sum and its target) is summed, then the total is capped at what is
+  // actually available across the component's accounts.
+  let savedFromBalanceBacked = 0;
+
+  if (balanceBacked.length > 0) {
+    const n = balanceBacked.length;
+    const parent: number[] = Array.from({ length: n }, (_, i) => i);
+
+    // Union-Find with path compression.
+    const find = (i: number): number => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]]; // path halving
+        i = parent[i];
+      }
+      return i;
+    };
+    const union = (a: number, b: number) => {
+      a = find(a);
+      b = find(b);
+      if (a !== b) parent[a] = b;
+    };
+
+    // Map each account to the indices of goals that link it.
+    const accountToGoals = new Map<string, number[]>();
+    for (let i = 0; i < n; i++) {
+      for (const aid of balanceBacked[i].linked_account_ids) {
+        if (!accountToGoals.has(aid)) accountToGoals.set(aid, []);
+        accountToGoals.get(aid)!.push(i);
+      }
+    }
+    // Goals sharing an account belong to the same component.
+    for (const indices of accountToGoals.values()) {
+      for (let j = 1; j < indices.length; j++) {
+        union(indices[0], indices[j]);
+      }
+    }
+
+    // Collect components: root index -> { goalIndices, accountIds }.
+    const components = new Map<number, { goalIndices: number[]; accountIds: Set<string> }>();
+    for (let i = 0; i < n; i++) {
+      const root = find(i);
+      if (!components.has(root)) {
+        components.set(root, { goalIndices: [], accountIds: new Set() });
+      }
+      const comp = components.get(root)!;
+      comp.goalIndices.push(i);
+      for (const aid of balanceBacked[i].linked_account_ids) comp.accountIds.add(aid);
+    }
+
+    for (const { goalIndices, accountIds } of components.values()) {
+      // Total balance available across all unique accounts in this component.
+      let available = 0;
+      for (const aid of accountIds) {
+        const a = accountById.get(aid);
+        if (a) available += Math.max(0, normalizedBalance(a));
+      }
+
+      // Sum each goal's individual saved without any dedup, then cap at what
+      // is actually available.
+      let componentSaved = 0;
+      for (const i of goalIndices) {
+        const g = balanceBacked[i];
+        const linkedAccounts = g.linked_account_ids
+          .map((aid) => accountById.get(aid))
+          .filter((a): a is Account => a !== undefined);
+        const current = linkedAccounts.reduce(
+          (sum, a) => sum + Math.max(0, normalizedBalance(a)),
+          0,
+        );
+        componentSaved += Math.min(current, Number(g.target_amount) || 0);
+      }
+
+      savedFromBalanceBacked += Math.min(componentSaved, available);
+    }
+  }
+
+  const saved = savedFromOthers + savedFromBalanceBacked;
   return { saved, target, pct: target > 0 ? saved / target : 0, counted, active };
 }
 
