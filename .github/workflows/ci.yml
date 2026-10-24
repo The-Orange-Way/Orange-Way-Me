@@ -232,7 +232,7 @@ jobs:
       # auth.setup.ts and authenticated-routes.spec.ts from this project,
       # so this cannot accidentally pick up the authenticated fixture.
       - name: Run Playwright (chromium smoke)
-        run: bunx playwright test --project=chromium --reporter=list,json
+        run: bunx playwright test --project=chromium --reporter=list,json,github
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173
           PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json

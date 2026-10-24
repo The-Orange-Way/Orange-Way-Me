@@ -12,6 +12,7 @@ import { test, expect, type ConsoleMessage } from "@playwright/test";
 import { mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { isFilteredConsoleMessage } from "./console-filter";
+import { stubOrbiRate } from "./orbi-rate-stub";
 
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const SHOT_DIR = path.join("tests/e2e/screenshots", TIMESTAMP);
@@ -72,6 +73,8 @@ for (const vp of VIEWPORTS) {
     let consoleErrors: string[] = [];
     test.beforeEach(async ({ page }) => {
       consoleErrors = [];
+      // The rate proxy does not exist on the dev project until this change merges.
+      await stubOrbiRate(page);
       page.on("console", (msg: ConsoleMessage) => {
         if (msg.type() === "error") consoleErrors.push(msg.text());
       });

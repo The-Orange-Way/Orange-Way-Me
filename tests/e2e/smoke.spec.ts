@@ -1,5 +1,6 @@
 import { test, expect, type ConsoleMessage } from "@playwright/test";
 import { isFilteredConsoleMessage } from "./console-filter";
+import { stubOrbiRate } from "./orbi-rate-stub";
 
 /**
  * Smoke tests — catches CF Pages deployment regressions.
@@ -33,6 +34,8 @@ test.describe("landing page", () => {
 
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
+    // The rate proxy does not exist on the dev project until this change merges.
+    await stubOrbiRate(page);
     page.on("console", (msg: ConsoleMessage) => {
       if (msg.type() === "error") {
         consoleErrors.push(msg.text());
