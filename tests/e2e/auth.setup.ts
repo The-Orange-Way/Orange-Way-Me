@@ -4,10 +4,10 @@
  * Playwright's "project dependencies" feature lets one project run
  * before another and pass its result (in this case, an authenticated
  * browser context's storageState) to the dependents. This spec is
- * the producer: it logs the test user in, unlocks the vault, and
- * writes the cookies plus localStorage to AUTH_STATE_PATH. Specs in
- * the `authenticated` project then load that state and skip the
- * login / unlock dance on every test.
+ * the producer: it obtains a session for the fixture account, unlocks
+ * the vault, and writes the cookies plus localStorage to
+ * AUTH_STATE_PATH. Specs in the `authenticated` project then load
+ * that state and skip the login / unlock dance on every test.
  *
  * Why a separate spec rather than a beforeAll:
  *   - Re-runs once, not per worker.
@@ -17,14 +17,31 @@
  *     codegen --load-storage=tests/e2e/.auth/user.json`).
  *
  * Inputs (env vars, all required):
- *   E2E_USER_EMAIL      Supabase auth email for the fixture test user
- *   E2E_USER_PASSWORD   Supabase auth password for the fixture test user
+ *   E2E_MINT_TOKEN      Bearer token accepted by the e2e-mint-session
+ *                       Edge Function (supabase/functions/e2e-mint-session).
+ *                       Single purpose: it can only mint a session for
+ *                       one hardcoded throwaway fixture account, never
+ *                       any real user, and it is unrelated to and
+ *                       independently revocable from the project's
+ *                       service-role key.
+ *   SUPABASE_URL        The dev Supabase project URL, used to reach the
+ *                       Edge Function and to derive the localStorage
+ *                       key supabase-js reads on startup.
  *   E2E_VAULT_PASSWORD  Vault password (the user-controlled secret the
  *                       client uses to derive the OPK key material;
  *                       see /security for the full scheme)
  *   PLAYWRIGHT_BASE_URL target URL. The harness REFUSES to run against
  *                       a production origin: see the preflight check
  *                       below for the deny list.
+ *
+ * Why this spec no longer types a password: the deployed dev sign-in
+ * screen is OTP-only (Cloudflare Turnstile plus an emailed code) and
+ * has no password field at all, verified against the live origin
+ * before this was built (see OWM-T0226). This spec instead mints a
+ * session server side and injects it as browser storage state before
+ * any app code runs, which is the same authenticated state a real
+ * sign-in would leave behind, without ever typing into, or even
+ * loading, the sign-in form.
  *
  * Behaviour when any input is missing:
  *   The setup test SKIPS (not throws) so `bunx playwright test`
@@ -58,8 +75,8 @@ import { AUTH_STATE_PATH } from "./auth-state-path";
 const FORBIDDEN_BASE_URL_HOSTS = ["orangeway.app", "www.orangeway.app"];
 
 setup("authenticate the test user and unlock the vault", async ({ page }) => {
-  const email = process.env.E2E_USER_EMAIL;
-  const password = process.env.E2E_USER_PASSWORD;
+  const mintToken = process.env.E2E_MINT_TOKEN;
+  const supabaseUrl = process.env.SUPABASE_URL;
   const vaultPassword = process.env.E2E_VAULT_PASSWORD;
 
   // Skip-not-throw when credentials are absent. Throwing here would
@@ -69,14 +86,14 @@ setup("authenticate the test user and unlock the vault", async ({ page }) => {
   // dependent project also skip cleanly and contributors see a
   // "skipped" line instead of a stack trace.
   setup.skip(
-    !email || !password || !vaultPassword,
-    "auth.setup.ts: skipping (E2E_USER_EMAIL / E2E_USER_PASSWORD / " +
+    !mintToken || !supabaseUrl || !vaultPassword,
+    "auth.setup.ts: skipping (E2E_MINT_TOKEN / SUPABASE_URL / " +
       "E2E_VAULT_PASSWORD not set). The authenticated suite skips with it.",
   );
   // After setup.skip, the test body still executes until the next
   // await; narrow the type so the rest of the spec sees non-empty
   // strings instead of `string | undefined`.
-  if (!email || !password || !vaultPassword) return;
+  if (!mintToken || !supabaseUrl || !vaultPassword) return;
 
   const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "";
   try {
@@ -98,25 +115,64 @@ setup("authenticate the test user and unlock the vault", async ({ page }) => {
   const authDir = path.dirname(AUTH_STATE_PATH);
   if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
 
-  // Step 1: Supabase auth.
-  await page.goto("/auth");
-  const emailField = page.locator("#si-email");
-  await emailField.waitFor({ state: "visible", timeout: 15000 });
-  await emailField.fill(email);
-  await page.locator("#si-pw").fill(password);
-  await page.getByRole("button", { name: /^sign in/i }).click();
+  // Step 1: mint a session for the fixture account server side, via
+  // the narrow e2e-mint-session Edge Function. This never types a
+  // password into the sign-in UI (dev sign-in is OTP-only and has no
+  // password field, see the ticket) and never puts the Supabase
+  // service-role key in a CI secret: the function holds that key as
+  // its own Supabase secret, and this spec only ever holds a
+  // single-purpose bearer token scoped to invoking this one function
+  // for this one hardcoded account.
+  const mintRes = await fetch(`${supabaseUrl}/functions/v1/e2e-mint-session`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${mintToken}` },
+  });
+  if (!mintRes.ok) {
+    throw new Error(
+      `auth.setup.ts: e2e-mint-session returned ${mintRes.status}. ` +
+        `Cannot authenticate the fixture account.`,
+    );
+  }
+  const { session } = (await mintRes.json()) as { session?: Record<string, unknown> };
+  if (!session) {
+    throw new Error("auth.setup.ts: e2e-mint-session returned no session.");
+  }
 
-  // Step 2: vault unlock. After successful auth, AuthScreen swaps to
-  // VaultGate, which asks for the vault password unless the device
-  // has a vault-cached marker (we're starting fresh so it always
-  // prompts).
+  // Step 2: inject the session as the exact key and shape supabase-js
+  // reads on startup, before any app code runs (context-level
+  // addInitScript, so a popup would be instrumented too). The
+  // storage key has no project-specific override in this bundle
+  // (verified against the deployed dev artifact), so it is always
+  // `sb-<project-ref>-auth-token`, and the session object returned by
+  // e2e-mint-session is already the exact shape supabase-js persists
+  // there, so no reshaping happens here.
+  const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
+  const storageKey = `sb-${projectRef}-auth-token`;
+  await page.context().addInitScript(
+    ([key, value]) => {
+      window.localStorage.setItem(key, value);
+    },
+    [storageKey, JSON.stringify(session)] as [string, string],
+  );
+
+  // Step 3: navigate straight to the authenticated app. AuthScreen
+  // reads the injected session on load and swaps to VaultGate, since
+  // this spec never touches the sign-in form at all.
+  await page.goto("/dashboard");
+
+  // Step 4: vault unlock. After the session is recognised, AuthScreen
+  // swaps to VaultGate, which asks for the vault password unless the
+  // device has a vault-cached marker (we're starting fresh so it
+  // always prompts). This is the screen this ticket exists to test,
+  // so it is unchanged from before.
   const vaultField = page.locator("#v-pw");
   await vaultField.waitFor({ state: "visible", timeout: 30000 });
   await vaultField.fill(vaultPassword);
   await page.getByRole("button", { name: /^unlock/i }).click();
 
-  // Step 3: confirm we landed on the post-unlock destination.
-  // The /auth route navigates to /dashboard once both gates pass.
+  // Step 5: confirm we landed on the post-unlock destination.
+  // The /auth route (and now the injected-session /dashboard load)
+  // navigates to /dashboard once both gates pass.
   await page.waitForURL((url) => url.pathname === "/dashboard", { timeout: 30000 });
   await expect(page.locator("body")).toBeVisible();
 
