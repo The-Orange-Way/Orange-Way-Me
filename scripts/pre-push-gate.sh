@@ -285,12 +285,21 @@ fi
 #
 # This is the same check as OWB's check 4 in scripts/pre-push-gate.sh,
 # kept in sync to preserve the design-twin property.
+#
+# --no-merges, matching check 6's exemption below. A merge commit's
+# COMMITTER field is GitHub's own automation identity (`GitHub
+# <noreply@github.com>`), set server-side by the "Merge pull request"
+# button/API, never by a contributor's local git config -- it is not the
+# leak pattern this check exists to catch. Without this flag, a branch
+# that merges in dev (rather than rebasing onto it) drags every merge
+# commit already on dev into the identity scan, including ones authored
+# by other contributors long before this push.
 ALLOWED_IDENT_RE='@users\.noreply\.github\.com$'
 for i in "${!LOCAL_SHAS[@]}"; do
   sha="${LOCAL_SHAS[$i]}"
   base="$(push_base "$sha" "${REMOTE_SHAS[$i]}")"
   if [ -n "$base" ]; then IDENT_RANGE="$base..$sha"; else IDENT_RANGE="$sha"; fi
-  BAD_IDENT=$(git log "$IDENT_RANGE" --format='%H %ae %ce' 2>/dev/null \
+  BAD_IDENT=$(git log --no-merges "$IDENT_RANGE" --format='%H %ae %ce' 2>/dev/null \
     | awk -v re="$ALLOWED_IDENT_RE" '$2 !~ re || $3 !~ re { print }')
   if [ -n "$BAD_IDENT" ]; then
     red "✗ Commit author or committer email is not a GitHub noreply:"
