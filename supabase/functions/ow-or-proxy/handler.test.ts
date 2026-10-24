@@ -1,5 +1,5 @@
 /**
- * OWM-T0231 / OW-T0231. Before this file, no test could execute
+ * OWM-T0231 / OW-T0231. Before this file, no test could run
  * ow-or-proxy's request logic at all: index.ts called Deno.serve at module
  * scope, read Deno.env at module scope, and imported supabase-js over an
  * https: URL, none of which vitest (Node) can import. The stealth mint
