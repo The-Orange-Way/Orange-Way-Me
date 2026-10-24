@@ -314,6 +314,41 @@ check 'structural categories: negative control: a clean tree exits 0' \
   '0' "$LAST_RC"
 
 # ----------------------------------------------------------------------
+# Category 2's id-level exemption (OWM-T0406)
+# ----------------------------------------------------------------------
+#
+# scan()'s strip_exempt argument is id-level, not line-level: it must drop
+# a line whose ONLY match is an allowed ticket id, and it must still catch
+# a line that carries an id AND a separate, real match. A ticket citation
+# and a description sitting on one line is the expected usage, not the
+# exotic case, so both directions need their own fixture.
+
+ID_ONLY="$WORK/id-only"
+mkdir -p "$ID_ONLY/scripts" "$ID_ONLY/src"
+cp "$SCAN" "$ID_ONLY/scripts/pre-publish-scan.sh"
+cp "$CANON" "$ID_ONLY/scripts/canon-terms.sh"
+printf '// Follow-up from OWM-T0406.\n' > "$ID_ONLY/src/id-only.ts"
+run_scan "$ID_ONLY" ci ""
+
+check 'id-level exemption: a line naming only a ticket id scans clean' \
+  '0' "$LAST_RC"
+
+ID_PLUS_LEAK="$WORK/id-plus-leak"
+mkdir -p "$ID_PLUS_LEAK/scripts" "$ID_PLUS_LEAK/src"
+cp "$SCAN" "$ID_PLUS_LEAK/scripts/pre-publish-scan.sh"
+cp "$CANON" "$ID_PLUS_LEAK/scripts/canon-terms.sh"
+printf '// OWM-T0406: still a leak, an OWM on its own here.\n' \
+  > "$ID_PLUS_LEAK/src/id-plus-leak.ts"
+run_scan "$ID_PLUS_LEAK" ci ""
+
+check 'id-level exemption: a ticket id sharing a line with a real match is still caught' \
+  '1' "$LAST_RC"
+check 'id-level exemption: the category is reported failing' \
+  'present' "$(has 'Internal codename: MB / OWM as acronym (1 findings)')"
+check 'id-level exemption: the finding keeps its file and line' \
+  'present' "$(has './src/id-plus-leak.ts:1')"
+
+# ----------------------------------------------------------------------
 # Evidence, for whoever reads this job log
 # ----------------------------------------------------------------------
 #
