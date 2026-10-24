@@ -71,7 +71,7 @@ jobs:
             const { approved, reason } = evaluateAuditorApproval(reviews, author, auditorLogin, headSha);
             console.log(reason);
 
-            await github.rest.checks.create({
+            const checkPayload = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               name: 'Auditor approval gate',
@@ -82,7 +82,39 @@ jobs:
                 title: approved ? 'Auditor approval present' : 'No qualifying Auditor approval',
                 summary: reason,
               },
+            };
+
+            // Find any check-run we already created for this exact name and
+            // head_sha (an earlier push or review event on this same commit)
+            // and update it in place instead of creating a new one. This is
+            // the actual fix for OWM-T0766: renaming the job (an earlier
+            // partial fix) stopped this check from colliding with GitHub's
+            // own automatic job-status check-run, but every trigger on the
+            // same head_sha (push, then a later review) still called
+            // checks.create() unconditionally, which could stack a second
+            // "Auditor approval gate" check-run at the same head_sha instead
+            // of updating the first one's conclusion. Reusing the run id
+            // guarantees exactly one check-run per head_sha by construction,
+            // instead of depending on timing between concurrent workflow runs.
+            const existing = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha,
+              check_name: 'Auditor approval gate',
             });
+
+            const mostRecent = existing
+              .slice()
+              .sort((a, b) => new Date(b.started_at) - new Date(a.started_at))[0];
+
+            if (mostRecent) {
+              await github.rest.checks.update({
+                ...checkPayload,
+                check_run_id: mostRecent.id,
+              });
+            } else {
+              await github.rest.checks.create(checkPayload);
+            }
 
             // Deliberately no core.setFailed here. The explicit check-run
             // created above is the single source of the verdict; failing
