@@ -242,6 +242,8 @@ describe("posthog scrubber", () => {
     const r = event({
       userPIN: "1234",
       PINHash: "abcd",
+      PINhash: "abcd",
+      userPINhash: "abcd",
       pin2: "1234",
       // Controls: these must still survive, same as the plain-token test.
       shipping_method: "post",
@@ -251,6 +253,8 @@ describe("posthog scrubber", () => {
 
     expect(r?.properties.userPIN).toBe("[redacted]");
     expect(r?.properties.PINHash).toBe("[redacted]");
+    expect(r?.properties.PINhash).toBe("[redacted]");
+    expect(r?.properties.userPINhash).toBe("[redacted]");
     expect(r?.properties.pin2).toBe("[redacted]");
 
     expect(r?.properties.shipping_method).toBe("post");
