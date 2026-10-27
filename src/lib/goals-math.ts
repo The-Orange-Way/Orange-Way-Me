@@ -8,14 +8,15 @@ import type { Goal } from "@/hooks/useGoals";
 import type { Account } from "@/lib/connectors";
 import type { DecryptedTxn } from "@/hooks/useTransactions";
 import { isBitcoinCurrency, normalizeBitcoinToSats, unitIsExact } from "@/lib/format";
+import { convert } from "@/lib/fx-rates";
 
 /**
  * A linked account's balance, normalized to sats when the currency is
  * Bitcoin-like so it is never summed at face value against a mismatched
- * unit. Non-Bitcoin currencies pass through unchanged (see the module-level
- * note on computeCurrent for the FX limitation this does not fix).
+ * unit. Non-Bitcoin currencies pass through unchanged (fiat FX is a
+ * separate concern: averageMonthlyContribution converts via convert()).
  */
-function normalizedBalance(a: Account): number {
+export function normalizedBalance(a: Account): number {
   const raw = Number(a.balance) || 0;
   if (!isBitcoinCurrency(a.currency)) return raw;
   return normalizeBitcoinToSats(raw, a.currency, { unitIsExact: unitIsExact(a.format_version) });
@@ -187,8 +188,20 @@ export function summariseGoals(goals: Goal[], accounts: Account[]): GoalsSummary
  * Average monthly contribution across the trailing N months of transactions
  * for the goal's linked accounts. For save_up: positive net inflow.
  * For pay_down: positive net outflow (payments) — measured as -net.
+ *
+ * Each txn is converted into primaryCurrency before it is added, using the
+ * txn's own currency as the source. Summing raw amounts mixed a CAD deposit
+ * with a sats-magnitude Bitcoin deposit at face value, so the 3mo avg on
+ * GoalCard/GoalDetailPage (and the pace fed to projectCompletionDate) was
+ * in no one unit. primaryCurrency defaults to USD so existing USD-only
+ * callers keep their numbers.
  */
-export function averageMonthlyContribution(goal: Goal, txns: DecryptedTxn[], months = 3): number {
+export function averageMonthlyContribution(
+  goal: Goal,
+  txns: DecryptedTxn[],
+  months = 3,
+  primaryCurrency = "USD",
+): number {
   if (goal.linked_account_ids.length === 0) return 0;
   const cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - months);
@@ -199,7 +212,8 @@ export function averageMonthlyContribution(goal: Goal, txns: DecryptedTxn[], mon
     if (!goal.linked_account_ids.includes(t.account_id)) continue;
     if (t.split_parent_id) continue;
     if (new Date(t.date + "T00:00:00").getTime() < cutoffMs) continue;
-    net += Number(t.amount) || 0;
+    const from = t.currency || primaryCurrency;
+    net += convert(Number(t.amount) || 0, from, primaryCurrency);
   }
   const perMonth = net / months;
   return goal.type === "save_up" ? perMonth : -perMonth;
@@ -225,7 +239,12 @@ export function projectCompletionDate(
   return d;
 }
 
-/** Order pay-down goals by avalanche or snowball. */
+/**
+ * Order pay-down goals by avalanche or snowball.
+ *
+ * Debt used for the sort is abs(normalizedBalance), not the raw face value.
+ * A stamped 1 BTC loan used to sort as "1" against a $5,000 card.
+ */
 export function orderPayDown(
   goals: Goal[],
   accounts: Account[],
@@ -235,7 +254,7 @@ export function orderPayDown(
     .filter((g) => g.type === "pay_down" && !g.is_completed)
     .map((g) => {
       const linked = accounts.filter((a) => g.linked_account_ids.includes(a.id));
-      const debt = linked.reduce((sum, a) => sum + Math.abs(Number(a.balance) || 0), 0);
+      const debt = linked.reduce((sum, a) => sum + Math.abs(normalizedBalance(a)), 0);
       const apr = Number(g.interest_rate ?? "0") || 0;
       return { goal: g, debt, apr };
     });
