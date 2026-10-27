@@ -236,6 +236,20 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:4173
           PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-report/results.json
+          # Public Supabase project config (not secrets). vault-password-change.spec.ts
+          # reads these directly from process.env at test-run time (not import.meta.env),
+          # so they must be set on THIS step, not only on the earlier Build step.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Credentials for the push-only AEAD vault password change spec.
+          # Same names auth.setup.ts already reads (E2E_USER_EMAIL / E2E_USER_PASSWORD /
+          # E2E_VAULT_PASSWORD). Gated to push events only (Auditor finding B2, OW-T0398):
+          # on pull_request these resolve to '', vault-password-change.spec.ts skips via
+          # its own test.skip guard (the spec runs in the chromium project and handles its
+          # own sign-in, so auth.setup.ts alone does not gate it).
+          E2E_USER_EMAIL: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_EMAIL || '' }}
+          E2E_USER_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_PASSWORD || '' }}
+          E2E_VAULT_PASSWORD: ${{ github.event_name == 'push' && secrets.OWM_DEV_E2E_VAULT_PASSWORD || '' }}
 
       # DL-0779 shape: a Playwright run that collects and skips every spec
       # still exits 0, so this reads the JSON report and fails the job
@@ -254,6 +268,13 @@ jobs:
             exit 1
           fi
           echo "Playwright executed $EXPECTED spec(s)."
+
+      - name: Guard required specs actually passed (tests/e2e/required-specs.json)
+        # OW-T0398 CTO ruling 2026-10-01, item 3: the zero-spec guard above only
+        # proves SOMETHING ran. This proves the push-only AEAD vault spec named
+        # in required-specs.json ran AND every one of its tests passed, so a
+        # push run cannot go green behind a skipped or failing required spec.
+        run: node scripts/assert-required-specs-passed.mjs tests/e2e/required-specs.json playwright-report/results.json "${{ github.event_name }}"
 
   migration-hygiene:
     name: Migration filename hygiene
