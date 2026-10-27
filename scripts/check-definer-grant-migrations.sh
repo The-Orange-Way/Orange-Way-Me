@@ -40,7 +40,10 @@
 # 1. CREATE FUNCTION defaults EXECUTE to PUBLIC, and CREATE OR REPLACE resets
 #    it to PUBLIC even after a clean revoke, with no GRANT line anywhere in
 #    the migration that changed it. A text scan of the diff cannot see that:
-#    there is nothing to find.
+#    there is nothing to find. RULE 2 below closes this gap for the four
+#    functions named in HARDENED_DEFINER_FUNCTIONS: an added CREATE OR
+#    REPLACE of one of them with no matching REVOKE in the same migration is
+#    refused. It stays open for every other SECURITY DEFINER function.
 # 2. A grant built at run time, inside a DO block or by EXECUTE format(...),
 #    where the grantee is not literal text in the migration.
 # 3. A grant that already sits in a file this pull request does not touch.
@@ -59,18 +62,23 @@
 # Diffs <base-ref>...<head-ref> for files under supabase/migrations, and scans
 # every line added by the PR (not the whole file, so an untouched grant in a
 # migration that already existed is not re-flagged by an unrelated edit to the
-# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, or a
+# same file) for a GRANT ... EXECUTE ... TO naming anon or PUBLIC, a
 # REVOKE ... FROM naming postgres on a function pg_cron calls (see CRON
-# CALLING ROLE PROTECTION below).
+# CALLING ROLE PROTECTION below), or an added CREATE OR REPLACE of a hardened
+# SECURITY DEFINER function with no matching REVOKE in the same file (see
+# RULE 2 below).
 #
 # OUTCOMES
 #   exit 0  PASS or NOTHING TO CHECK  no migration files changed, or none of
 #           the changed lines grant EXECUTE to anon or PUBLIC outside the
-#           allowlist, and none revoke EXECUTE from postgres on a protected
-#           cron-called function
+#           allowlist, none revoke EXECUTE from postgres on a protected
+#           cron-called function, and no hardened SECURITY DEFINER function is
+#           replaced with no matching revoke
 #   exit 1  VIOLATION                 a changed migration line grants EXECUTE
-#           to anon or PUBLIC on a function not on the allowlist, or revokes
-#           EXECUTE from postgres on a protected cron-called function
+#           to anon or PUBLIC on a function not on the allowlist, revokes
+#           EXECUTE from postgres on a protected cron-called function, or adds
+#           a CREATE OR REPLACE of a hardened SECURITY DEFINER function with
+#           no matching REVOKE in the same migration file
 #
 # The allowlist below MUST be kept identical to the one in
 # check-definer-grants.sh. It is duplicated rather than sourced because this
@@ -123,6 +131,20 @@
 #    a violation here, deliberately: default privilege changes apply only to
 #    objects created AFTER the statement runs, so it cannot retroactively
 #    remove EXECUTE that postgres already holds on an existing function.
+#
+# RULE 2: UNREVOKED REPLACE OF A HARDENED SECURITY DEFINER FUNCTION (OWM-T0599)
+# CREATE OR REPLACE FUNCTION resets a function's EXECUTE grant to PUBLIC by
+# Postgres default, even if it had previously been revoked down to
+# service_role. Rule 1 above only matches an explicit GRANT line, so a
+# migration that replaces one of the four functions named in
+# HARDENED_DEFINER_FUNCTIONS with no GRANT line anywhere passes rule 1 clean.
+# Rule 2 closes that: an added CREATE OR REPLACE FUNCTION of a hardened
+# function is refused unless a matching REVOKE EXECUTE for the same function
+# is also present in the same migration file, case and whitespace
+# insensitive. Scope is PR-time text scan only, same as rule 1: it does not
+# touch the live-database jobs in definer-grant-gate.yml, which stay as the
+# after-the-fact backstop for a grant that lands with no commit behind it at
+# all.
 
 set -uo pipefail
 
@@ -140,6 +162,12 @@ ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\t
 # currently declare. Both are called by pg_cron as role postgres: see CRON
 # CALLING ROLE PROTECTION above.
 PROTECTED_CRON_FUNCTIONS=$'expire_time_boxed_household_roles()\npurge_expired_old_household_key_wraps()'
+
+# RULE 2 target list: SECURITY DEFINER functions whose EXECUTE grant must
+# never be left at CREATE's PUBLIC default. Declared exactly once so a second
+# rule never gets a second, driftable copy of these four names (CTO condition
+# 3 on OWM-T0599: two copies of this list is a failure, not a style choice).
+HARDENED_DEFINER_FUNCTIONS=$'has_role\nadvance_household_rotation_job\nexpire_time_boxed_household_roles\npurge_expired_old_household_key_wraps'
 
 if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   echo "::error::CANNOT CHECK: base ref '${BASE_REF}' is not resolvable in this checkout. Was fetch-depth set to 0?" >&2
@@ -159,6 +187,7 @@ fi
 VIOLATIONS=()
 ALLOWED_HITS=0
 CRON_REVOKE_HITS=0
+RULE2_VIOLATIONS=()
 
 # Words that begin a TYPE rather than a parameter name. Used to decide whether
 # the first token of an argument is a name to drop or part of the type itself,
@@ -200,6 +229,27 @@ is_protected_cron_function() {
     || printf '%s\n' "$PROTECTED_CRON_FUNCTIONS" | grep -Fxq -- "$stripped"
 }
 
+# RULE 2: a CREATE OR REPLACE FUNCTION added for one of the hardened names in
+# HARDENED_DEFINER_FUNCTIONS resets EXECUTE to PUBLIC on the Postgres default.
+# If this file's added lines (buf, already comment-stripped and statement-
+# joined the same way rule 1 reads it) contain that replace and do NOT also
+# contain a REVOKE EXECUTE naming the same function, the reset is never taken
+# back and the migration is refused. Appends to RULE2_VIOLATIONS, declared at
+# top level alongside VIOLATIONS.
+check_rule2_unrevoked_replace() {
+  local file="$1" buf="$2" lowerbuf hfunc
+  lowerbuf=$(printf '%s' "$buf" | tr '[:upper:]' '[:lower:]')
+  while IFS= read -r hfunc; do
+    [ -n "$hfunc" ] || continue
+    if printf '%s' "$lowerbuf" | grep -Eq "create[[:space:]]+or[[:space:]]+replace[[:space:]]+function[[:space:]]+(public\.)?${hfunc}[[:space:]]*\("; then
+      if ! printf '%s' "$lowerbuf" | grep -Eq "revoke[[:space:]]+execute[[:space:]]+on[[:space:]]+function[[:space:]]+(public\.)?${hfunc}[[:space:]]*\([^)]*\)[[:space:]]+from"; then
+        RULE2_VIOLATIONS+=("${file}"$'\t'"${hfunc}")
+        echo "REFUSED (rule 2): ${file}: CREATE OR REPLACE FUNCTION ${hfunc} added with no matching REVOKE EXECUTE in the same migration; EXECUTE resets to PUBLIC by Postgres default."
+      fi
+    fi
+  done <<< "$HARDENED_DEFINER_FUNCTIONS"
+}
+
 while IFS= read -r FILE; do
   [ -n "$FILE" ] || continue
   # Only lines this PR ADDS, so an untouched GRANT already sitting in a file
@@ -212,6 +262,8 @@ while IFS= read -r FILE; do
   # line-at-a-time scan reports PASS on it and says nothing at all. Join the
   # added lines, drop line comments, collapse whitespace, split on ';'.
   BUFFER=$(printf '%s\n' "$ADDED_LINES" | sed 's/--.*$//' | tr '\n' ' ' | tr -s '[:space:]' ' ')
+
+  check_rule2_unrevoked_replace "$FILE" "$BUFFER"
 
   while IFS= read -r STMT; do
     [ -n "$STMT" ] || continue
@@ -344,7 +396,7 @@ done <<< "$CHANGED_FILES"
   echo "## SECURITY DEFINER EXECUTE grants, migration diff scan"
   echo
   echo "Migration files changed: $(printf '%s\n' "$CHANGED_FILES" | grep -c .)."
-  echo "Allowlisted grants added: ${ALLOWED_HITS}. Cron-revoke hits: ${CRON_REVOKE_HITS}. Refused: ${#VIOLATIONS[@]}."
+  echo "Rule 1 (unallowlisted GRANT). Allowlisted grants added: ${ALLOWED_HITS}. Cron-revoke hits: ${CRON_REVOKE_HITS}. Refused: ${#VIOLATIONS[@]}."
   if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
     echo
     echo "| file | function | grantee |"
@@ -363,12 +415,28 @@ done <<< "$CHANGED_FILES"
     echo "removes EXECUTE from postgres on a function pg_cron calls; that breaks the"
     echo "schedule silently and must come out of the migration."
   fi
+  echo
+  echo "Rule 2 (CREATE OR REPLACE with no matching REVOKE). Refused: ${#RULE2_VIOLATIONS[@]}."
+  if [ "${#RULE2_VIOLATIONS[@]}" -gt 0 ]; then
+    echo
+    echo "| file | function |"
+    echo "| --- | --- |"
+    for V in "${RULE2_VIOLATIONS[@]}"; do
+      F="${V%%$'\t'*}"
+      HF="${V#*$'\t'}"
+      printf '| `%s` | `%s` |\n' "$F" "$HF"
+    done
+    echo
+    echo "Add \`REVOKE EXECUTE ON FUNCTION public.<name>(...) FROM PUBLIC, anon[, authenticated];\`"
+    echo "to the SAME migration, matching the pattern the function's own original migration"
+    echo "already uses, or move the replace out until the revoke can ship with it."
+  fi
 } >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
-if [ "${#VIOLATIONS[@]}" -gt 0 ]; then
-  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon/PUBLIC EXECUTE grant(s) or protected cron-function EXECUTE revoke(s) added in this pull request's migrations."
+if [ "${#VIOLATIONS[@]}" -gt 0 ] || [ "${#RULE2_VIOLATIONS[@]}" -gt 0 ]; then
+  echo "::error::VIOLATION: ${#VIOLATIONS[@]} unallowlisted anon/PUBLIC EXECUTE grant(s) or protected cron-function EXECUTE revoke(s), and ${#RULE2_VIOLATIONS[@]} unrevoked CREATE OR REPLACE of a hardened SECURITY DEFINER function, added in this pull request's migrations."
   exit 1
 fi
 
-echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE; no cron-calling-role revoke on a protected function."
+echo "PASS: scanned $(printf '%s\n' "$CHANGED_FILES" | grep -c .) changed migration file(s); ${ALLOWED_HITS} allowlisted grant(s) added; no unallowlisted anon or PUBLIC EXECUTE; no cron-calling-role revoke on a protected function; no unrevoked CREATE OR REPLACE of a hardened SECURITY DEFINER function."
 exit 0
