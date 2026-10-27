@@ -127,87 +127,87 @@ async function readVaultRow(page: Page): Promise<VaultRow> {
 // When the if-block does not execute, Playwright sees zero tests from this file,
 // which is a clean result (OW-T0398 CI observation, 2026-10-07).
 if (EMAIL && PASSWORD && VAULT_PW) {
-test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
-  // Serial: tests share a single fixture account; races corrupt the vault row.
-  test.describe.configure({ mode: "serial" });
-  // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
-  // carry typed values; without an artifact-upload step exposure is runner-only,
-  // but there is no benefit to capturing them for a spec that runs correctly (M1).
-  test.use({ trace: "off", screenshot: "off" });
+  test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
+    // Serial: tests share a single fixture account; races corrupt the vault row.
+    test.describe.configure({ mode: "serial" });
+    // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
+    // carry typed values; without an artifact-upload step exposure is runner-only,
+    // but there is no benefit to capturing them for a spec that runs correctly (M1).
+    test.use({ trace: "off", screenshot: "off" });
 
-  test("wrong current password is rejected and dialog stays open", async ({ page }) => {
-    await signInAndUnlock(page);
-    await openChangeVaultPasswordDialog(page);
-    await submitChange(page, "definitely-wrong-password", VAULT_PW);
+    test("wrong current password is rejected and dialog stays open", async ({ page }) => {
+      await signInAndUnlock(page);
+      await openChangeVaultPasswordDialog(page);
+      await submitChange(page, "definitely-wrong-password", VAULT_PW);
 
-    // Dialog must remain open and an error notification must be visible.
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByRole("alert")).toBeVisible({ timeout: 8000 });
-  });
+      // Dialog must remain open and an error notification must be visible.
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(page.getByRole("alert")).toBeVisible({ timeout: 8000 });
+    });
 
-  test("same-value vault password change writes v1. and re-unlocks", async ({ page }) => {
-    // CTO ruling OW-T0398 2026-10-01: use a same-value change (current === new ===
-    // E2E_VAULT_PASSWORD). The dialog has no same-value guard (verified at
-    // ChangeVaultPasswordDialog.submit and VaultContext.changeVaultPassword). A
-    // same-value change still mints a fresh 16-byte kdf_salt and re-wraps the MEK
-    // (VaultContext.tsx 1441), giving a new enc_mek_ciphertext to assert on without
-    // the need for a rotate-and-restore cycle that is unsafe under CI cancellation.
-    test.setTimeout(180_000);
+    test("same-value vault password change writes v1. and re-unlocks", async ({ page }) => {
+      // CTO ruling OW-T0398 2026-10-01: use a same-value change (current === new ===
+      // E2E_VAULT_PASSWORD). The dialog has no same-value guard (verified at
+      // ChangeVaultPasswordDialog.submit and VaultContext.changeVaultPassword). A
+      // same-value change still mints a fresh 16-byte kdf_salt and re-wraps the MEK
+      // (VaultContext.tsx 1441), giving a new enc_mek_ciphertext to assert on without
+      // the need for a rotate-and-restore cycle that is unsafe under CI cancellation.
+      test.setTimeout(180_000);
 
-    // B4 requires VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY. Both are
-    // public CI vars present on push runs whenever E2E credentials are also available.
-    expect(SUPABASE_URL, "VITE_SUPABASE_URL must be set").toBeTruthy();
-    expect(SUPABASE_ANON_KEY, "VITE_SUPABASE_PUBLISHABLE_KEY must be set").toBeTruthy();
+      // B4 requires VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY. Both are
+      // public CI vars present on push runs whenever E2E credentials are also available.
+      expect(SUPABASE_URL, "VITE_SUPABASE_URL must be set").toBeTruthy();
+      expect(SUPABASE_ANON_KEY, "VITE_SUPABASE_PUBLISHABLE_KEY must be set").toBeTruthy();
 
-    // 1. Sign in and unlock vault.
-    await signInAndUnlock(page);
+      // 1. Sign in and unlock vault.
+      await signInAndUnlock(page);
 
-    // 2. Read vault row BEFORE the change (B4).
-    const rowBefore = await readVaultRow(page);
+      // 2. Read vault row BEFORE the change (B4).
+      const rowBefore = await readVaultRow(page);
 
-    // 3. Open the dialog and submit the same-value change.
-    await openChangeVaultPasswordDialog(page);
-    await submitChange(page, VAULT_PW, VAULT_PW);
+      // 3. Open the dialog and submit the same-value change.
+      await openChangeVaultPasswordDialog(page);
+      await submitChange(page, VAULT_PW, VAULT_PW);
 
-    // 4. Wait for success toast.
-    //    Tripwire: if the dialog rejects a same-value change, fail explicitly rather
-    //    than timing out or passing vacuously. CTO ruling OW-T0398 (2026-10-01) says
-    //    the form has no same-value guard. If this fires, revisit the ruling -- never
-    //    work around it by adding rotation back.
-    const toast = page.getByText(/vault password changed/i);
-    try {
-      await toast.waitFor({ state: "visible", timeout: 15000 });
-    } catch {
-      const alertVisible = await page.getByRole("alert").isVisible();
-      const dialogOpen = await page.getByRole("dialog").isVisible();
-      if (alertVisible && dialogOpen) {
-        throw new Error("TRIPWIRE: same-value change rejected; revisit the OW-T0398 ruling");
+      // 4. Wait for success toast.
+      //    Tripwire: if the dialog rejects a same-value change, fail explicitly rather
+      //    than timing out or passing vacuously. CTO ruling OW-T0398 (2026-10-01) says
+      //    the form has no same-value guard. If this fires, revisit the ruling -- never
+      //    work around it by adding rotation back.
+      const toast = page.getByText(/vault password changed/i);
+      try {
+        await toast.waitFor({ state: "visible", timeout: 15000 });
+      } catch {
+        const alertVisible = await page.getByRole("alert").isVisible();
+        const dialogOpen = await page.getByRole("dialog").isVisible();
+        if (alertVisible && dialogOpen) {
+          throw new Error("TRIPWIRE: same-value change rejected; revisit the OW-T0398 ruling");
+        }
+        throw new Error("vault password change: success toast did not appear within 15s");
       }
-      throw new Error("vault password change: success toast did not appear within 15s");
-    }
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+      await expect(page.getByRole("dialog")).not.toBeVisible();
 
-    // 5. Read vault row AFTER the change (B4).
-    const rowAfter = await readVaultRow(page);
+      // 5. Read vault row AFTER the change (B4).
+      const rowAfter = await readVaultRow(page);
 
-    // B4 assertions per CTO ruling OW-T0398 2026-10-01:
-    //   enc_mek_ciphertext must differ AND carry the AEAD v1. envelope prefix.
-    //   kdf_salt must differ (new 16-byte salt minted at VaultContext.tsx 1441).
-    //   verifier_ciphertext is NOT asserted: changeVaultPassword does not write it.
-    const wrappedBefore = rowBefore.enc_mek_ciphertext;
-    const wrappedAfter = rowAfter.enc_mek_ciphertext;
-    expect(wrappedAfter, "wrapped key must change").not.toBe(wrappedBefore);
-    expect(wrappedAfter, "wrapped key must carry the AEAD v1. prefix").toMatch(/^v1\./);
-    expect(rowAfter.kdf_salt, "kdf_salt must change").not.toBe(rowBefore.kdf_salt);
+      // B4 assertions per CTO ruling OW-T0398 2026-10-01:
+      //   enc_mek_ciphertext must differ AND carry the AEAD v1. envelope prefix.
+      //   kdf_salt must differ (new 16-byte salt minted at VaultContext.tsx 1441).
+      //   verifier_ciphertext is NOT asserted: changeVaultPassword does not write it.
+      const wrappedBefore = rowBefore.enc_mek_ciphertext;
+      const wrappedAfter = rowAfter.enc_mek_ciphertext;
+      expect(wrappedAfter, "wrapped key must change").not.toBe(wrappedBefore);
+      expect(wrappedAfter, "wrapped key must carry the AEAD v1. prefix").toMatch(/^v1\./);
+      expect(rowAfter.kdf_salt, "kdf_salt must change").not.toBe(rowBefore.kdf_salt);
 
-    // 6. Sign out and sign back in with the SAME password to prove the re-wrapped key
-    //    is decryptable end-to-end through the real UI.
-    //    NOT A BLOCKER per CTO OW-T0398: a cancel between the UPDATE and rewrapUserKeypair
-    //    (VaultContext.tsx 1485-1498) could leave the keypair stale; if unlock fails here
-    //    that is a product finding -- report it, do not skip the step.
-    await clearAuthSession(page);
-    await signInAndUnlock(page, VAULT_PW);
-    expect(page.url()).toContain("/dashboard");
+      // 6. Sign out and sign back in with the SAME password to prove the re-wrapped key
+      //    is decryptable end-to-end through the real UI.
+      //    NOT A BLOCKER per CTO OW-T0398: a cancel between the UPDATE and rewrapUserKeypair
+      //    (VaultContext.tsx 1485-1498) could leave the keypair stale; if unlock fails here
+      //    that is a product finding -- report it, do not skip the step.
+      await clearAuthSession(page);
+      await signInAndUnlock(page, VAULT_PW);
+      expect(page.url()).toContain("/dashboard");
+    });
   });
-});
 }
