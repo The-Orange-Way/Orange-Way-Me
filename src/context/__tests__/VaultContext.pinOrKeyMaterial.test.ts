@@ -100,9 +100,10 @@ describe("VaultContext.pinOrKeyMaterial (exhausted-retry reporting)", () => {
       errorClass: expect.any(String),
       attempts: 3,
     });
+    expect(updateEq).toHaveBeenCalledTimes(3);
   });
 
-  it("Case B: no sentinel value (userId, ciphertext, salt) appears in the captureException payload", async () => {
+  it("Case B: no sentinel value (userId, ciphertext, salt, raw key bytes) appears in the captureException payload", async () => {
     const updateEq = vi.fn().mockResolvedValue({ error: { message: "backend write error" } });
     fromMock.mockReturnValue({ update: vi.fn().mockReturnValue({ eq: updateEq }) });
 
@@ -112,10 +113,32 @@ describe("VaultContext.pinOrKeyMaterial (exhausted-retry reporting)", () => {
 
     // ZKA invariant: the observability payload must never carry user identity,
     // sealed material, or the salt the key was derived under.
-    const serialized = JSON.stringify(captureException.mock.calls[0]);
-    expect(serialized).not.toContain(TEST_USER_ID);
-    expect(serialized).not.toContain(WRAPPED_CIPHERTEXT);
-    expect(serialized).not.toContain(TEST_SALT);
+    //
+    // JSON.stringify(Error) = {} because message and stack are non-enumerable
+    // properties; they must be checked directly on the Error object, not via
+    // JSON serialization.
+    const [capturedError, opts] = captureException.mock.calls[0] as [
+      Error,
+      { extra: Record<string, unknown> },
+    ];
+
+    // Check the Error message and stack trace directly.
+    const errorText = `${capturedError.message}\n${capturedError.stack ?? ""}`;
+    expect(errorText).not.toContain(TEST_USER_ID);
+    expect(errorText).not.toContain(WRAPPED_CIPHERTEXT);
+    expect(errorText).not.toContain(TEST_SALT);
+
+    // Check the options payload via JSON serialization (safe: no Error objects inside).
+    const optsText = JSON.stringify(opts);
+    expect(optsText).not.toContain(TEST_USER_ID);
+    expect(optsText).not.toContain(WRAPPED_CIPHERTEXT);
+    expect(optsText).not.toContain(TEST_SALT);
+
+    // The raw OR MEK bytes (mock returns Uint8Array [1, 2, 3, 4], base64 "AQIDBA==")
+    // must not appear in any encoding in the payload.
+    const OR_MEK_B64 = "AQIDBA==";
+    expect(errorText).not.toContain(OR_MEK_B64);
+    expect(optsText).not.toContain(OR_MEK_B64);
   });
 
   it("Case C: captureException not called when attempt 1 fails and attempt 2 succeeds", async () => {
@@ -127,6 +150,7 @@ describe("VaultContext.pinOrKeyMaterial (exhausted-retry reporting)", () => {
 
     await resolveAndDrain();
 
+    expect(updateEq).toHaveBeenCalledTimes(2);
     expect(captureException).not.toHaveBeenCalled();
   });
 });
