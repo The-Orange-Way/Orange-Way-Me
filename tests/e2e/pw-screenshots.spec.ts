@@ -118,10 +118,20 @@ for (const vp of VIEWPORTS) {
         // interacted). Browser logs that as a generic "Failed to load
         // resource: 401". That's expected; the form still renders and is
         // interactive.
+        // Second /auth carve-out: Cloudflare Turnstile (the captcha widget)
+        // probes a data: URL and the page's Content Security Policy blocks
+        // it. Chromium logs the violation and the failed fetch as console
+        // errors. That is third-party noise, not an app error. It is scoped
+        // to /auth and to these two known message shapes, so any other
+        // console error, on any route, still fails the test.
+        const isTurnstileNoise = (e: string): boolean =>
+          (e.includes("data:,") && e.includes("challenges.cloudflare.com")) ||
+          e.includes("Fetch API cannot load data:,");
         const significantErrors = consoleErrors.filter(
           (e) =>
             !isFilteredConsoleMessage(e) &&
-            !(route.path === "/auth" && e.includes("status of 401")),
+            !(route.path === "/auth" && e.includes("status of 401")) &&
+            !(route.path === "/auth" && isTurnstileNoise(e)),
         );
         expect(significantErrors, `${route.label} no console errors`).toEqual([]);
       });
