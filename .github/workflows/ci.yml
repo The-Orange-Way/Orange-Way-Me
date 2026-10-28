@@ -197,6 +197,13 @@ jobs:
           VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          # Cloudflare's published always-passes Turnstile TEST sitekey, the
+          # same value deploy.yml uses on the dev arm. The dev Auth project
+          # enforces captcha, so without it the widget renders nothing, the
+          # sign-in carries no captchaToken and every credentialed spec
+          # (vault-password-change) is refused. Safe here: this bundle is
+          # served on loopback only and is never deployed.
+          VITE_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
 
       # Serve the freshly built bundle on loopback and block until the port
       # answers, so a preview that has not finished starting fails loudly
