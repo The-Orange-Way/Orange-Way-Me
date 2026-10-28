@@ -127,13 +127,16 @@ async function readVaultRow(page: Page): Promise<VaultRow> {
 // When the if-block does not execute, Playwright sees zero tests from this file,
 // which is a clean result (OW-T0398 CI observation, 2026-10-07).
 if (EMAIL && PASSWORD && VAULT_PW) {
+  // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
+  // carry typed values; without an artifact-upload step exposure is runner-only,
+  // but there is no benefit to capturing them for a spec that runs correctly (M1).
+  // Set at file scope: Playwright refuses trace/screenshot in a describe group
+  // because those options force a new worker.
+  test.use({ trace: "off", screenshot: "off" });
+
   test.describe("AEAD vault password change round-trip (OW-T0398)", () => {
     // Serial: tests share a single fixture account; races corrupt the vault row.
     test.describe.configure({ mode: "serial" });
-    // No trace or screenshot: this spec fills vault passwords. Traces and screenshots
-    // carry typed values; without an artifact-upload step exposure is runner-only,
-    // but there is no benefit to capturing them for a spec that runs correctly (M1).
-    test.use({ trace: "off", screenshot: "off" });
 
     test("wrong current password is rejected and dialog stays open", async ({ page }) => {
       await signInAndUnlock(page);
