@@ -45,6 +45,7 @@ import {
   randomBytesB64,
   unwrapOrMekWithVaultMek,
   wrapOrMekWithVaultMek,
+  buildVaultAad,
 } from "@/lib/vault";
 
 import { CURRENT_OR_KEY_EPOCH, planOrKeyMaterial } from "../or-key-material";
@@ -56,6 +57,23 @@ const PW_NEW = "new-password-battery-staple-14c";
 
 /** Stands in for a row an account synced BEFORE anything rotated. */
 const SEALED_PLAINTEXT = "orange-rails-payload-sealed-before-the-rotation";
+
+/**
+ * Both sealed values in this suite live in ONE user's vault_metadata row, so
+ * each is bound to that row and to its own column. The two AADs are
+ * deliberately different: that is what stops the wrapped MEK and the wrapped
+ * Orange Rails key from being swapped for one another.
+ */
+const MEK_AAD = buildVaultAad({
+  table: "vault_metadata",
+  column: "enc_mek_ciphertext",
+  rowId: USER_ID,
+});
+const OR_MEK_AAD = buildVaultAad({
+  table: "vault_metadata",
+  column: "enc_or_mek_ciphertext",
+  rowId: USER_ID,
+});
 
 const EMPTY_ROW: OrKeyMaterialRow = {
   enc_or_mek_ciphertext: null,
@@ -101,7 +119,7 @@ async function openSealedAfterRotation(saltMatches: boolean): Promise<string> {
   if (plan.mode !== "unwrap") {
     throw new Error(`expected unwrap, got ${plan.mode}`);
   }
-  const recovered = await unwrapOrMekWithVaultMek(plan.ciphertext, vaultMekAfter);
+  const recovered = await unwrapOrMekWithVaultMek(plan.ciphertext, vaultMekAfter, OR_MEK_AAD);
   const creds = await deriveOrCredsKeyFromMek(recovered, plan.saltContext);
   return decryptText(fixture.sealed, creds);
 }
@@ -118,9 +136,9 @@ beforeAll(async () => {
   // password rather than derived from it. That is the property C3 depends on.
   const mekRaw = crypto.getRandomValues(new Uint8Array(32));
   const wrapMek = (pw: string, salt: string) =>
-    strategy.wrapMekWithPassword(mekRaw.buffer as ArrayBuffer, pw, salt);
+    strategy.wrapMekWithPassword(mekRaw.buffer as ArrayBuffer, pw, salt, MEK_AAD);
   const unwrapMek = (ct: string, pw: string, salt: string) =>
-    strategy.unwrapMekWithPassword(ct, pw, salt);
+    strategy.unwrapMekWithPassword(ct, pw, salt, MEK_AAD);
 
   const encBefore = await wrapMek(PW_OLD, saltOld);
   const mekBefore = await unwrapMek(encBefore, PW_OLD, saltOld);
@@ -135,7 +153,7 @@ beforeAll(async () => {
   const kOld = await deriveOrMekBytes(PW_OLD, USER_ID, pinPlan.saltContext);
   const kOldAgain = await deriveOrMekBytes(PW_OLD, USER_ID, pinPlan.saltContext);
   const pinned: OrKeyMaterialRow = {
-    enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(kOld, vaultMekBefore),
+    enc_or_mek_ciphertext: await wrapOrMekWithVaultMek(kOld, vaultMekBefore, OR_MEK_AAD),
     or_subkey_salt: pinPlan.saltContext,
     or_key_epoch: pinPlan.epoch,
   };
@@ -182,14 +200,14 @@ describe("Orange Rails key material across a kdf_salt rotation", () => {
     expect(fixture.pinned.or_key_epoch).toBe(CURRENT_OR_KEY_EPOCH);
 
     const ct = fixture.pinned.enc_or_mek_ciphertext as string;
-    const unwrapped = await unwrapOrMekWithVaultMek(ct, fixture.vaultMekBefore);
+    const unwrapped = await unwrapOrMekWithVaultMek(ct, fixture.vaultMekBefore, OR_MEK_AAD);
     expect(toHex(unwrapped)).toBe(toHex(fixture.kOld));
   });
 
   it("C2 PIN: what is stored is genuinely sealed, not open to another key", async () => {
     const otherMek = await importMekFromRaw(crypto.getRandomValues(new Uint8Array(32)));
     const ct = fixture.pinned.enc_or_mek_ciphertext as string;
-    await expect(unwrapOrMekWithVaultMek(ct, otherMek)).rejects.toThrow();
+    await expect(unwrapOrMekWithVaultMek(ct, otherMek, OR_MEK_AAD)).rejects.toThrow();
   });
 
   /**
@@ -219,7 +237,7 @@ describe("Orange Rails key material across a kdf_salt rotation", () => {
     // pinned key under a rotated salt still moves all four subkeys.
     expect(plan.saltContext).toBe(fixture.saltOld);
 
-    const recovered = await unwrapOrMekWithVaultMek(plan.ciphertext, vaultMekAfter);
+    const recovered = await unwrapOrMekWithVaultMek(plan.ciphertext, vaultMekAfter, OR_MEK_AAD);
     expect(toHex(recovered)).toBe(toHex(fixture.kOld));
   });
 

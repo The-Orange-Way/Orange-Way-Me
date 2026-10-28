@@ -20,7 +20,20 @@ import {
   wrapMekWithRecovery,
   unwrapMekWithRecovery,
   randomBytes,
+  buildVaultAad,
 } from "../vault";
+
+/**
+ * These tests are about recovery-code normalization, not about binding, so
+ * every wrap and unwrap here uses the same AAD. It still has to be a REAL
+ * one: the parameter is required precisely so that no caller can quietly
+ * seal a value with nothing bound to it.
+ */
+const AAD = buildVaultAad({
+  table: "vault_metadata",
+  column: "recovery_ciphertext",
+  rowId: "00000000-0000-4000-8000-000000000001",
+});
 
 /** wrapMekWithRecovery takes an ArrayBuffer; randomBytes hands back a view. */
 function freshMek(): ArrayBuffer {
@@ -29,7 +42,7 @@ function freshMek(): ArrayBuffer {
 
 async function unwraps(wrapped: string, attempt: string): Promise<boolean> {
   try {
-    await unwrapMekWithRecovery(wrapped, attempt);
+    await unwrapMekWithRecovery(wrapped, attempt, AAD);
     return true;
   } catch {
     return false;
@@ -40,7 +53,7 @@ describe("recovery code accepts a correctly-typed code", () => {
   it("accepts the code exactly as generated", async () => {
     const code = await generateRecoveryCode();
     const mek = freshMek();
-    expect(await unwraps(await wrapMekWithRecovery(mek, code), code)).toBe(true);
+    expect(await unwraps(await wrapMekWithRecovery(mek, code, AAD), code)).toBe(true);
   });
 
   it.each([
@@ -53,14 +66,14 @@ describe("recovery code accepts a correctly-typed code", () => {
   ])("accepts a code retyped with %s", async (_label, mangle) => {
     const code = await generateRecoveryCode();
     const mek = freshMek();
-    const wrapped = await wrapMekWithRecovery(mek, code);
+    const wrapped = await wrapMekWithRecovery(mek, code, AAD);
     expect(await unwraps(wrapped, mangle(code))).toBe(true);
   });
 
   it("still refuses a code with a wrong word", async () => {
     const code = await generateRecoveryCode();
     const mek = freshMek();
-    const wrapped = await wrapMekWithRecovery(mek, code);
+    const wrapped = await wrapMekWithRecovery(mek, code, AAD);
     const words = code.split(" ");
     words[5] = words[5] === "abacus" ? "zoom" : "abacus";
     expect(await unwraps(wrapped, words.join(" "))).toBe(false);
@@ -69,7 +82,7 @@ describe("recovery code accepts a correctly-typed code", () => {
   it("still refuses a code with the words reordered", async () => {
     const code = await generateRecoveryCode();
     const mek = freshMek();
-    const wrapped = await wrapMekWithRecovery(mek, code);
+    const wrapped = await wrapMekWithRecovery(mek, code, AAD);
     const words = code.split(" ");
     [words[0], words[1]] = [words[1], words[0]];
     expect(await unwraps(wrapped, words.join(" "))).toBe(false);
@@ -79,7 +92,7 @@ describe("recovery code accepts a correctly-typed code", () => {
     // Collapsing runs of whitespace must not delete the separator itself.
     const code = await generateRecoveryCode();
     const mek = freshMek();
-    const wrapped = await wrapMekWithRecovery(mek, code);
+    const wrapped = await wrapMekWithRecovery(mek, code, AAD);
     expect(await unwraps(wrapped, code.replace(" ", ""))).toBe(false);
   });
 
@@ -92,8 +105,8 @@ describe("recovery code accepts a correctly-typed code", () => {
     expect(legacyNormalized).toBe(legacyNormalized.replace(/\s+/g, " "));
 
     const mek = freshMek();
-    const wrapped = await wrapMekWithRecovery(mek, legacyNormalized);
-    const out = await unwrapMekWithRecovery(wrapped, code);
+    const wrapped = await wrapMekWithRecovery(mek, legacyNormalized, AAD);
+    const out = await unwrapMekWithRecovery(wrapped, code, AAD);
     expect(out).toEqual(new Uint8Array(mek));
   });
 });

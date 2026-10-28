@@ -65,6 +65,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       row: EMPTY_ROW,
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     // (2) no key material at all comes back on the refuse path.
@@ -110,6 +111,7 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       row: EMPTY_ROW,
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     expect(result.ok).toBe(false);
@@ -142,15 +144,138 @@ describe("resolveOrKeyMaterial (VaultContext's OR key-material caller)", () => {
       },
       kdfSalt: "brand-new-salt-minted-by-recovery",
       saltMatchesExistingRows: false,
+      deferPinUntilProven: false,
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
     expect(result.orMekBytes).toEqual(new Uint8Array([1, 2, 3, 4]));
-    expect(unwrapOrMekWithVaultMek).toHaveBeenCalledWith("sealed-blob", expect.anything());
+    expect(unwrapOrMekWithVaultMek).toHaveBeenCalledWith(
+      "sealed-blob",
+      expect.anything(),
+      expect.any(Uint8Array),
+    );
+    // And it is bound to THIS user's row and THIS column, not merely to
+    // something. A pinned blob lifted out of another user's row has to stop
+    // opening here, and the only thing that makes it stop is what goes in
+    // this third argument.
+    const aadArg = unwrapOrMekWithVaultMek.mock.calls[0][2] as Uint8Array;
+    expect(new TextDecoder().decode(aadArg)).toBe(
+      "owm/v1|public.vault_metadata|enc_or_mek_ciphertext|user-1",
+    );
     // Unwrap does not re-pin: the row already carries the current pin, so
     // pinOrKeyMaterial is never reached on this path either.
     expect(deriveOrMekBytes).not.toHaveBeenCalled();
     expect(wrapOrMekWithVaultMek).not.toHaveBeenCalled();
+  });
+
+  it("returns a pendingPin instead of writing when deferPinUntilProven is true, for the ambiguous fully-unpinned row (OWM-T0584)", async () => {
+    const { resolveOrKeyMaterial } = await import("../VaultContext");
+    const updateMock = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockReturnValue({ update: updateMock });
+    deriveOrMekBytes.mockResolvedValue(new Uint8Array([9, 9, 9]));
+    const mek = {} as CryptoKey;
+
+    const result = await resolveOrKeyMaterial({
+      userId: "user-1",
+      password: "current-password",
+      mek,
+      row: EMPTY_ROW,
+      kdfSalt: "current-salt",
+      // Every OR column null AND the caller reports the salt has not rotated:
+      // planOrKeyMaterial resolves this to "derive-and-pin" regardless of
+      // whether the account is brand-new or a residual gap (see the
+      // pendingPin doc comment in VaultContext.tsx). This is the exact
+      // ambiguous shape the ticket exists for.
+      saltMatchesExistingRows: true,
+      deferPinUntilProven: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.orMekBytes).toEqual(new Uint8Array([9, 9, 9]));
+    expect(result.pendingPin).toEqual({
+      userId: "user-1",
+      mek,
+      orMekBytes: new Uint8Array([9, 9, 9]),
+      saltContext: "current-salt",
+      epoch: CURRENT_OR_KEY_EPOCH,
+    });
+
+    // The key comes back for immediate session use, but nothing is written:
+    // that is the whole point of deferring.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(wrapOrMekWithVaultMek).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("still writes the pin immediately when deferPinUntilProven is false, for the same ambiguous row", async () => {
+    const { resolveOrKeyMaterial } = await import("../VaultContext");
+    const updateEq = vi.fn().mockResolvedValue({ error: null });
+    const updateMock = vi.fn().mockReturnValue({ eq: updateEq });
+    fromMock.mockReturnValue({ update: updateMock });
+    deriveOrMekBytes.mockResolvedValue(new Uint8Array([9, 9, 9]));
+    wrapOrMekWithVaultMek.mockResolvedValue("wrapped-ciphertext");
+
+    const result = await resolveOrKeyMaterial({
+      userId: "user-1",
+      password: "current-password",
+      mek: {} as CryptoKey,
+      row: EMPTY_ROW,
+      kdfSalt: "current-salt",
+      saltMatchesExistingRows: true,
+      deferPinUntilProven: false,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect("pendingPin" in result).toBe(false);
+
+    // Immediate pin is fire-and-forget (`void`, not awaited): flush a turn
+    // before asserting the write landed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(wrapOrMekWithVaultMek).toHaveBeenCalledWith(
+      new Uint8Array([9, 9, 9]),
+      expect.anything(),
+      expect.any(Uint8Array),
+    );
+    // The AAD must bind this specific column and this specific user, so a
+    // wrapped blob cannot be lifted into another column or another row.
+    const wrapAadArg = wrapOrMekWithVaultMek.mock.calls[0][2] as Uint8Array;
+    expect(new TextDecoder().decode(wrapAadArg)).toBe(
+      "owm/v1|public.vault_metadata|enc_or_mek_ciphertext|user-1",
+    );
+    expect(updateMock).toHaveBeenCalledWith({
+      enc_or_mek_ciphertext: "wrapped-ciphertext",
+      or_subkey_salt: "current-salt",
+      or_key_epoch: CURRENT_OR_KEY_EPOCH,
+    });
+  });
+
+  it("never returns a pendingPin for an unwrap plan, even when deferPinUntilProven is true", async () => {
+    const { resolveOrKeyMaterial } = await import("../VaultContext");
+    fromMock.mockReturnValue({ update: vi.fn().mockReturnValue({ eq: vi.fn() }) });
+    unwrapOrMekWithVaultMek.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
+
+    const result = await resolveOrKeyMaterial({
+      userId: "user-1",
+      password: "current-password",
+      mek: {} as CryptoKey,
+      row: {
+        enc_or_mek_ciphertext: "sealed-blob",
+        or_subkey_salt: "salt-at-pin-time",
+        or_key_epoch: CURRENT_OR_KEY_EPOCH,
+      },
+      kdfSalt: "current-salt",
+      saltMatchesExistingRows: true,
+      // Deferring only ever matters on a "derive-and-pin" plan. An already
+      // pinned row resolves to "unwrap" regardless of this flag, and unwrap
+      // never produces a pendingPin because there is nothing left to pin.
+      deferPinUntilProven: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect("pendingPin" in result).toBe(false);
   });
 });

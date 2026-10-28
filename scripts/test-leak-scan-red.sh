@@ -4,9 +4,9 @@
 # Run locally:  bash scripts/test-leak-scan-red.sh
 # Runs in CI as a step of .github/workflows/leak-check.yml.
 #
-# Why this exists. The reserved-term category prints file and line only when
-# it runs in CI, because a job log on a public repository is public and those
-# matches are internal strings by definition. Withholding output is the
+# Why this exists. Every category prints file and line only when it runs in
+# CI, because a job log on a public repository is public and the matches are
+# content the scanner exists to keep off that surface. Withholding output is the
 # easiest possible way to turn a working scanner into a silent one, and a
 # silent scanner produces output indistinguishable from a clean tree. Every
 # defect this gate has had has been an absence that read as green: a term
@@ -96,21 +96,42 @@ new_fixture() {
 LAST_OUT=""
 LAST_RC=0
 
-# run_scan <fixture dir> <ci|local> <term list, empty for unconfigured>
+# run_scan <fixture dir> <ci|github-actions|self-test|local>
+#          <term list, empty for unconfigured>
 #
-# The scanner keys its redaction off the CI variable, which GitHub Actions
-# sets for every step, so the local case has to remove it explicitly rather
-# than assume it is absent.
+# The scanner treats either CI indicator as sufficient for redaction. The
+# self-test mode keeps those indicators set and uses the scanner's narrow
+# escape hatch to inspect invented canaries. The local case removes every
+# control explicitly rather than assuming it is absent.
 run_scan() {
   local dir="$1" mode="$2" list="${3:-}"
   local rc=0
-  if [ "$mode" = ci ]; then
-    LAST_OUT="$(CI=true OW_RESERVED_TERMS="$list" \
-      bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
-  else
-    LAST_OUT="$(env -u CI OW_RESERVED_TERMS="$list" \
-      bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
-  fi
+  case "$mode" in
+    ci)
+      LAST_OUT="$(env -u GITHUB_ACTIONS -u LEAK_SCAN_SELF_TEST_SHOW_MATCHES \
+        CI=true OW_RESERVED_TERMS="$list" \
+        bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
+      ;;
+    github-actions)
+      LAST_OUT="$(env -u CI -u LEAK_SCAN_SELF_TEST_SHOW_MATCHES \
+        GITHUB_ACTIONS=true OW_RESERVED_TERMS="$list" \
+        bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
+      ;;
+    self-test)
+      LAST_OUT="$(CI=true GITHUB_ACTIONS=true \
+        LEAK_SCAN_SELF_TEST_SHOW_MATCHES=1 OW_RESERVED_TERMS="$list" \
+        bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
+      ;;
+    local)
+      LAST_OUT="$(env -u CI -u GITHUB_ACTIONS \
+        -u LEAK_SCAN_SELF_TEST_SHOW_MATCHES OW_RESERVED_TERMS="$list" \
+        bash "$dir/scripts/pre-publish-scan.sh" 2>&1)" || rc=$?
+      ;;
+    *)
+      printf 'FAIL: unknown run mode: %s\n' "$mode" >&2
+      exit 1
+      ;;
+  esac
   LAST_RC="$rc"
 }
 
@@ -151,6 +172,16 @@ check 'the withholding is announced rather than left silent' \
 
 check 'the run ends by refusing the tree, not by calling it clean' \
   'present' "$(has 'Leaks found')"
+
+# Some callers deliberately sanitize CI while GitHub Actions keeps its own
+# marker. Either marker on its own must keep the public-log behavior.
+run_scan "$PLANTED" github-actions "$TERM"
+
+check 'GITHUB_ACTIONS alone still makes the scan exit non-zero' \
+  '1' "$LAST_RC"
+
+check 'GITHUB_ACTIONS alone still withholds the matched text' \
+  'absent' "$(has "$TERM")"
 
 # ----------------------------------------------------------------------
 # The same tree on a workstation
@@ -216,45 +247,70 @@ check 'the other-case finding withholds its matched text too' \
   'absent' "$(has "$TERM_OTHER_CASE")"
 
 # ----------------------------------------------------------------------
-# Category 4: Tailnet address redaction
+# Every structural category
 # ----------------------------------------------------------------------
 #
-# Category 4 scans for Tailscale CGNAT addresses and MagicDNS hostnames.
-# The planted address is built from two halves at runtime so this file
-# does not itself match the CGNAT pattern when the scan runs against the
-# repository tree. (This file is in EXEMPT_GENERIC as belt-and-suspenders.)
+# Each current scan call gets its own invented fixture. This guards the
+# reporting policy at the customer-visible output boundary: every finding
+# must keep its path and line in CI, withhold its content, and remain
+# inspectable only through the self-test escape hatch. The tailnet address is
+# built from two halves so this file does not itself match that category when
+# the scan runs against the repository tree. (This file is also in
+# EXEMPT_GENERIC as belt-and-suspenders.)
 _CAT4_A="100.6"
 _CAT4_B="4.0.1"
 PLANTED_TAILNET="${_CAT4_A}${_CAT4_B}"
 
-TAILNET="$(new_fixture tailnet "$PLANTED_TAILNET")"
-run_scan "$TAILNET" ci ""
-TAILNET_CI_OUT="$LAST_OUT"
+STRUCTURAL_NAMES=(
+  'Internal codename: MB / OWM as acronym'
+  'D-number milestone tags'
+  'SEC-N audit tags'
+  'CQ-N code-quality tags'
+  'DB-N database-audit tags'
+  'PERF-N performance-audit tags'
+  'Dead PR references'
+  'Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix)'
+)
+STRUCTURAL_CANARIES=(
+  'MB —'
+  'D12: fixture'
+  'SEC-912'
+  'CQ-913'
+  'DB-914'
+  'PERF-915'
+  'PR #916'
+  "$PLANTED_TAILNET"
+)
 
-check 'category 4: a tailnet address makes the scan exit non-zero' \
-  '1' "$LAST_RC"
+STRUCTURAL_CI_OUT=""
+for i in "${!STRUCTURAL_NAMES[@]}"; do
+  name="${STRUCTURAL_NAMES[$i]}"
+  canary="${STRUCTURAL_CANARIES[$i]}"
+  fixture="$(new_fixture "structural-$i" "$canary")"
 
-check 'category 4: the tailnet category is reported failing' \
-  'present' "$(has 'Tailnet addresses (Tailscale CGNAT range / MagicDNS suffix) (1 findings)')"
+  run_scan "$fixture" ci ""
+  STRUCTURAL_CI_OUT="$LAST_OUT"
 
-check 'category 4: the finding names the file and line' \
-  'present' "$(has './src/planted.ts:1')"
+  check "$name: a fixture makes the scan exit non-zero" \
+    '1' "$LAST_RC"
+  check "$name: the category is reported failing" \
+    'present' "$(has "$name (1 findings)")"
+  check "$name: the finding keeps its file and line" \
+    'present' "$(has './src/planted.ts:1')"
+  check "$name: CI withholds the matched content" \
+    'absent' "$(has "$canary")"
+  check "$name: withholding is announced" \
+    'present' "$(has 'matched text withheld')"
 
-check 'category 4: the matched address is withheld from the CI log' \
-  'absent' "$(has "$PLANTED_TAILNET")"
-
-check 'category 4: the withholding is announced rather than left silent' \
-  'present' "$(has 'matched text withheld')"
-
-run_scan "$TAILNET" local ""
-
-check 'category 4: a local run prints the address so the finding stays fixable' \
-  'present' "$(has "$PLANTED_TAILNET")"
+  run_scan "$fixture" self-test ""
+  check "$name: the self-test escape hatch exposes its invented canary" \
+    'present' "$(has "$canary")"
+done
 
 CLEAN_TAILNET="$(new_fixture tailnet_clean)"
 run_scan "$CLEAN_TAILNET" ci ""
 
-check 'category 4: negative control: a clean tree exits 0' \
+check 'structural categories: negative control: a clean tree exits 0' \
   '0' "$LAST_RC"
 
 # ----------------------------------------------------------------------
@@ -269,8 +325,8 @@ check 'category 4: negative control: a clean tree exits 0' \
 printf '\nobserved output, planted fixture, CI mode:\n'
 printf '%s\n' "$PLANTED_CI_OUT" | sed 's/^/    | /'
 
-printf '\nobserved output, tailnet fixture, CI mode:\n'
-printf '%s\n' "$TAILNET_CI_OUT" | sed 's/^/    | /'
+printf '\nobserved output, final structural fixture, CI mode:\n'
+printf '%s\n' "$STRUCTURAL_CI_OUT" | sed 's/^/    | /'
 
 printf '\n%d passed, %d failed\n\n' "$PASSED" "$FAILED"
 

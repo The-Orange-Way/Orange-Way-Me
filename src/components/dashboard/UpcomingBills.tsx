@@ -70,7 +70,16 @@ export function UpcomingBills() {
               // Use the merchant's most-frequent currency by checking the accounts
               // we've seen. Fall back to primary.
               const cur = prefs.primaryCurrency;
-              const amount = convert(b.typicalAmount, cur, prefs.primaryCurrency);
+              // unitIsExact has to be passed HERE, not only on the formatCurrency
+              // call below. When cur is "BTC", convert()'s own BTC branch runs
+              // typicalAmount through normalizeBitcoinToSats before doing any
+              // conversion arithmetic, so a whole-number bill average is misread
+              // as sats at this line, before the value ever reaches the
+              // formatter -- passing the flag only downstream is too late, the
+              // number is already wrong.
+              const amount = convert(b.typicalAmount, cur, prefs.primaryCurrency, {
+                unitIsExact: true,
+              });
               return (
                 <div
                   key={b.key}
@@ -91,6 +100,7 @@ export function UpcomingBills() {
                   <span className="shrink-0 font-mono text-sm tabular-nums">
                     {fmt.formatCurrency(amount, prefs.primaryCurrency, {
                       maximumFractionDigits: 2,
+                      unitIsExact: true,
                     })}
                   </span>
                   <button

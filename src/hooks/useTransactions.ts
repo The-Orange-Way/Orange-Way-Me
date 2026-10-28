@@ -83,11 +83,12 @@ const txnsTable = () => supabase.from("transactions");
 
 const BATCH = 50;
 
-async function decryptInBatches(
+export async function decryptInBatches(
   rows: RawRow[],
   decryptText: (s: string) => Promise<string>,
-): Promise<DecryptedTxn[]> {
+): Promise<{ items: DecryptedTxn[]; failCount: number }> {
   const out: DecryptedTxn[] = [];
+  let failCount = 0;
   for (let i = 0; i < rows.length; i += BATCH) {
     const slice = rows.slice(i, i + BATCH);
     const decoded = await Promise.allSettled(
@@ -115,9 +116,10 @@ async function decryptInBatches(
     for (const result of decoded) {
       // Skip rows encrypted with a different vault key (orphaned from prior sessions).
       if (result.status === "fulfilled") out.push(result.value);
+      else failCount++;
     }
   }
-  return out;
+  return { items: out, failCount };
 }
 
 export function useTransactions(opts: {
@@ -131,6 +133,7 @@ export function useTransactions(opts: {
   const [items, setItems] = useState<DecryptedTxn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [decryptFailCount, setDecryptFailCount] = useState(0);
   const cacheRef = useRef<Map<string, DecryptedTxn>>(new Map());
 
   const refresh = useCallback(async () => {
@@ -167,12 +170,13 @@ export function useTransactions(opts: {
           toDecrypt.push(r);
         }
       });
-      const decrypted = await decryptInBatches(toDecrypt, decryptText);
+      const { items: decrypted, failCount } = await decryptInBatches(toDecrypt, decryptText);
       decrypted.forEach((d) => {
         cacheRef.current.set(d.id, d);
         const idx = indexMap.get(d.id);
         if (idx !== undefined) interim[idx] = d;
       });
+      setDecryptFailCount(failCount);
       setItems(interim.filter((x): x is DecryptedTxn => x !== null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load transactions");
@@ -459,7 +463,12 @@ export function useTransactions(opts: {
         .order("date", { ascending: false })
         .limit(500);
       if (e) throw new Error(e.message);
-      return decryptInBatches((data ?? []) as RawRow[], decryptText);
+      const { items: hits, failCount } = await decryptInBatches(
+        (data ?? []) as RawRow[],
+        decryptText,
+      );
+      setDecryptFailCount((prev) => prev + failCount);
+      return hits;
     },
     [user, getHmacKey, decryptText],
   );
@@ -484,6 +493,7 @@ export function useTransactions(opts: {
     error,
     refresh,
     totals,
+    decryptFailCount,
     createTransaction,
     bulkCreateTransactions,
     createTransfer,
