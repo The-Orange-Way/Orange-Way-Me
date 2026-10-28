@@ -59,10 +59,20 @@ async function clearAuthSession(page: Page): Promise<void> {
 }
 
 /**
- * Navigate to /settings/security and open the Change vault password dialog.
+ * Navigate to /settings/security by clicking through the app and open the
+ * Change vault password dialog.
+ *
+ * Never page.goto() here: VaultContext keeps isUnlocked in React state only
+ * (ZKA, not persisted), so a full navigation re-locks the vault and the route
+ * renders VaultGate instead of the Security page. Users click through the app,
+ * so the spec does too. Selectors are href-based so a collapsed sidebar (icon
+ * only) still matches; :visible skips the hidden mobile drawer copy.
  */
 async function openChangeVaultPasswordDialog(page: Page): Promise<void> {
-  await page.goto("/settings/security");
+  await page.locator('a[href="/settings"]:visible').first().click();
+  await page.waitForURL((url) => url.pathname === "/settings", { timeout: 15000 });
+  await page.locator('a[href="/settings/security"]:visible').first().click();
+  await page.waitForURL((url) => url.pathname === "/settings/security", { timeout: 15000 });
   await page.getByRole("button", { name: /change vault password/i }).click();
   await page.getByRole("dialog").waitFor({ state: "visible" });
 }
