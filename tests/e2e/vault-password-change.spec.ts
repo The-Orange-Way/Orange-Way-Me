@@ -58,6 +58,11 @@ async function clearAuthSession(page: Page): Promise<void> {
   });
 }
 
+/** The sonner error toast (toastError / toast.error); see the first test. */
+function errorToast(page: Page) {
+  return page.locator('[data-sonner-toast][data-type="error"]').first();
+}
+
 /**
  * Navigate to /settings/security by clicking through the app and open the
  * Change vault password dialog.
@@ -160,8 +165,11 @@ if (EMAIL && PASSWORD && VAULT_PW) {
       await submitChange(page, "definitely-wrong-password", VAULT_PW);
 
       // Dialog must remain open and an error notification must be visible.
+      // The dialog reports failure through toastError() (sonner). sonner 2.x
+      // renders toasts inside an aria-live region with NO role="alert", so
+      // getByRole("alert") can never match; target the error toast itself.
       await expect(page.getByRole("dialog")).toBeVisible();
-      await expect(page.getByRole("alert")).toBeVisible({ timeout: 8000 });
+      await expect(errorToast(page)).toBeVisible({ timeout: 8000 });
     });
 
     test("same-value vault password change writes v1. and re-unlocks", async ({ page }) => {
@@ -197,7 +205,7 @@ if (EMAIL && PASSWORD && VAULT_PW) {
       try {
         await toast.waitFor({ state: "visible", timeout: 15000 });
       } catch {
-        const alertVisible = await page.getByRole("alert").isVisible();
+        const alertVisible = await errorToast(page).isVisible();
         const dialogOpen = await page.getByRole("dialog").isVisible();
         if (alertVisible && dialogOpen) {
           throw new Error("TRIPWIRE: same-value change rejected; revisit the OW-T0398 ruling");
