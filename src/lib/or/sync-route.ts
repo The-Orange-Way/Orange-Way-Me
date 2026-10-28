@@ -64,3 +64,46 @@ export function planSyncRoute(conn: SyncRouteCandidate): SyncRoute {
   if (conn.is_stealth === true) return "private";
   return "or-sync";
 }
+
+/**
+ * Run the handler for this route, and no other.
+ *
+ * planSyncRoute answers WHERE a press goes. This function is what actually
+ * sends it there. The two used to be one if-chain inside
+ * ConnectionsPage.handleSync, and deleting the private arm failed no test:
+ * the press fell through to requestOrSync, which refuses (OWM-T0544, no key
+ * leak) but the user saw "Sync failed" instead of the private-path scan
+ * (OWM-T0590).
+ *
+ * Handlers are injected so a test can assert the private handler ran and the
+ * or-sync handler did not, with no page, no vault, and no network. That is
+ * the whole reason this is a function rather than an if-chain in the click
+ * handler.
+ *
+ * The kill switch is not an input here, for the same reason it is not an
+ * input to planSyncRoute: an off switch must not move a private connection
+ * onto the or-sync handler.
+ */
+export type SyncDispatchHandlers = {
+  bank: () => void | Promise<void>;
+  private: () => void | Promise<void>;
+  "or-sync": () => void | Promise<void>;
+};
+
+export function dispatchSync(
+  route: SyncRoute,
+  handlers: SyncDispatchHandlers,
+): void | Promise<void> {
+  switch (route) {
+    case "bank":
+      return handlers.bank();
+    case "private":
+      return handlers.private();
+    case "or-sync":
+      return handlers["or-sync"]();
+    default: {
+      const _exhaustive: never = route;
+      throw new Error(`Unhandled sync route: ${String(_exhaustive)}`);
+    }
+  }
+}
