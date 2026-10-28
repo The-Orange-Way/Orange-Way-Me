@@ -27,14 +27,17 @@ async function signInAndUnlock(page: Page, vaultPassword = VAULT_PW): Promise<vo
 
   // A fresh Playwright context always prompts for vault unlock before /dashboard.
   // waitFor (not isVisible) is required: isVisible answers instantly ignoring its
-  // timeout argument and misses a heading that has not yet rendered (H2).
-  const unlockHeading = page.getByRole("heading", { name: /unlock vault/i });
-  const unlockVisible = await unlockHeading
-    .waitFor({ state: "visible", timeout: 30000 })
+  // timeout argument and misses a field that has not yet rendered (H2).
+  // Wait on the #v-pw input, the stable test hook auth.setup.ts also uses. The
+  // gate heading reads "Unlock your vault", which /unlock vault/i never matched,
+  // so the old wait always ran out and consumed the whole test timeout.
+  const vaultField = page.locator("#v-pw");
+  const unlockVisible = await vaultField
+    .waitFor({ state: "visible", timeout: 20000 })
     .then(() => true)
     .catch(() => false);
   if (unlockVisible) {
-    await page.locator("#v-pw").fill(vaultPassword);
+    await vaultField.fill(vaultPassword);
     await page.getByRole("button", { name: /^unlock/i }).click();
   }
 
@@ -139,6 +142,9 @@ if (EMAIL && PASSWORD && VAULT_PW) {
     test.describe.configure({ mode: "serial" });
 
     test("wrong current password is rejected and dialog stays open", async ({ page }) => {
+      // Sign-in, captcha, vault unlock (KDF) and the dialog round-trip do not fit
+      // the 30s project default; the sibling test already raises its own budget.
+      test.setTimeout(90_000);
       await signInAndUnlock(page);
       await openChangeVaultPasswordDialog(page);
       await submitChange(page, "definitely-wrong-password", VAULT_PW);
