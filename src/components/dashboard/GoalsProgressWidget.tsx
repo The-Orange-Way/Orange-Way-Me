@@ -50,9 +50,7 @@ export function GoalsProgressWidget() {
         ) : (
           <div className="space-y-3">
             {top.map((g) => {
-              const p = computeProgress(g, accounts);
-              const linkedAcct = accounts.find((a) => g.linked_account_ids.includes(a.id));
-              const goalCurrency = linkedAcct?.currency ?? prefs.primaryCurrency;
+              const p = computeProgress(g, accounts, prefs.primaryCurrency);
               return (
                 <Link
                   key={g.id}
@@ -87,8 +85,8 @@ export function GoalsProgressWidget() {
                     <>
                       <Progress value={p.pct * 100} className="mt-2 h-1.5" />
                       <div className="mt-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-muted-foreground">
-                        <span>{fmt.formatCurrency(p.current, goalCurrency)}</span>
-                        <span>of {fmt.formatCurrency(p.target, goalCurrency)}</span>
+                        <span>{fmt.formatCurrency(p.current, prefs.primaryCurrency)}</span>
+                        <span>of {fmt.formatCurrency(p.target, prefs.primaryCurrency)}</span>
                       </div>
                     </>
                   )}
