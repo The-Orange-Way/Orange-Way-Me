@@ -8,7 +8,8 @@ import { VaultProvider } from "@/context/VaultContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { RootErrorFallback } from "@/components/error/RootErrorFallback";
 import { logBoundaryError } from "@/components/error/logError";
-import { refreshLiveBTCRate } from "@/lib/orbi-rates";
+import { getLiveBTCRate, isBtcRateStale, refreshLiveBTCRate } from "@/lib/orbi-rates";
+import { StaleBtcRateNotice } from "@/components/app/StaleBtcRateNotice";
 import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
 import { isMarketingPath } from "@/lib/observability/analytics-surface";
 
@@ -72,6 +73,11 @@ function RootComponent() {
   // Whether posthog.init has run. Init is deferred until the user is on a
   // marketing route, so inside the app the SDK is never initialised at all.
   const analyticsStarted = useRef(false);
+
+  // True when the cached Bitcoin price is older than the stale limit, or no live
+  // price could be loaded. isBtcRateStale stays false until the first refresh has
+  // settled, so there is no warning flash on load.
+  const [btcRateStale, setBtcRateStale] = useState(() => isBtcRateStale("USD"));
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -151,8 +157,15 @@ function RootComponent() {
   // in if the fetch fails (offline, ORBI down, env unset).
   useEffect(() => {
     if (typeof window === "undefined") return;
-    void refreshLiveBTCRate("USD");
-    const id = setInterval(() => void refreshLiveBTCRate("USD"), 60_000);
+    const refresh = async () => {
+      try {
+        await refreshLiveBTCRate("USD");
+      } finally {
+        setBtcRateStale(isBtcRateStale("USD"));
+      }
+    };
+    void refresh();
+    const id = setInterval(() => void refresh(), 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -162,6 +175,9 @@ function RootComponent() {
         <AuthProvider>
           <VaultProvider>
             <HeadContent />
+            {btcRateStale && !isMarketingPath(location.pathname) && (
+              <StaleBtcRateNotice bucketTs={getLiveBTCRate("USD")?.bucketTs ?? null} />
+            )}
             <Outlet />
             <Suspense fallback={null}>
               <Toaster />
