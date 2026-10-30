@@ -87,12 +87,18 @@ function toORBIRate(data: unknown): ORBIRate | null {
 
 // ── In-memory cache --------------------------------------------------------
 
+/** How old a bucket timestamp can be before we consider the price stale. */
+export const STALE_RATE_MAX_MS = 30 * 60 * 1_000; // 30 minutes
+
 interface LiveRateSnapshot {
   rate: number;
   tier: ORBIRate["tier"];
   providerCount: number;
   composite: boolean;
+  /** Wall-clock time when this snapshot was fetched (Date.now()). */
   fetchedAt: number;
+  /** ISO timestamp of the ORBI price bucket this rate belongs to. */
+  bucketTs: string;
 }
 
 const liveBTCRates = new Map<string, LiveRateSnapshot>();
@@ -111,9 +117,22 @@ export async function refreshLiveBTCRate(target: string): Promise<LiveRateSnapsh
     providerCount: r.providerCount,
     composite: r.composite,
     fetchedAt: Date.now(),
+    bucketTs: r.bucketTs,
   };
   liveBTCRates.set(target.toUpperCase(), snap);
   return snap;
+}
+
+/**
+ * True when the cached BTC rate bucket is older than STALE_RATE_MAX_MS,
+ * or when no snapshot exists or the bucket timestamp is missing/invalid.
+ */
+export function isBtcRateStale(target: string): boolean {
+  const snap = getLiveBTCRate(target.toUpperCase());
+  if (!snap || !snap.bucketTs) return true;
+  const bucketTime = new Date(snap.bucketTs).getTime();
+  if (Number.isNaN(bucketTime)) return true;
+  return Date.now() - bucketTime > STALE_RATE_MAX_MS;
 }
 
 // ── Bulk range read --------------------------------------------------------
