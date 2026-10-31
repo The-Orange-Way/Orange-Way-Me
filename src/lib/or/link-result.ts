@@ -52,17 +52,28 @@ export function describeLinkResult(args: {
   result: LinkSuccessLike;
   /** Connection ids on screen immediately BEFORE the widget was opened. */
   knownConnectionIdsBefore: ReadonlyArray<string>;
-  /** Ids returned by the refresh AFTER the widget closed, when available. */
-  connectionIdsAfter?: ReadonlyArray<string>;
+  /** Ids returned by the refresh AFTER the widget closed. */
+  connectionIdsAfter: ReadonlyArray<string>;
 }): LinkResultReport {
   const id = args.result.connection_id;
   const wasKnown = args.knownConnectionIdsBefore.includes(id);
 
-  // OR's own flag wins when it is actually sent. Today it never is, so the
-  // membership check below is what runs. Both paths are covered by tests so
-  // the day OR starts forwarding it, nothing silently changes shape.
+  // OR's own flag is useful context, but it is not a read-back. The refreshed
+  // list must contain the id before this function names either outcome.
   const flag = args.result.already_existed;
   const existed = typeof flag === "boolean" ? flag : wasKnown;
+
+  const listed = args.connectionIdsAfter.includes(id);
+  if (!listed) {
+    return {
+      outcome: "unknown",
+      toast: {
+        level: "warning",
+        message: "We refreshed your connections, but couldn't confirm that connection is listed.",
+      },
+      highlightConnectionId: null,
+    };
+  }
 
   if (existed) {
     return {
@@ -76,26 +87,11 @@ export function describeLinkResult(args: {
     };
   }
 
-  // Genuinely new. If a refresh already ran and still does not contain the id,
-  // saying "added" would be a claim the screen contradicts. Say what is true:
-  // it was created, and it is not showing yet.
-  if (args.connectionIdsAfter && !args.connectionIdsAfter.includes(id)) {
-    return {
-      outcome: "unknown",
-      toast: {
-        level: "warning",
-        message:
-          "Connection added, but it isn't showing yet. Reload the page, and tell us if it stays missing.",
-      },
-      highlightConnectionId: null,
-    };
-  }
-
   return {
     outcome: "created",
     toast: {
       level: "success",
-      message: "Connection added. Credentials stored as ciphertext only.",
+      message: "New connection is listed.",
     },
     highlightConnectionId: id,
   };
