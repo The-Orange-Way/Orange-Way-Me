@@ -1,0 +1,95 @@
+name: Import staleness monitor
+
+# Checks every day at 09:00 UTC that at least one external transaction
+# has been imported into the prod database within the last 48 hours.
+#
+# Secret required: OWM_PROD_SUPABASE_SERVICE_ROLE_KEY
+# A service_role key is needed because the check must count across all
+# users. An anon key would be limited by RLS to rows the caller owns.
+# The key is used read-only (SELECT only) in this workflow.
+#
+# On failure GitHub marks the run red and emails the repository owner.
+# This is the intended alert channel for this low-severity daily notice.
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staleness-check:
+    name: Check transaction import staleness (prod)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check latest external transaction age
+        env:
+          SUPABASE_URL: https://tmqjusxxjjcsdgyiqbcg.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.OWM_PROD_SUPABASE_SERVICE_ROLE_KEY }}
+          STALENESS_THRESHOLD_HOURS: '48'
+        run: |
+          python3 - <<'EOF'
+          import os, sys, json, urllib.request, urllib.error
+          from datetime import datetime, timezone
+
+          url = os.environ["SUPABASE_URL"]
+          key = os.environ["SUPABASE_SERVICE_KEY"]
+          threshold = int(os.environ["STALENESS_THRESHOLD_HOURS"])
+
+          if not key:
+              print("ERROR: OWM_PROD_SUPABASE_SERVICE_ROLE_KEY is not set.", file=sys.stderr)
+              print("Add the secret to the repo and re-run this workflow.")
+              sys.exit(1)
+
+          endpoint = (
+              f"{url}/rest/v1/transactions"
+              "?select=created_at"
+              "&external_source=not.is.null"
+              "&order=created_at.desc"
+              "&limit=1"
+          )
+          req = urllib.request.Request(
+              endpoint,
+              headers={
+                  "apikey": key,
+                  "Authorization": f"Bearer {key}",
+                  "User-Agent": "ImportStalenessMonitor/1.0",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req) as resp:
+                  rows = json.loads(resp.read())
+          except urllib.error.HTTPError as exc:
+              print(f"ERROR: HTTP {exc.code} from Supabase API.", file=sys.stderr)
+              sys.exit(1)
+
+          if not rows:
+              print(
+                  "ALERT: No rows found in transactions where external_source IS NOT NULL.",
+                  file=sys.stderr,
+              )
+              print("Either no external transactions have ever been imported, or the column filter is wrong.")
+              sys.exit(1)
+
+          raw_ts = rows[0]["created_at"]
+          # Supabase returns ISO 8601, e.g. "2026-10-20T14:32:11.123456+00:00"
+          latest = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+          now = datetime.now(timezone.utc)
+          age_hours = (now - latest).total_seconds() / 3600
+
+          print(f"Latest external transaction: {raw_ts}")
+          print(f"Age: {age_hours:.1f} hours  (threshold: {threshold}h)")
+
+          if age_hours >= threshold:
+              print(
+                  f"ALERT: Import is stale. "
+                  f"Latest external transaction is {age_hours:.1f}h old "
+                  f"(threshold {threshold}h).",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print("OK: Import is current.")
+          EOF
