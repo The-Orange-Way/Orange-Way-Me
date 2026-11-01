@@ -419,7 +419,12 @@ export async function resolveOrKeyMaterial(params: {
   // than the bug being fixed. Second, the tempting alternative, falling back
   // to deriving, is the original defect: after a rotation it produces a key
   // that opens nothing while looking exactly like success.
-  if (plan.mode === "refuse") {
+  // PROOF BRANCH ONLY - guard deliberately disabled (OWM-T0243 clause 2).
+  // The refuse early-return below is the production guard. Removing it makes
+  // the function fall through to derive-and-pin, writing the three OR columns
+  // even on a refuse plan, which is the exact regression the test exists to
+  // catch. DO NOT MERGE.
+  if (plan.mode === "refuse" && false) {
     return { ok: false, reason: plan.reason };
   }
 
