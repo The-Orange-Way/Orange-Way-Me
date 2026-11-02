@@ -2,11 +2,11 @@
  * The or-sync request, and the one place the vault keys are handed over.
  *
  * or-sync is the ONLY path in this app that exports the Orange Rails
- * credentials key and the transactions key out of the vault and puts them in a
+ * credentials key out of the vault and puts it in a
  * request body. Everything else about a "Sync" press is a routing decision.
  * So this module owns two things that belong together and used to be apart:
  * the check that says this connection may go to or-sync at all, and the export
- * that hands the keys to it.
+ * that hands the key to it.
  *
  * WHY THE CHECK IS IN HERE AND NOT IN THE CALLER (OWM-T0544, OWM-T0511).
  * The rule "a private connection never goes to or-sync" was correct and tested
@@ -14,7 +14,7 @@
  * press. Neither protected the key export, because the export lived in the
  * caller, below the check, inside a click handler that no test renders.
  * Deleting the private arm from that handler restored OWM-T0530 in full, sent
- * both keys for a connection or-sync answers with a 400, and left every test in
+ * the credentials key for a connection or-sync answers with a 400, and left every test in
  * the repo green.
  *
  * A guard whose call site nothing checks lasts exactly as long as nobody edits
@@ -55,8 +55,6 @@ export interface OrSyncResponse {
 export interface OrSyncKeyHandover {
   /** Vault export of the Orange Rails credentials subkey, raw base64. */
   exportCredentialsKey(): Promise<string>;
-  /** Vault export of the Orange Rails transactions subkey, raw base64. */
-  exportTransactionsKey(): Promise<string>;
   /** The ow-or-proxy call. Endpoint and payload, exactly as the caller's own. */
   callProxy(endpoint: string, payload: Record<string, unknown>): Promise<unknown>;
 }
@@ -107,7 +105,7 @@ export async function requestOrSync(
   }
 
   // Nothing to sync is a zero answer, not a request. Falling through here
-  // would take both keys out of the vault to ask or-sync about no connections,
+  // would take the credentials key out of the vault to ask or-sync about no connections,
   // and then leave the caller to interpret the reply to a question we had no
   // reason to ask.
   if (connections.length === 0) {
@@ -115,12 +113,11 @@ export async function requestOrSync(
   }
 
   const credentials_key = await handover.exportCredentialsKey();
-  const transactions_key = await handover.exportTransactionsKey();
 
   return (await handover.callProxy("or-sync", {
     subaccount_id: subaccountId,
     connection_ids: connections.map((c) => c.id),
     credentials_key,
-    transactions_key,
+    format: "orangeway-me",
   })) as OrSyncResponse;
 }
