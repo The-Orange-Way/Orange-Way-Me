@@ -23,13 +23,12 @@ import {
 } from "../or-sync-request";
 
 /**
- * A handover whose three surfaces are all spies, so a test can assert that
+ * A handover whose two surfaces are both spies, so a test can assert that
  * nothing was called rather than that something else was.
  */
 function spyHandover(response: unknown = { synced: 0, connections: [] }) {
   return {
     exportCredentialsKey: vi.fn(async () => "creds-key-b64"),
-    exportTransactionsKey: vi.fn(async () => "txns-key-b64"),
     callProxy: vi.fn(async () => response),
   } satisfies OrSyncKeyHandover;
 }
@@ -38,7 +37,6 @@ function spyHandover(response: unknown = { synced: 0, connections: [] }) {
 function callCounts(h: ReturnType<typeof spyHandover>) {
   return {
     creds: h.exportCredentialsKey.mock.calls.length,
-    txns: h.exportTransactionsKey.mock.calls.length,
     proxy: h.callProxy.mock.calls.length,
   };
 }
@@ -65,7 +63,7 @@ describe("requestOrSync", () => {
     await expect(
       requestOrSync("sub-1", [{ id: "c1", is_stealth: true }], h),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("refuses a private connection whatever else the row carries", async () => {
@@ -82,7 +80,7 @@ describe("requestOrSync", () => {
     for (const conn of privateShapes) {
       const h = spyHandover();
       await expect(requestOrSync("sub-1", [conn], h)).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-      expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+      expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
     }
   });
 
@@ -94,7 +92,7 @@ describe("requestOrSync", () => {
     await expect(
       requestOrSync("sub-1", [{ id: "c1", provider_type: "quiltt" }], h),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("refuses a whole batch when one member is private, and exports nothing", async () => {
@@ -115,7 +113,7 @@ describe("requestOrSync", () => {
         h,
       ),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("names the route and the connection it refused", async () => {
@@ -143,7 +141,7 @@ describe("requestOrSync", () => {
     const h = spyHandover();
     const res = await requestOrSync("sub-1", [], h);
     expect(res).toEqual({ synced: 0, connections: [] });
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("cannot be given the kill switch as an input", async () => {
