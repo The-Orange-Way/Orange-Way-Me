@@ -18,8 +18,8 @@
  *   3. Map destinations: present DestinationPickerDialog → encrypt
  *      each Personal account.id with the user vault MEK → write to
  *      connection_account_map.
- *   4. Sync: export both OR subkeys as raw base64, hand them to or-sync
- *      for one request (OR holds them in memory only, never persists).
+ *   4. Sync: export the credentials subkey as raw base64, hand it to or-sync
+ *      for one request (OR holds it in memory only, never persists).
  *   5. List / delete: regular proxy calls. Delete also wipes mapping rows.
  *
  * Key handoff:
@@ -234,7 +234,6 @@ export function ConnectionsPage() {
     decryptOrCipher,
     decryptOrTxnCipher,
     exportOrCredsKey,
-    exportOrTxnsKey,
     buildHouseholdSignatureFields,
     getOpkKeypair,
     orNamespaceDisabledReason,
@@ -244,19 +243,18 @@ export function ConnectionsPage() {
 
   /**
    * The vault key handover for or-sync, built once and shared by both press
-   * paths. or-sync is the only path in this app that takes these two keys out
+   * paths. or-sync is the only path in this app that takes the credentials key out
    * of the vault, so there is one object that can do it and one function that
-   * accepts it, and that function checks the route before it uses either
+   * accepts it, and that function checks the route before it uses it
    * (OWM-T0544). callProxy is module scope and stable, so it is not a
    * dependency here.
    */
   const orSyncKeys = useMemo(
     () => ({
       exportCredentialsKey: exportOrCredsKey,
-      exportTransactionsKey: exportOrTxnsKey,
       callProxy,
     }),
-    [exportOrCredsKey, exportOrTxnsKey],
+    [exportOrCredsKey],
   );
 
   const {
