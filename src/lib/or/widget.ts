@@ -7,14 +7,14 @@
  * then resolves a Promise when the user finishes.
  *
  * Key handoff:
- *   OR's /connect route accepts `cred_key` + `txn_key` (base64 raw
- *   32-byte AES keys) in the URL fragment. The fragment never reaches
- *   OR's server logs. To produce these bytes, we re-derive from the
- *   user's vault password using the same HKDF contexts already used by
- *   the vault (ORANGERAILS_CREDENTIALS_V1 / ORANGERAILS_TRANSACTIONS_V1).
- *   The widget locks the credential under those keys and posts only
- *   the resulting subaccount_id / connection_id back to OW — OW never
- *   sees the plaintext credential.
+ *   OR's /connect route accepts `cred_key` (base64 raw 32-byte AES key)
+ *   in the URL fragment. The fragment never reaches OR's server logs.
+ *   To produce this byte, we re-derive from the user's vault password
+ *   using the HKDF context ORANGERAILS_CREDENTIALS_V1 already used by
+ *   the vault. The widget locks the credential under that key and posts
+ *   only the resulting subaccount_id / connection_id back to OW — OW
+ *   never sees the plaintext credential. The transactions key stays in
+ *   the vault and is never sent to the widget or to OR.
  *
  * Single-user adaptation (vs. V3 which is multi-org):
  *   OW has no org concept. The vault is per-user, so `orgId` here is
@@ -104,7 +104,6 @@ export async function openOrConnect(args: {
   orgId: string;
   provider?: string;
   credKeyB64: string;
-  txnKeyB64: string;
 }): Promise<OrLinkSuccess> {
   const widgetToken = await mintWidgetToken(args.orgId);
   const url = buildConnectUrl({
@@ -114,7 +113,6 @@ export async function openOrConnect(args: {
     returnTo: window.location.origin,
     widgetToken,
     credKeyB64: args.credKeyB64,
-    txnKeyB64: args.txnKeyB64,
   });
 
   const popup = window.open(url, "or-connect", "width=720,height=900,popup=yes");
@@ -249,7 +247,6 @@ function buildConnectUrl(args: {
   returnTo: string;
   widgetToken: string;
   credKeyB64: string;
-  txnKeyB64: string;
 }): string {
   const qs = new URLSearchParams({
     platform: args.platform,
@@ -260,7 +257,6 @@ function buildConnectUrl(args: {
   const frag = new URLSearchParams({
     widget_token: args.widgetToken,
     cred_key: args.credKeyB64,
-    txn_key: args.txnKeyB64,
   });
   return `${OR_CONNECT_BASE}?${qs.toString()}#${frag.toString()}`;
 }
