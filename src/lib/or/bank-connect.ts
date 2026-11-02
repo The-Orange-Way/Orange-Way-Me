@@ -97,7 +97,7 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 
 /**
  * Step 2: build the popup URL with the Quiltt session bundle embedded in
- * the fragment, plus the ZKA keys cred_key + txn_key. All of these travel
+ * the fragment, plus the ZKA key cred_key. All of these travel
  * ONLY in the URL fragment, never in the query string.
  *
  * That answers exactly one threat, and it is worth saying which one so the
@@ -111,14 +111,12 @@ export async function quickConnect(): Promise<BankConnectQuickConnectResponse> {
 export function buildBankPopupUrl(args: {
   quickConnect: BankConnectQuickConnectResponse;
   credKeyB64: string;
-  txnKeyB64: string;
 }): string {
-  const { quickConnect: qc, credKeyB64, txnKeyB64 } = args;
+  const { quickConnect: qc, credKeyB64 } = args;
   const base = new URL(OR_CONNECT_BASE);
   const fragParams = new URLSearchParams({
     widget_token: qc.widget_token,
     cred_key: credKeyB64,
-    txn_key: txnKeyB64,
   });
   if (qc.quilttBundle) {
     // Fast path: skip /connect, go straight to /connect/quiltt with the
