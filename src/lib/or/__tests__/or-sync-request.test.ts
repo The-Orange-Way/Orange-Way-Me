@@ -2,7 +2,7 @@
  * or-sync request contract tests.
  *
  * WHAT THESE DEFEND. or-sync is the only path that takes the credentials key
- * and the transactions key out of the vault. The behaviour being pinned is
+ * out of the vault (OWM-T0413 removed the transactions key from this path). The behaviour being pinned is
  * that a connection which does not belong on this path never gets that far:
  * no export, no request, no key anywhere.
  *
@@ -44,7 +44,7 @@ function callCounts(h: ReturnType<typeof spyHandover>) {
 }
 
 describe("requestOrSync", () => {
-  it("sends an ordinary Bitcoin source, with both keys and the ids asked for", async () => {
+  it("sends an ordinary Bitcoin source, with the credentials key, format, and the ids asked for", async () => {
     const h = spyHandover({ synced: 3, connections: [{ connection_id: "c1", synced: 3 }] });
     const res = await requestOrSync("sub-1", [{ id: "c1", provider_type: "blink" }], h);
 
@@ -54,7 +54,7 @@ describe("requestOrSync", () => {
       subaccount_id: "sub-1",
       connection_ids: ["c1"],
       credentials_key: "creds-key-b64",
-      transactions_key: "txns-key-b64",
+      format: "orangeway-me",
     });
   });
 
@@ -139,7 +139,7 @@ describe("requestOrSync", () => {
   it("sends nothing and exports nothing for an empty list", async () => {
     // An empty list is not an error, it is nothing to do. Asking or-sync
     // about no connections and interpreting the answer is worse than not
-    // asking, and it would still have exported two keys to do it.
+    // asking, and it would still have exported the credentials key to do it.
     const h = spyHandover();
     const res = await requestOrSync("sub-1", [], h);
     expect(res).toEqual({ synced: 0, connections: [] });
