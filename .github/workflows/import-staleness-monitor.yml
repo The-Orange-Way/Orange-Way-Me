@@ -15,6 +15,11 @@ on:
   schedule:
     - cron: '0 9 * * *'
   workflow_dispatch:
+    inputs:
+      threshold_hours:
+        description: 'Fail if the newest external transaction is at least this many hours old'
+        required: false
+        default: '48'
 
 permissions:
   contents: read
@@ -23,12 +28,13 @@ jobs:
   staleness-check:
     name: Check transaction import staleness (prod)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check latest external transaction age
         env:
           SUPABASE_URL: https://tmqjusxxjjcsdgyiqbcg.supabase.co
           SUPABASE_SERVICE_KEY: ${{ secrets.OWM_PROD_SUPABASE_SERVICE_ROLE_KEY }}
-          STALENESS_THRESHOLD_HOURS: '48'
+          STALENESS_THRESHOLD_HOURS: ${{ github.event.inputs.threshold_hours || '48' }}
         run: |
           python3 - <<'EOF'
           import os, sys, json, urllib.request, urllib.error
@@ -59,7 +65,7 @@ jobs:
               },
           )
           try:
-              with urllib.request.urlopen(req) as resp:
+              with urllib.request.urlopen(req, timeout=30) as resp:
                   rows = json.loads(resp.read())
           except urllib.error.HTTPError as exc:
               print(f"ERROR: HTTP {exc.code} from Supabase API.", file=sys.stderr)
