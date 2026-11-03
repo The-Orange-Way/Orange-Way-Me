@@ -93,4 +93,4 @@ jobs:
           # per-function verify_jwt settings in supabase/config.toml. Source
           # becomes the single source of truth for what is live, instead of
           # the edge drifting from the repo (DL-1079).
-          supabase functions deploy --project-ref "$REF"
+          supabase functions deploy --project-ref "$REF" --yes
