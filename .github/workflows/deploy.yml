@@ -499,12 +499,12 @@ jobs:
       # a future nightly matrix workflow). Tests stub /api/signup
       # internally, so this step does NOT actually call Resend.
       - name: Install Playwright (chromium)
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright@latest install --with-deps chromium
 
       - name: Playwright smoke + marketing-form interaction
         env:
           PLAYWRIGHT_BASE_URL: ${{ steps.target.outputs.verify_url }}
-        run: bunx playwright test --project=chromium --reporter=list
+        run: bunx playwright@latest test --project=chromium --reporter=list
 
       - name: Upload Playwright HTML report on failure
         if: failure()
