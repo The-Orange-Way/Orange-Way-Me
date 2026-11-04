@@ -2,9 +2,11 @@
  * or-sync request contract tests.
  *
  * WHAT THESE DEFEND. or-sync is the only path that takes the credentials key
- * and the transactions key out of the vault. The behaviour being pinned is
- * that a connection which does not belong on this path never gets that far:
- * no export, no request, no key anywhere.
+ * out of the vault. The behaviour being pinned is that a connection which does
+ * not belong on this path never gets that far: no export, no request, no key.
+ * With OWM-T0413 the transactions key is removed from the handover entirely:
+ * OR returns plaintext row drafts through the orangeway-me sink, and the
+ * browser encrypts them before its own database write.
  *
  * WHY THE ASSERTIONS ARE ABOUT ABSENCE. The defect this module exists to make
  * unreachable (OWM-T0530) was not a wrong branch body. Both keys were exported
@@ -18,34 +20,50 @@ import { describe, it, expect, vi } from "vitest";
 import {
   requestOrSync,
   OrSyncRouteRefusal,
+  OrSyncSinkContractError,
+  sinkAndLegacyTransactionsForConnection,
+  OR_SYNC_FORMAT,
   type OrSyncConnection,
-  type OrSyncKeyHandover,
+  type OrSyncHandover,
+  type OrSyncResponse,
+  type OwmSinkTransactionRow,
 } from "../or-sync-request";
 
+/** A minimal valid sink response for use in test spies. */
+const VALID_SINK_RESPONSE: OrSyncResponse = {
+  synced: 0,
+  connections: [],
+  rows: {},
+  metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+};
+
 /**
- * A handover whose three surfaces are all spies, so a test can assert that
+ * A handover whose surfaces are all spies, so a test can assert that
  * nothing was called rather than that something else was.
  */
-function spyHandover(response: unknown = { synced: 0, connections: [] }) {
+function spyHandover(response: unknown = VALID_SINK_RESPONSE) {
   return {
     exportCredentialsKey: vi.fn(async () => "creds-key-b64"),
-    exportTransactionsKey: vi.fn(async () => "txns-key-b64"),
     callProxy: vi.fn(async () => response),
-  } satisfies OrSyncKeyHandover;
+  } satisfies OrSyncHandover;
 }
 
 /** Every call count this module must be able to hold at zero. */
 function callCounts(h: ReturnType<typeof spyHandover>) {
   return {
     creds: h.exportCredentialsKey.mock.calls.length,
-    txns: h.exportTransactionsKey.mock.calls.length,
     proxy: h.callProxy.mock.calls.length,
   };
 }
 
 describe("requestOrSync", () => {
-  it("sends an ordinary Bitcoin source, with both keys and the ids asked for", async () => {
-    const h = spyHandover({ synced: 3, connections: [{ connection_id: "c1", synced: 3 }] });
+  it("sends credentials key and format, but NOT transactions_key", async () => {
+    const h = spyHandover({
+      synced: 3,
+      connections: [{ connection_id: "c1", synced: 3 }],
+      rows: {},
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    });
     const res = await requestOrSync("sub-1", [{ id: "c1", provider_type: "blink" }], h);
 
     expect(res.synced).toBe(3);
@@ -54,18 +72,21 @@ describe("requestOrSync", () => {
       subaccount_id: "sub-1",
       connection_ids: ["c1"],
       credentials_key: "creds-key-b64",
-      transactions_key: "txns-key-b64",
+      format: OR_SYNC_FORMAT,
     });
+    // The key distinction: transactions_key must not appear in the payload.
+    const payload = h.callProxy.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("transactions_key");
   });
 
-  it("refuses a private connection without exporting either key", async () => {
+  it("refuses a private connection without exporting any key", async () => {
     // THE DEFECT, OWM-T0530. This is the assertion the whole module exists
     // for: not that the private handler ran instead, but that nothing left.
     const h = spyHandover();
     await expect(
       requestOrSync("sub-1", [{ id: "c1", is_stealth: true }], h),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("refuses a private connection whatever else the row carries", async () => {
@@ -82,11 +103,11 @@ describe("requestOrSync", () => {
     for (const conn of privateShapes) {
       const h = spyHandover();
       await expect(requestOrSync("sub-1", [conn], h)).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-      expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+      expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
     }
   });
 
-  it("refuses a bank connection without exporting either key", async () => {
+  it("refuses a bank connection without exporting any key", async () => {
     // Bank connections sync through the OPK sealed-box path. They have never
     // been sent here, and this makes that a property of the function rather
     // than of the caller that has always happened to route them away.
@@ -94,7 +115,7 @@ describe("requestOrSync", () => {
     await expect(
       requestOrSync("sub-1", [{ id: "c1", provider_type: "quiltt" }], h),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("refuses a whole batch when one member is private, and exports nothing", async () => {
@@ -115,7 +136,7 @@ describe("requestOrSync", () => {
         h,
       ),
     ).rejects.toBeInstanceOf(OrSyncRouteRefusal);
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("names the route and the connection it refused", async () => {
@@ -139,11 +160,16 @@ describe("requestOrSync", () => {
   it("sends nothing and exports nothing for an empty list", async () => {
     // An empty list is not an error, it is nothing to do. Asking or-sync
     // about no connections and interpreting the answer is worse than not
-    // asking, and it would still have exported two keys to do it.
+    // asking, and it would still have exported the credentials key to do it.
     const h = spyHandover();
     const res = await requestOrSync("sub-1", [], h);
-    expect(res).toEqual({ synced: 0, connections: [] });
-    expect(callCounts(h)).toEqual({ creds: 0, txns: 0, proxy: 0 });
+    expect(res).toEqual({
+      synced: 0,
+      connections: [],
+      rows: {},
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    });
+    expect(callCounts(h)).toEqual({ creds: 0, proxy: 0 });
   });
 
   it("cannot be given the kill switch as an input", async () => {
@@ -157,5 +183,142 @@ describe("requestOrSync", () => {
     // function. It decides refuse-or-scan inside handleStealthSync, above that
     // path's own key export. Routing asks only what the connection IS.
     expect(requestOrSync.length).toBe(3);
+  });
+
+  it("fails closed when the response does not confirm orangeway-me format", async () => {
+    // Sending `format` is only a request; metadata.format in the response is
+    // the proof OR took the non-storing branch. A server that answers with a
+    // different format must not succeed.
+    const h = spyHandover({
+      synced: 1,
+      connections: [{ connection_id: "c1", synced: 1 }],
+      rows: {},
+      metadata: { format: "legacy-format", requires_encryption: [] },
+    });
+    await expect(
+      requestOrSync("sub-1", [{ id: "c1", provider_type: "blink" }], h),
+    ).rejects.toBeInstanceOf(OrSyncSinkContractError);
+  });
+
+  it("fails closed when the response has no metadata at all", async () => {
+    // A legacy or-sync response (before sink mode) has no metadata field.
+    // This must fail closed rather than accepting the response as a no-rows sync.
+    const h = spyHandover({
+      synced: 1,
+      connections: [{ connection_id: "c1", synced: 1 }],
+    });
+    await expect(
+      requestOrSync("sub-1", [{ id: "c1", provider_type: "blink" }], h),
+    ).rejects.toBeInstanceOf(OrSyncSinkContractError);
+  });
+});
+
+describe("sinkAndLegacyTransactionsForConnection", () => {
+  /** Build a minimal valid sink transaction row for a given connection and id. */
+  function makeSinkRow(
+    connectionId: string,
+    externalId: string,
+    amount = "50",
+  ): OwmSinkTransactionRow {
+    return {
+      date: "2024-01-15",
+      enc_amount: JSON.stringify({ value: amount, currency: "USD", direction: "in" as const }),
+      enc_description: "Test transaction",
+      enc_merchant: null,
+      _meta: {
+        or_connection_id: connectionId,
+        external_id: externalId,
+        provider_slug: "blink",
+        schema_version: "1",
+      },
+      __resolveAccountId: { or_connection_id: connectionId, or_external_wallet_id: null },
+    };
+  }
+
+  /** Build a legacy row containing the given transaction as its encrypted payload. */
+  function makeLegacyRow(connectionId: string, id: string) {
+    return {
+      connection_id: connectionId,
+      // Identity "decrypt" is used in tests, so the payload is plain JSON.
+      encrypted_payload: JSON.stringify({
+        id,
+        amount: 50,
+        currency: "USD",
+        direction: "in",
+        timestamp: "2024-01-15",
+        type: "blink",
+        description: null,
+        counterparty: null,
+        source_wallet_id: null,
+      }),
+    };
+  }
+
+  const identityDecrypt = async (ct: string) => ct;
+
+  it("dedupes a transaction present in both sink and legacy paths by stable id", async () => {
+    // A transaction returned by the new sink that is also present in the
+    // legacy encrypted_transactions store must appear exactly once.
+    const sinkResponse: OrSyncResponse = {
+      synced: 1,
+      connections: [{ connection_id: "conn-1", synced: 1 }],
+      rows: { transactions: [makeSinkRow("conn-1", "stable-ext-id")] },
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    };
+    const legacyRow = makeLegacyRow("conn-1", "stable-ext-id");
+
+    const result = await sinkAndLegacyTransactionsForConnection(
+      sinkResponse,
+      "conn-1",
+      [legacyRow],
+      identityDecrypt,
+    );
+
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].id).toBe("stable-ext-id");
+    expect(result.legacyFailures).toBe(0);
+  });
+
+  it("includes a legacy-only transaction when sink has no match for it", async () => {
+    // A transaction present only in the legacy store (not returned by the
+    // current sink response) must still be included.
+    const legacyRow = makeLegacyRow("conn-1", "legacy-only-id");
+
+    const result = await sinkAndLegacyTransactionsForConnection(
+      undefined,
+      "conn-1",
+      [legacyRow],
+      identityDecrypt,
+    );
+
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0].id).toBe("legacy-only-id");
+    expect(result.legacyFailures).toBe(0);
+  });
+
+  it("sink transaction wins over legacy when both carry the same id", async () => {
+    // The sink path runs first; the legacy path skips any id already seen.
+    // This confirms sink-wins-on-conflict, which matters for forward migration.
+    const sinkResponse: OrSyncResponse = {
+      synced: 1,
+      connections: [{ connection_id: "conn-1", synced: 1 }],
+      rows: { transactions: [makeSinkRow("conn-1", "shared-id", "99")] },
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    };
+    const legacyRow = makeLegacyRow("conn-1", "shared-id");
+
+    const result = await sinkAndLegacyTransactionsForConnection(
+      sinkResponse,
+      "conn-1",
+      [legacyRow],
+      identityDecrypt,
+    );
+
+    expect(result.transactions).toHaveLength(1);
+    // The sink row carries amount "99"; legacy carries 50.
+    // Sink wins, so the surviving row comes from the sink path.
+    expect(result.transactions[0].id).toBe("shared-id");
+    expect((result.transactions[0] as { amount?: number }).amount).toBe(99);
+    expect(result.legacyFailures).toBe(0);
   });
 });
