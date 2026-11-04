@@ -28,6 +28,7 @@ import {
   type OrSyncResponse,
   type OwmSinkTransactionRow,
 } from "../or-sync-request";
+import { importOrTransactions } from "@/lib/orImportBridge";
 
 /** A minimal valid sink response for use in test spies. */
 const VALID_SINK_RESPONSE: OrSyncResponse = {
@@ -44,7 +45,9 @@ const VALID_SINK_RESPONSE: OrSyncResponse = {
 function spyHandover(response: unknown = VALID_SINK_RESPONSE) {
   return {
     exportCredentialsKey: vi.fn(async () => "creds-key-b64"),
-    callProxy: vi.fn(async () => response),
+    callProxy: vi.fn<(endpoint: string, payload: Record<string, unknown>) => Promise<unknown>>(
+      async () => response,
+    ),
   } satisfies OrSyncHandover;
 }
 
@@ -206,6 +209,7 @@ describe("requestOrSync", () => {
     const h = spyHandover({
       synced: 1,
       connections: [{ connection_id: "c1", synced: 1 }],
+      rows: {},
     });
     await expect(
       requestOrSync("sub-1", [{ id: "c1", provider_type: "blink" }], h),
@@ -320,5 +324,89 @@ describe("sinkAndLegacyTransactionsForConnection", () => {
     expect(result.transactions[0].id).toBe("shared-id");
     expect((result.transactions[0] as { amount?: number }).amount).toBe(99);
     expect(result.legacyFailures).toBe(0);
+  });
+});
+
+describe("sink path encryption contract", () => {
+  it("does not write plaintext amount, description, currency, or merchant to the upsert", async () => {
+    // ZKA contract: OR delivers plaintext row drafts through the sink; the
+    // browser must encrypt them under the MEK before writing to the OWM
+    // database. This test feeds known plaintext values through the full
+    // sinkAndLegacyTransactionsForConnection + importOrTransactions pipeline
+    // and asserts the upserted row carries ENC() wrappers, never the originals.
+    const AMOUNT = "75";
+    const DESCRIPTION = "Coffee shop";
+    const MERCHANT = "Starbucks";
+    const CURRENCY = "USD";
+
+    const sinkResponse: OrSyncResponse = {
+      synced: 1,
+      connections: [{ connection_id: "conn-1", synced: 1 }],
+      rows: {
+        transactions: [
+          {
+            date: "2024-01-15",
+            enc_amount: JSON.stringify({ value: AMOUNT, currency: CURRENCY, direction: "in" as const }),
+            enc_description: DESCRIPTION,
+            enc_merchant: MERCHANT,
+            _meta: {
+              or_connection_id: "conn-1",
+              external_id: "ext-enc-99",
+              provider_slug: "blink",
+              schema_version: "1",
+            },
+            __resolveAccountId: { or_connection_id: "conn-1", or_external_wallet_id: "wallet-1" },
+          },
+        ],
+      },
+      metadata: { format: OR_SYNC_FORMAT, requires_encryption: [] },
+    };
+
+    // Step 1: merge (no legacy rows).
+    const { transactions } = await sinkAndLegacyTransactionsForConnection(
+      sinkResponse,
+      "conn-1",
+      [],
+      async (ct) => ct,
+    );
+    expect(transactions).toHaveLength(1);
+
+    // Step 2: import -- capture what lands in the upsert.
+    const capturedRows: Array<Record<string, unknown>> = [];
+    const mockSupabase = {
+      from: (table: string) => {
+        if (table === "accounts") {
+          return {
+            select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }),
+          };
+        }
+        return {
+          upsert: (rows: Array<Record<string, unknown>>, _opts?: unknown) => {
+            capturedRows.push(...rows);
+            return { select: () => Promise.resolve({ data: [], error: null }) };
+          },
+        };
+      },
+    };
+
+    await importOrTransactions("conn-1", transactions, {
+      supabase: mockSupabase as Parameters<typeof importOrTransactions>[2]["supabase"],
+      userId: "user-1",
+      encryptText: async (plain) => `ENC(${plain})`,
+      resolveAccountIds: (_connId, walletId) => (walletId === "wallet-1" ? ["acct-1"] : []),
+    });
+
+    expect(capturedRows).toHaveLength(1);
+    const row = capturedRows[0];
+
+    // All sensitive columns must carry the ENC() wrapper -- never raw plaintext.
+    expect(row.enc_amount).toMatch(/^ENC\(/);
+    expect(row.enc_amount).not.toBe(AMOUNT);
+    expect(row.enc_description).toMatch(/^ENC\(/);
+    expect(row.enc_description).not.toBe(DESCRIPTION);
+    expect(row.enc_currency).toMatch(/^ENC\(/);
+    expect(row.enc_currency).not.toBe(CURRENCY);
+    expect(row.enc_merchant).toMatch(/^ENC\(/);
+    expect(row.enc_merchant).not.toBe(MERCHANT);
   });
 });
