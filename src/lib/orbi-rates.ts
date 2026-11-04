@@ -71,8 +71,8 @@ function toORBIRateFromView(row: unknown): ORBIRate | null {
     id: String(r.id ?? ""),
     rate: Number(r.rate),
     tier: r.tier as ORBIRate["tier"],
-    bucketTs: String(r.bucket_ts ?? ""),          // view column is bucket_ts
-    providerCount: Number(r.provider_count ?? 0),  // view column is provider_count
+    bucketTs: String(r.bucket_ts ?? ""),
+    providerCount: Number(r.provider_count ?? 0),
     composite: Boolean(r.composite),
   };
 }
