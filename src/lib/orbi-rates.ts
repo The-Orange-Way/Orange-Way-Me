@@ -18,6 +18,65 @@
  * The Orange Rails anon key no longer appears in the browser bundle.
  */
 
+// ── Orange Rails direct view reader (OWM-T0472) ─────────────────────────
+//
+// Orange Rails publishes orbi_btc_usd_latest as a read-only anonymous view.
+// HELD: do NOT fill in the placeholders below until OR-T0216 publishes the
+// project address and anon key (expected 2026-11-04 21:00 UTC). When that
+// ticket publishes the values, replace both placeholders and merge.
+
+// PLACEHOLDER: set to the OR project URL from OR-T0216 after 2026-11-04 21:00 UTC.
+// Never commit a real URL before that ticket publishes it.
+const OR_PROJECT_URL = "PLACEHOLDER_OR_PROJECT_URL";
+
+// PLACEHOLDER: set to the OR anon (read-only) key from OR-T0216 after 2026-11-04 21:00 UTC.
+// Never commit a real key before that ticket publishes it.
+const OR_ANON_KEY = "PLACEHOLDER_OR_ANON_KEY";
+
+/**
+ * Read the single-row orbi_btc_usd_latest view on Orange Rails.
+ *
+ * The view fixes: BTC/USD, 1-minute bucket, ORBI composite, confirmed only,
+ * last 2 days. No filter parameters are sent. If the latest settled price is
+ * older than 2 days the view returns an empty list; this function returns null
+ * and callers must show "price unavailable" -- never 0, never a stale cached
+ * number.
+ *
+ * Anonymous read-only. No secret key.
+ */
+async function fetchLatestBTCRateFromView(): Promise<ORBIRate | null> {
+  try {
+    const url = `${OR_PROJECT_URL}/rest/v1/orbi_btc_usd_latest?select=*`;
+    const resp = await fetch(url, {
+      headers: {
+        apikey: OR_ANON_KEY,
+        Authorization: `Bearer ${OR_ANON_KEY}`,
+      },
+    });
+    if (!resp.ok) return null;
+    const rows: unknown = await resp.json();
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return toORBIRateFromView(rows[0]);
+  } catch {
+    return null;
+  }
+}
+
+/** Map the view's snake_case column names (bucket_ts, provider_count) to ORBIRate. */
+function toORBIRateFromView(row: unknown): ORBIRate | null {
+  if (!row || typeof row !== "object") return null;
+  const r = row as Record<string, unknown>;
+  if (r.rate === undefined || r.rate === null) return null;
+  return {
+    id: String(r.id ?? ""),
+    rate: Number(r.rate),
+    tier: r.tier as ORBIRate["tier"],
+    bucketTs: String(r.bucket_ts ?? ""),          // view column is bucket_ts
+    providerCount: Number(r.provider_count ?? 0),  // view column is provider_count
+    composite: Boolean(r.composite),
+  };
+}
+
 // ── Edge function transport ------------------------------------------------
 
 function edgeFunctionBase(): string | null {
@@ -110,7 +169,7 @@ export function getLiveBTCRate(target: string): LiveRateSnapshot | null {
 
 /** Refresh the cache for a single fiat target. Returns the snapshot or null on failure. */
 export async function refreshLiveBTCRate(target: string): Promise<LiveRateSnapshot | null> {
-  const r = await fetchLatestBTCRate(target);
+  const r = await fetchLatestBTCRateFromView(); // was: fetchLatestBTCRate(target)
   settledTargets.add(target.toUpperCase());
   if (!r) return null;
   const snap: LiveRateSnapshot = {
