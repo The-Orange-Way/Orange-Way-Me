@@ -22,7 +22,16 @@ async function seedCache(target: string, msAgo: number): Promise<void> {
   const bucketTs = new Date(Date.now() - msAgo).toISOString();
   globalThis.fetch = vi.fn().mockResolvedValueOnce({
     ok: true,
-    json: async () => [{ id: "bucket-test", rate: 67_000, tier: "A", bucket_ts: bucketTs, provider_count: 3, composite: false }],
+    json: async () => [
+      {
+        id: "bucket-test",
+        rate: 67_000,
+        tier: "A",
+        bucket_ts: bucketTs,
+        provider_count: 3,
+        composite: false,
+      },
+    ],
   } as unknown as Response);
   await refreshLiveBTCRate(target);
 }
@@ -90,7 +99,9 @@ describe("isBtcRateStale", () => {
     // Response omits bucketTs; toORBIRate stores it as "".
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => [{ id: "no-bucket", rate: 67_000, tier: "A", provider_count: 3, composite: false }],
+      json: async () => [
+        { id: "no-bucket", rate: 67_000, tier: "A", provider_count: 3, composite: false },
+      ],
     } as unknown as Response);
     await refreshLiveBTCRate("JPY");
     expect(isBtcRateStale("JPY")).toBe(true);
@@ -99,7 +110,16 @@ describe("isBtcRateStale", () => {
   it("returns true when bucketTs is not a valid date", async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => [{ id: "bad-bucket", rate: 67_000, tier: "A", bucket_ts: "not-a-date", provider_count: 3, composite: false }],
+      json: async () => [
+        {
+          id: "bad-bucket",
+          rate: 67_000,
+          tier: "A",
+          bucket_ts: "not-a-date",
+          provider_count: 3,
+          composite: false,
+        },
+      ],
     } as unknown as Response);
     await refreshLiveBTCRate("CHF");
     expect(isBtcRateStale("CHF")).toBe(true);
