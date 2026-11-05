@@ -220,12 +220,20 @@ EXIT_CODE=0
 #   $2  grep pattern (extended regex)
 #   $3  grep flags (e.g. -i for case-insensitive). Empty string for none.
 #   $4  extra-exemption pattern (extended regex). Empty string for none.
+#   $5  optional id-level exemption pattern. Unlike $4, this does not drop a
+#       whole line just because it CONTAINS an allowed id: it strips every
+#       occurrence of this pattern out of a COPY of the matched text and
+#       re-tests that copy against $2. A line whose only match was the id
+#       is dropped; a line that still matches once the id is stripped out
+#       carries a separate, real finding and is reported with the original
+#       (unstripped) line.
 
 scan() {
   local name="$1"
   local pattern="$2"
   local flags="$3"
   local extra_exempt="$4"
+  local strip_exempt="${5:-}"
 
   local raw
   if [[ -n "$flags" ]]; then
@@ -263,6 +271,31 @@ scan() {
     filtered=$(printf '%s\n' "$raw" | grep -Ev "$drop_patterns" || true)
   else
     filtered="$raw"
+  fi
+
+  # Id-level exemption: re-test each surviving line with the id pattern
+  # stripped out of a copy of its matched text, rather than dropping the
+  # whole line because it contains an allowed id. A line whose only match
+  # was the id no longer matches the stripped copy and is dropped here; a
+  # line that still matches carries a separate, real finding and is kept,
+  # with the original (unstripped) line printed below.
+  if [[ -n "$strip_exempt" && -n "$filtered" ]]; then
+    local kept="" line text stripped still_matches
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      text="${line#*:}"
+      text="${text#*:}"
+      stripped="$(printf '%s' "$text" | sed -E "s/${strip_exempt}//g")"
+      if [[ -n "$flags" ]]; then
+        still_matches=$(printf '%s' "$stripped" | grep -E $flags -q "$pattern" && echo yes || echo no)
+      else
+        still_matches=$(printf '%s' "$stripped" | grep -Eq "$pattern" && echo yes || echo no)
+      fi
+      if [[ "$still_matches" == "yes" ]]; then
+        kept+="${kept:+$'\n'}${line}"
+      fi
+    done <<< "$filtered"
+    filtered="$kept"
   fi
 
   if [[ -z "$filtered" ]]; then
@@ -344,16 +377,25 @@ printf "\n\033[1m2. Structural naming checks\033[0m\n"
 
 # A delivery-board ticket id (OWM-T0402, OWM-T1234, ...) is allowed even
 # though it contains the literal bare-OWM regex, because a hyphen counts
-# as a word boundary and \bOWM\b matches it too. This is a content-level
-# exemption (not anchored to a path) so a ticket id is fine in any file;
-# a bare "OWM" on its own, or "OWM" followed by anything other than
-# "-T<digits>", is still a leak and still fails the scan.
+# as a word boundary and \bOWM\b matches it too. Passed as scan()'s
+# strip_exempt argument (not folded into extra_exempt): the id is stripped
+# out of a copy of each matched line and the copy is re-tested, so a line
+# carrying ONLY a ticket id is dropped while a line that ALSO carries a
+# separate, real match (a bare "OWM", or "OWM" followed by anything other
+# than "-T<digits>") still matches the stripped copy and is still reported,
+# with the original line (id intact) printed.
+#
+# Kept as its own argument rather than concatenated into extra_exempt:
+# "${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}" would leave a leading "|" if
+# EXEMPT_OWM_FUNCTION_URLS were ever emptied, which matches the empty
+# string and silently drops every line of the category.
 EXEMPT_OWM_TICKET_ID='OWM-T[0-9]+'
 
 scan "Internal codename: MB / OWM as acronym" \
      "\\(MB\\)|MB —| in MB\\b|MB's|\\bOWM\\b" \
      "" \
-     "${EXEMPT_OWM_RE}|${EXEMPT_OWM_TICKET_ID}"
+     "${EXEMPT_OWM_RE}" \
+     "${EXEMPT_OWM_TICKET_ID}"
 
 # ----------------------------------------------------------------------
 # Category 3: Internal milestone tags + dead PR refs
