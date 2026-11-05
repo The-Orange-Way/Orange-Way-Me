@@ -29,4 +29,10 @@ regexes = [
   # FIPS-204 ML-DSA-65 + hybrid KEM byte-length constants in pqc.ts
   # — these are SIZES (e.g. 1216, 2432, 1120), not key material
   '''SECRET_KEY_BYTES =\s+HYBRID_KEM_V1''',
+  # key-material-names.ts explains its KEY_MATERIAL_SUBSTRINGS list with a
+  # comment naming EXAMPLE field names the "key" substring matches. The
+  # example name or_stealth_key_b64 reads as high-entropy to the
+  # generic-api-key rule even though it is a field name in a comment, not
+  # a credential value. No secret value appears anywhere in this file.
+  '''or_stealth_key_b64''',
 ]
