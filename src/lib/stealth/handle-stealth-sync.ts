@@ -34,7 +34,10 @@ import {
 } from "@/lib/stealth/sync";
 import { isStealthSyncEnabled, refreshRuntimeFlagsForDoor } from "@/lib/stealth/runtimeFlags";
 import { humanizeError } from "@/lib/friendly-error";
-import type { ConnectionRow } from "@/components/connections/ConnectionsPage";
+import type {
+  ConnectionRow,
+  ConnectionListReadback,
+} from "@/components/connections/ConnectionsPage";
 
 export interface HandleStealthSyncDeps {
   user: { id: string } | null | undefined;
@@ -45,6 +48,13 @@ export interface HandleStealthSyncDeps {
   setStealthProgress: (p: StealthSyncProgress | null) => void;
   setStealthScanId: (id: string | null) => void;
   importAfterStealthScan: (conn: ConnectionRow) => void | Promise<void>;
+  /**
+   * A widget error or launch failure is an outcome report, not a read-back
+   * (OW-T0092). Both failure paths below fetch the list before describing
+   * what happened, so what the user reads is confirmed against the list
+   * rather than trusted from the failure event alone.
+   */
+  refreshList: () => Promise<ConnectionListReadback | undefined>;
 }
 
 /**
@@ -77,6 +87,7 @@ export async function handleStealthSync(conn: ConnectionRow, deps: HandleStealth
     setStealthProgress,
     setStealthScanId,
     importAfterStealthScan,
+    refreshList,
   } = deps;
   if (!user) {
     toast.error("Please sign in first.");
@@ -266,18 +277,32 @@ export async function handleStealthSync(conn: ConnectionRow, deps: HandleStealth
           console.warn(`[Connections] stealth sync failed: ${failure.code}`);
         }
         const line = describeStealthFailure(failure, cursorKnowledgeRef.current.get(conn.id));
-        toast.error(
-          line.message,
-          line.canRetry
-            ? {
-                // The caveat rides on the same toast as the button it is
-                // about. A warning in a separate toast can be dismissed
-                // first, which would leave the button and lose the sentence.
-                description: line.retryNote,
-                action: { label: "Try again", onClick: () => void handleStealthSync(conn, deps) },
-              }
-            : undefined,
-        );
+        // A widget error is an outcome report, not a read-back. Fetch the
+        // row before describing the failed scan, including its retry path.
+        void (async () => {
+          const readback = await refreshList();
+          const connectionReadBack =
+            readback?.connections.some((row) => row.id === conn.id) === true &&
+            !readback.stealthUnavailable;
+          if (!connectionReadBack) {
+            toast.error(
+              "We couldn't confirm the connection status after the scan problem because the list couldn't refresh.",
+            );
+            return;
+          }
+          toast.error(
+            line.message,
+            line.canRetry
+              ? {
+                  // The caveat rides on the same toast as the button it is
+                  // about. A warning in a separate toast can be dismissed
+                  // first, which would leave the button and lose the sentence.
+                  description: line.retryNote,
+                  action: { label: "Try again", onClick: () => void handleStealthSync(conn, deps) },
+                }
+              : undefined,
+          );
+        })();
       },
     });
     channelRef.current = channel;
@@ -289,7 +314,14 @@ export async function handleStealthSync(conn: ConnectionRow, deps: HandleStealth
     setStealthScanId(null);
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[Connections] stealth sync could not start", err);
-    toast.error(humanizeError(new Error(msg)));
+    const readback = await refreshList();
+    if (readback) {
+      toast.error(humanizeError(new Error(msg)));
+    } else {
+      toast.error(
+        "We couldn't confirm the connection status after the scan could not start because the list couldn't refresh.",
+      );
+    }
     // The started row may still be in flight: this catch is reachable from
     // the key export and the token mint, both of which run before runId is
     // assigned. Resolve the insert before finishing it, or this execution

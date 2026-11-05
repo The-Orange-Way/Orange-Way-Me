@@ -24,6 +24,7 @@ describe("describeLinkResult", () => {
     const r = describeLinkResult({
       result: { connection_id: EXISTING, source_wallets: [] },
       knownConnectionIdsBefore: [OTHER, EXISTING],
+      connectionIdsAfter: [OTHER, EXISTING],
     });
     expect(r.outcome).toBe("already-existed");
     expect(r.toast.message).toMatch(/already have this wallet/i);
@@ -34,6 +35,7 @@ describe("describeLinkResult", () => {
     const r = describeLinkResult({
       result: { connection_id: FRESH, source_wallets: [] },
       knownConnectionIdsBefore: [OTHER, EXISTING],
+      connectionIdsAfter: [OTHER, EXISTING, FRESH],
     });
     expect(r.outcome).toBe("created");
     expect(r.toast.level).toBe("success");
@@ -46,6 +48,7 @@ describe("describeLinkResult", () => {
     const r = describeLinkResult({
       result: { connection_id: FRESH, already_existed: true },
       knownConnectionIdsBefore: [],
+      connectionIdsAfter: [FRESH],
     });
     expect(r.outcome).toBe("already-existed");
   });
@@ -54,6 +57,7 @@ describe("describeLinkResult", () => {
     const r = describeLinkResult({
       result: { connection_id: EXISTING, already_existed: false },
       knownConnectionIdsBefore: [EXISTING],
+      connectionIdsAfter: [EXISTING],
     });
     expect(r.outcome).toBe("created");
   });
@@ -68,8 +72,8 @@ describe("describeLinkResult", () => {
     });
     expect(r.outcome).toBe("unknown");
     expect(r.toast.level).toBe("warning");
-    expect(r.toast.message).toMatch(/isn't showing yet/i);
-    expect(r.toast.message).not.toMatch(/^Wallet added\.$/);
+    expect(r.toast.message).toMatch(/couldn't confirm/i);
+    expect(r.toast.message).not.toMatch(/added/i);
     expect(r.highlightConnectionId).toBeNull();
   });
 
@@ -86,6 +90,7 @@ describe("describeLinkResult", () => {
     const r = describeLinkResult({
       result: { connection_id: FRESH },
       knownConnectionIdsBefore: [],
+      connectionIdsAfter: [FRESH],
     });
     expect(r.outcome).toBe("created");
   });
@@ -95,6 +100,7 @@ describe("describeLinkResult", () => {
       const r = describeLinkResult({
         result: { connection_id: EXISTING },
         knownConnectionIdsBefore: known,
+        connectionIdsAfter: [EXISTING],
       });
       expect(r.toast.message.length).toBeGreaterThan(0);
     }
