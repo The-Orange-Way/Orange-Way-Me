@@ -22,14 +22,16 @@ async function seedCache(target: string, msAgo: number): Promise<void> {
   const bucketTs = new Date(Date.now() - msAgo).toISOString();
   globalThis.fetch = vi.fn().mockResolvedValueOnce({
     ok: true,
-    json: async () => ({
-      id: "bucket-test",
-      rate: 67_000,
-      tier: "A",
-      bucketTs,
-      providerCount: 3,
-      composite: false,
-    }),
+    json: async () => [
+      {
+        id: "bucket-test",
+        rate: 67_000,
+        tier: "A",
+        bucket_ts: bucketTs,
+        provider_count: 3,
+        composite: false,
+      },
+    ],
   } as unknown as Response);
   await refreshLiveBTCRate(target);
 }
@@ -97,13 +99,9 @@ describe("isBtcRateStale", () => {
     // Response omits bucketTs; toORBIRate stores it as "".
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        id: "no-bucket",
-        rate: 67_000,
-        tier: "A",
-        providerCount: 3,
-        composite: false,
-      }),
+      json: async () => [
+        { id: "no-bucket", rate: 67_000, tier: "A", provider_count: 3, composite: false },
+      ],
     } as unknown as Response);
     await refreshLiveBTCRate("JPY");
     expect(isBtcRateStale("JPY")).toBe(true);
@@ -112,17 +110,68 @@ describe("isBtcRateStale", () => {
   it("returns true when bucketTs is not a valid date", async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        id: "bad-bucket",
-        rate: 67_000,
-        tier: "A",
-        bucketTs: "not-a-date",
-        providerCount: 3,
-        composite: false,
-      }),
+      json: async () => [
+        {
+          id: "bad-bucket",
+          rate: 67_000,
+          tier: "A",
+          bucket_ts: "not-a-date",
+          provider_count: 3,
+          composite: false,
+        },
+      ],
     } as unknown as Response);
     await refreshLiveBTCRate("CHF");
     expect(isBtcRateStale("CHF")).toBe(true);
+  });
+});
+
+// ── OR view reader: empty list and one-row cases (OWM-T0472) ─────────────────
+//
+// fetchLatestBTCRateFromView returns null when the view is empty (price > 2 days
+// old). That null is what isBtcRateStale uses to show "price unavailable".
+// When the view returns one fresh row, the cache is populated and no banner appears.
+
+describe("OR view reader: orbi_btc_usd_latest", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("empty list (price > 2 days old): refreshLiveBTCRate returns null and isBtcRateStale returns true", async () => {
+    // The view returns [] when the latest settled price is older than 2 days.
+    // The UI must show "price unavailable" -- never 0, never a stale cached number.
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => [],
+    } as unknown as Response);
+    const result = await refreshLiveBTCRate("VTEST_EMPTY");
+    expect(result).toBeNull();
+    expect(isBtcRateStale("VTEST_EMPTY")).toBe(true);
+  });
+
+  it("one row (fresh price): rate is cached and isBtcRateStale returns false", async () => {
+    // Five-minute-old bucket is well within the 30-minute stale threshold.
+    const freshBucketTs = new Date(Date.now() - 5 * 60 * 1_000).toISOString();
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        {
+          id: "view-row-1",
+          rate: 70_000,
+          tier: "C-composite",
+          bucket_ts: freshBucketTs,
+          provider_count: 4,
+          composite: true,
+        },
+      ],
+    } as unknown as Response);
+    const result = await refreshLiveBTCRate("VTEST_FRESH");
+    expect(result).not.toBeNull();
+    expect(result?.rate).toBe(70_000);
+    expect(isBtcRateStale("VTEST_FRESH")).toBe(false);
   });
 });
 
