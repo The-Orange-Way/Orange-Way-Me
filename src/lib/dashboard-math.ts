@@ -97,6 +97,7 @@ export function cashFlowByMonth(
   monthsBack: number,
 ): CashFlowMonth[] {
   const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
+  const acctFormatVersion = new Map(accounts.map((a) => [a.id, a.format_version]));
   const today = new Date();
   const buckets: CashFlowMonth[] = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
@@ -116,7 +117,9 @@ export function cashFlowByMonth(
     const bucket = buckets.find((b) => b.monthKey === key);
     if (!bucket) continue;
     const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
-    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency);
+    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency, {
+      unitIsExact: unitIsExact(acctFormatVersion.get(t.account_id)),
+    });
     if (amt >= 0) bucket.income += amt;
     else bucket.spending += Math.abs(amt);
   }
@@ -143,6 +146,7 @@ export function thisMonthSummary(
   anchor: Date = new Date(),
 ): MonthSummary {
   const acctCurrency = new Map(accounts.map((a) => [a.id, a.currency]));
+  const acctFormatVersion = new Map(accounts.map((a) => [a.id, a.format_version]));
   const ym = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
   const thisYM = ym(anchor);
   const lastYM = ym(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1));
@@ -158,7 +162,9 @@ export function thisMonthSummary(
     const k = ym(d);
     if (k !== thisYM && k !== lastYM) continue;
     const cur = acctCurrency.get(t.account_id) ?? primaryCurrency;
-    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency);
+    const amt = convert(Number(t.amount) || 0, cur, primaryCurrency, {
+      unitIsExact: unitIsExact(acctFormatVersion.get(t.account_id)),
+    });
     if (k === thisYM) {
       if (amt >= 0) inc += amt;
       else sp += Math.abs(amt);
