@@ -117,4 +117,14 @@ describe("humanizeError", () => {
     const msg = humanizeError(new Error("or-link-mint-token failed (503): stealth_sync_disabled"));
     expect(msg).toBe("Private wallet sync is temporarily unavailable. Please try again later.");
   });
+
+  // OW-T0387. Same bug shape as the 404 fix (OWM-T0115): a genuine 403
+  // Forbidden does not resolve itself by waiting a moment and retrying, so
+  // the copy must not invite a retry, and it must read differently than the
+  // 404 copy since the two are different failures.
+  it("does not invite a retry for a genuine 403 Forbidden", () => {
+    const msg = humanizeError(new Error("403 Forbidden"));
+    expect(msg).not.toMatch(/try again/i);
+    expect(msg).not.toBe(humanizeError(new Error("404 Not Found")));
+  });
 });
