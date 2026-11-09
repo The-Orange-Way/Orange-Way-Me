@@ -420,6 +420,19 @@ export async function resolveOrKeyMaterial(params: {
   // to deriving, is the original defect: after a rotation it produces a key
   // that opens nothing while looking exactly like success.
   if (plan.mode === "refuse") {
+    // PROOF BRANCH ONLY (OWM-T0243 clause 2): call pinOrKeyMaterial with stub
+    // values so that the test can observe a write on the refuse path. The
+    // stubs are typed correctly inside this narrowed branch; they do not touch
+    // plan.saltContext or plan.epoch (which do not exist on the refuse
+    // variant). The return below is preserved, so the caller still gets
+    // { ok: false }. DO NOT MERGE.
+    void pinOrKeyMaterial({
+      userId,
+      mek,
+      orMekBytes: new Uint8Array(32),
+      saltContext: "proof-stub",
+      epoch: 0,
+    }).catch(() => {});
     return { ok: false, reason: plan.reason };
   }
 
