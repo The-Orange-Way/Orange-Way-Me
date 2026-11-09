@@ -73,6 +73,12 @@ export const SECRET_KEY_PATTERNS = [
   /xprv/i,
   /entropy/i,
   /salt/i,
+  // AEAD nonce. Redacting object keys named "nonce" costs Sentry the
+  // ability to surface a CSP nonce verbatim in a violation report. That
+  // trade is acceptable: CSP violation events carry the violated directive
+  // and blocked-URI regardless; the nonce value is not needed for diagnosis.
+  // posthog-scrubber.ts carries the same entry.
+  /nonce/i,
   /private_key/i,
   /privatekey/i,
   /api_key/i,
