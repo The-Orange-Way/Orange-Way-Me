@@ -55,6 +55,8 @@ describe("Sentry vs PostHog scrubber parity (OWM-T0738)", () => {
       "opk",
       "password",
       "passphrase",
+      // AEAD nonce -- added to both lists in OWM-T0738 items 1-2.
+      "nonce",
     ];
     for (const key of TICKET_FIXED_KEYS) {
       expect(
