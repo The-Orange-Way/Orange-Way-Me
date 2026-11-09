@@ -11,16 +11,19 @@
  * this repo produces five check-runs and none of them is an e2e job, so an e2e
  * test added now would be collected by nothing on the gate.
  *
- * WHAT IT DEFENDS (OWM-T0530, OWM-T0544). handleSync routes a private
- * connection to handleStealthSync and everything else to requestOrSync, which
- * is the only call in this app that takes the Orange Rails credentials key and
- * transactions key out of the vault and puts them in a request body. The rule
- * itself is tested in sync-route.test.ts and the key handover is tested in
- * or-sync-request.test.ts. Neither of those notices if the ARM in the handler
- * is deleted. Deleting it no longer leaks a key, because requestOrSync asks
- * planSyncRoute itself and refuses above its own export, but it does break
- * private wallet sync for every customer who presses Sync on one, silently, on
- * a green board. That is the gap this file closes.
+ * WHAT IT DEFENDS (OWM-T0530, OWM-T0544, OWM-T0590). handleSync routes a
+ * private connection to handleStealthSync and everything else to requestOrSync,
+ * which is the only call in this app that takes the Orange Rails credentials
+ * key and transactions key out of the vault and puts them in a request body.
+ * The route itself is tested in sync-route.test.ts (planSyncRoute) and the
+ * dispatch table is tested there too (dispatchSync, with injected handlers).
+ * The key handover is tested in or-sync-request.test.ts. None of those notice
+ * if handleSync stops calling dispatchSync, or stops wiring handleStealthSync
+ * as the private handler, or drops the requestOrSync call site. Deleting any
+ * of those no longer leaks a key, because requestOrSync asks planSyncRoute
+ * itself and refuses above its own export, but it does break private wallet
+ * sync for every customer who presses Sync on one: they get "Sync failed"
+ * instead of the private-path scan. That is the gap this file closes.
  *
  * WHAT IT DOES NOT CLAIM. It is not the customer-path assertion that no
  * request carrying credentials_key ever leaves the browser. Only a real
@@ -105,23 +108,31 @@ describe("ConnectionsPage handleSync wiring", () => {
     expect(code.length).toBeGreaterThan(200);
   });
 
+  it("dispatches the press through dispatchSync", () => {
+    const code = handlerCode("handleSync");
+    expect(
+      code.includes("dispatchSync("),
+      "handleSync no longer calls dispatchSync. The route table has to live in " +
+        "a function a unit test can call with injected handlers (OWM-T0590); an " +
+        "inline if-chain is how deleting the private arm failed nothing.",
+    ).toBe(true);
+  });
+
   it("sends a private connection to the private path", () => {
     const code = handlerCode("handleSync");
     expect(
-      code.includes('route === "private"'),
-      "handleSync no longer branches on the private route. A private connection " +
-        "must go to handleStealthSync; it must never reach the or-sync path.",
-    ).toBe(true);
-    expect(
-      code.includes("handleStealthSync("),
-      "handleSync no longer calls handleStealthSync. The private branch has to " +
-        "hand the press to the in-browser scan, not just return.",
+      /private\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*handleStealthSync\(/.test(code),
+      "handleSync no longer wires handleStealthSync as the private handler. A " +
+        "private connection must go to handleStealthSync; it must never reach " +
+        "the or-sync path.",
     ).toBe(true);
   });
 
   it("decides the private branch above the call that hands over the vault keys", () => {
     const code = handlerCode("handleSync");
-    const privateArm = code.indexOf('route === "private"');
+    const privateArm = code.search(
+      /private\s*:\s*(?:async\s*)?\([^)]*\)\s*=>\s*handleStealthSync\(/,
+    );
     const keyHandover = code.indexOf("requestOrSync(");
     expect(keyHandover).toBeGreaterThan(-1);
     expect(
