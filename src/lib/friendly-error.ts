@@ -84,7 +84,7 @@ export function humanizeError(
     return "Your session expired. Please sign in again.";
   }
   if (lower.includes("forbidden") || lower.includes(" 403")) {
-    return "We can't reach this service right now. Try again in a moment.";
+    return "You don't have permission to do that.";
   }
   if (lower.includes("not found") || lower.includes(" 404")) {
     return "That item is no longer there.";
