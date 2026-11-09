@@ -67,6 +67,20 @@ export const SECRET_KEY_PATTERNS = [
   /key/i,
   /txn_key/i,
   /seed/i,
+  // Found 2026-09-15 by the parity test in this PR. Nothing in this list
+  // covered a property named "mnemonic": /seed/i does not match it, because
+  // the two words share no substring.
+  //
+  // Stated honestly rather than maximally, this is DEFENCE IN DEPTH and not a
+  // live leak. Verified on dev the same day: the string "mnemonic" appears in
+  // no file outside these observability modules, so no current callsite sends
+  // such a property. Closing it is still right, because "mnemonic" is the
+  // standard BIP39 term for the recovery phrase, which is the highest-value
+  // secret this product holds, and a name this obvious will be reached for the
+  // first time by someone who is not thinking about telemetry. Catching that
+  // naming drift BEFORE it ships is the whole reason the shared inventory and
+  // its parity test exist.
+  /mnemonic/i,
   /secret/i,
   /xpub/i,
   /xpriv/i,
@@ -183,6 +197,19 @@ function scrubUrl(u: string): string {
   return scrubString(noHash);
 }
 
+/**
+ * True when an object key must have its VALUE redacted before the event is
+ * sent. Exported so src/lib/observability/__tests__/key-material-scrub-parity.test.ts
+ * can ask this list about a field name directly, rather than inferring the
+ * answer from a synthetic event and a module-private scrubber.
+ *
+ * Every pattern above is non-global, so .test() carries no lastIndex state
+ * between calls and this is safe to call in a loop.
+ */
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY_PATTERNS.some((p) => p.test(key));
+}
+
 function scrubValue(v: unknown, depth = 0): unknown {
   if (depth > 8) return REDACTED;
   if (v == null) return v;
@@ -194,7 +221,7 @@ function scrubValue(v: unknown, depth = 0): unknown {
   if (typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (SECRET_KEY_PATTERNS.some((p) => p.test(k))) {
+      if (isSecretKey(k)) {
         out[k] = REDACTED;
       } else if (k === "url" && typeof val === "string") {
         out[k] = scrubUrl(val);
