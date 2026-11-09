@@ -1,0 +1,65 @@
+name: Sync E2E_MINT_TOKEN to Supabase dev
+
+# One-off setup tool (OWM-T0226). Run this once after xo-5 has set
+# E2E_MINT_TOKEN on the dev GitHub environment. It syncs that value to
+# the Supabase dev project as a function secret so e2e-mint-session can
+# read it at call time.
+#
+# BEFORE TRIGGERING: confirm xo-5 has set E2E_MINT_TOKEN on the dev
+# GitHub environment (Actions -> Environments -> dev -> Secrets). If
+# that secret is absent this job fails loudly and names the gap.
+#
+# AFTER TRIGGERING: verify e2e-mint-session responds 401 to an
+# unauthenticated POST to confirm the secret landed.
+
+on:
+  workflow_dispatch:
+
+# Least privilege. This job reads the checkout and calls the Supabase
+# Management API using the already-provisioned SUPABASE_ACCESS_TOKEN.
+# It does NOT mint new credentials or write GitHub secrets.
+permissions:
+  contents: read
+
+jobs:
+  sync-mint-token:
+    name: Set E2E_MINT_TOKEN on dev Supabase project
+    runs-on: ubuntu-latest
+    # Pull SUPABASE_ACCESS_TOKEN and E2E_MINT_TOKEN from the dev
+    # environment secrets. Both must be set before this job can run.
+    environment: dev
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      E2E_MINT_TOKEN: ${{ secrets.E2E_MINT_TOKEN }}
+    steps:
+      - name: Check required secrets are present
+        # A missing secret expands to an empty string in the env block.
+        # Fail loudly and name the gap so the caller knows exactly what
+        # to set, instead of getting a cryptic auth error from the CLI.
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ -n "${E2E_MINT_TOKEN:-}" ]        || missing="$missing E2E_MINT_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot sync: the following secret(s) are not set on the dev environment:$missing"
+            exit 1
+          fi
+          echo "Both required secrets are present on the dev environment."
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Set E2E_MINT_TOKEN on dev Supabase project
+        run: |
+          set -euo pipefail
+          # Mask immediately. GitHub already masks env vars sourced from
+          # secrets, but add-mask covers any sub-process that might echo
+          # the env, including supabase CLI debug output.
+          echo "::add-mask::$E2E_MINT_TOKEN"
+          supabase secrets set "E2E_MINT_TOKEN=${E2E_MINT_TOKEN}" \
+            --project-ref bogmoovbjpvcvdqrmjgt
+          echo "E2E_MINT_TOKEN set on dev Supabase project (ref bogmoovbjpvcvdqrmjgt)."
+          echo "Verify: POST to e2e-mint-session with no Authorization header should return 401."
