@@ -86,6 +86,9 @@
 # and the two scripts are reviewed together whenever either changes.
 #   is_invite_code_valid(text)        called from the join page before sign in
 #   is_email_in_beta_allowlist(text)  called from the auth screen before sign in
+#   import_age_hours()                called by the scheduled import monitor with the
+#                                     public key and no user session. Returns whole
+#                                     hours since the newest imported row, nothing else
 #
 # SIGNATURE FORM, and why an added grant is compared twice
 # check-definer-grants.sh derives its signature from oid::regprocedure, which
@@ -156,7 +159,7 @@ fi
 BASE_REF="$1"
 HEAD_REF="$2"
 
-ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon'
+ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon\nimport_age_hours()\tanon'
 
 # Signatures only, one per line, no argument list beyond the empty parens both
 # currently declare. Both are called by pg_cron as role postgres: see CRON

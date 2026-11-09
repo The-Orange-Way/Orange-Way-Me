@@ -78,16 +78,19 @@ API_URL="https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query"
 # Allowlist, exact `signature<TAB>grantee` pairs, and it is PER PROJECT rather
 # than shared. A pre-auth callsite that justifies anon EXECUTE on dev does not
 # automatically justify it on production, and one shared list would let a dev
-# exemption silently cover production drift. Both projects allow the same two
+# exemption silently cover production drift. Both projects allow the same three
 # functions today; if that ever stops being true, give them separate lists here
 # rather than widening one list for both.
 #
-# Both entries have a verified pre-auth callsite, which is the only thing that
-# can justify anon reaching a definer function at all:
+# Each entry has a verified callsite that holds no user session, which is the only
+# thing that can justify anon reaching a definer function at all:
 #   is_invite_code_valid(text)        called from the join page before sign in
 #   is_email_in_beta_allowlist(text)  called from the auth screen before sign in
+#   import_age_hours()                called by the scheduled import monitor with the
+#                                     public key and no user session. Returns whole
+#                                     hours since the newest imported row, nothing else
 #
-# PUBLIC is deliberately NOT allowlisted for either of them, on either project.
+# PUBLIC is deliberately NOT allowlisted for any of them, on either project.
 # PUBLIC is broader than anon, and a PUBLIC grant reappearing on one of these is
 # exactly the CREATE OR REPLACE drift described above.
 #
@@ -95,7 +98,7 @@ API_URL="https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query"
 # cannot name one, the answer is a revoke, not an allowlist entry.
 DEV_PROJECT_REF='bogmoovbjpvcvdqrmjgt'
 PROD_PROJECT_REF='tmqjusxxjjcsdgyiqbcg'
-PRE_AUTH_ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon'
+PRE_AUTH_ALLOWLIST=$'is_invite_code_valid(text)\tanon\nis_email_in_beta_allowlist(text)\tanon\nimport_age_hours()\tanon'
 
 case "$PROJECT_REF" in
   "$DEV_PROJECT_REF")  ALLOWLIST="$PRE_AUTH_ALLOWLIST" ;;
