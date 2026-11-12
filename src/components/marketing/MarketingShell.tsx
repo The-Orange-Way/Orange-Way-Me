@@ -5,6 +5,8 @@
  */
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { openPrivacyChoices } from "@/lib/analytics";
+import AnalyticsBanner from "@/components/AnalyticsBanner";
 
 const NAV = [
   { to: "/features", label: "Features" },
@@ -17,90 +19,115 @@ const NAV = [
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2">
-            <img src="/icon-192.png" alt="" width={32} height={32} className="h-8 w-8 rounded-lg" />
-            <span className="text-sm font-semibold tracking-tight">Orange Way</span>
-          </Link>
-          <nav className="hidden items-center gap-5 md:flex" aria-label="Primary">
-            {NAV.map((n) => (
-              <Link
-                key={n.to}
-                to={n.to}
-                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                activeProps={{ className: "text-foreground font-medium" }}
-              >
-                {n.label}
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex-1 overflow-y-auto">
+        <div className="min-h-full bg-background text-foreground">
+          <header className="border-b border-border">
+            <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+              <Link to="/" className="flex items-center gap-2">
+                <img
+                  src="/icon-192.png"
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 rounded-lg"
+                />
+                <span className="text-sm font-semibold tracking-tight">Orange Way</span>
               </Link>
-            ))}
-          </nav>
-          <div className="flex items-center gap-2">
-            <Link
-              to="/auth"
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/beta"
-              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Apply for beta
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main>{children}</main>
-
-      <footer className="mt-16 border-t border-border">
-        <div className="mx-auto grid max-w-6xl gap-6 px-6 py-10 text-sm md:grid-cols-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <img src="/icon-192.png" alt="" width={16} height={16} className="h-4 w-4 rounded" />
-              <span className="font-semibold">Orange Way</span>
+              <nav className="hidden items-center gap-5 md:flex" aria-label="Primary">
+                {NAV.map((n) => (
+                  <Link
+                    key={n.to}
+                    to={n.to}
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    activeProps={{ className: "text-foreground font-medium" }}
+                  >
+                    {n.label}
+                  </Link>
+                ))}
+              </nav>
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/auth"
+                  className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  to="/beta"
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Apply for beta
+                </Link>
+              </div>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              The only finance app that connects to your bank and your Bitcoin and locks them with a
-              key only you hold.
-            </p>
-          </div>
-          <FooterCol
-            title="Product"
-            links={[
-              { to: "/features", label: "Features" },
-              { to: "/security", label: "Security" },
-              { to: "/bitcoin", label: "Bitcoin" },
-              { to: "/households", label: "Households" },
-              { to: "/pricing", label: "Pricing" },
-            ]}
-          />
-          <FooterCol
-            title="Resources"
-            links={[
-              { to: "/compare", label: "Compare" },
-              { to: "/faq", label: "FAQ" },
-              { to: "/changelog", label: "Changelog" },
-              { to: "/ai", label: "For AI agents" },
-            ]}
-          />
-          <FooterCol
-            title="Company"
-            links={[
-              { to: "/about", label: "About" },
-              { to: "/enterprise", label: "Enterprise" },
-              { to: "/self-host", label: "Self host" },
-              { to: "/privacy", label: "Privacy" },
-              { to: "/terms", label: "Terms" },
-            ]}
-          />
+          </header>
+
+          <main>{children}</main>
+
+          <footer className="mt-16 border-t border-border">
+            <div className="mx-auto grid max-w-6xl gap-6 px-6 py-10 text-sm md:grid-cols-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <img
+                    src="/icon-192.png"
+                    alt=""
+                    width={16}
+                    height={16}
+                    className="h-4 w-4 rounded"
+                  />
+                  <span className="font-semibold">Orange Way</span>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  The only finance app that connects to your bank and your Bitcoin and locks them
+                  with a key only you hold.
+                </p>
+              </div>
+              <FooterCol
+                title="Product"
+                links={[
+                  { to: "/features", label: "Features" },
+                  { to: "/security", label: "Security" },
+                  { to: "/bitcoin", label: "Bitcoin" },
+                  { to: "/households", label: "Households" },
+                  { to: "/pricing", label: "Pricing" },
+                ]}
+              />
+              <FooterCol
+                title="Resources"
+                links={[
+                  { to: "/compare", label: "Compare" },
+                  { to: "/faq", label: "FAQ" },
+                  { to: "/changelog", label: "Changelog" },
+                  { to: "/ai", label: "For AI agents" },
+                ]}
+              />
+              <FooterCol
+                title="Company"
+                links={[
+                  { to: "/about", label: "About" },
+                  { to: "/enterprise", label: "Enterprise" },
+                  { to: "/self-host", label: "Self host" },
+                  { to: "/privacy", label: "Privacy" },
+                  { to: "/terms", label: "Terms" },
+                ]}
+              />
+            </div>
+            <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
+              © {new Date().getFullYear()} Orange Way · Built for sovereignty
+              {" · "}
+              <button
+                type="button"
+                onClick={openPrivacyChoices}
+                className="underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Privacy choices
+              </button>
+            </div>
+          </footer>
         </div>
-        <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Orange Way · Built for sovereignty
-        </div>
-      </footer>
+      </div>
+      <AnalyticsBanner />
     </div>
   );
 }

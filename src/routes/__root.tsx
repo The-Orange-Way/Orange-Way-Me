@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { Outlet, Link, createRootRoute, HeadContent, useLocation } from "@tanstack/react-router";
-import posthog from "posthog-js";
-import { PostHogProvider } from "posthog-js/react";
 
 import { AuthProvider } from "@/context/AuthContext";
 import { VaultProvider } from "@/context/VaultContext";
@@ -9,8 +7,8 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { RootErrorFallback } from "@/components/error/RootErrorFallback";
 import { logBoundaryError } from "@/components/error/logError";
 import { refreshLiveBTCRate } from "@/lib/orbi-rates";
-import { scrubPostHogEvent } from "@/lib/observability/posthog-scrubber";
 import { isMarketingPath } from "@/lib/observability/analytics-surface";
+import { pauseAnalytics, restoreAnalytics } from "@/lib/analytics";
 
 // Toaster is lazy-loaded: sonner transitively imports lucide-react icons
 // (CheckCircle, Info, etc.), which would otherwise drag the entire
@@ -69,81 +67,17 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const location = useLocation();
-  // Whether posthog.init has run. Init is deferred until the user is on a
-  // marketing route, so inside the app the SDK is never initialised at all.
-  const analyticsStarted = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-
     if (!isMarketingPath(location.pathname)) {
       // Authenticated app, auth screens, and anything unrecognised. If the
-      // user arrived here from marketing the SDK is already live, so stop
-      // capturing rather than leaving it running behind the sign-in wall.
-      if (analyticsStarted.current && !posthog.has_opted_out_capturing()) {
-        posthog.opt_out_capturing();
-      }
+      // user arrived here from marketing after opting in, stop capturing
+      // rather than leaving it running behind the sign-in wall.
+      void pauseAnalytics();
       return;
     }
-
-    if (!analyticsStarted.current) {
-      // Cookieless PostHog, privacy-first analytics for Orange Way.
-      // Memory-only persistence, no cookies, no localStorage tracking,
-      // no session recording, no person profiles. Each page load is a
-      // fresh anonymous event stream.
-      // phc_ keys are PostHog "Project API Keys": write-only, public-safe.
-      // Pin analytics to the EU PostHog region by construction. An unset
-      // VITE_POSTHOG_HOST becomes "" at build time, which is not nullish, so a
-      // ?? fallback would not fire and posthog-js would default to its US host.
-      // Our privacy posture requires EU, so accept only a known EU PostHog
-      // origin and pin to EU otherwise. The env var cannot move the region.
-      const configuredPostHogHost = import.meta.env.VITE_POSTHOG_HOST;
-      const posthogHost =
-        configuredPostHogHost === "https://eu.i.posthog.com" ||
-        configuredPostHogHost === "https://eu.posthog.com"
-          ? configuredPostHogHost
-          : "https://eu.i.posthog.com";
-      posthog.init(import.meta.env.VITE_POSTHOG_KEY ?? "", {
-        api_host: posthogHost,
-        persistence: "memory",
-        person_profiles: "never",
-        // Explicit capture only. Automatic pageviews follow SPA navigation,
-        // which would fire on app routes the moment the user signs in. The
-        // capture below is what makes the route gate actually hold.
-        capture_pageview: false,
-        autocapture: false,
-        disable_session_recording: true,
-        respect_dnt: true,
-        // Cybersec audit finding 2026-06-19: PostHog captures URL query
-        // strings and path params on pageview. If a route happens to
-        // surface an account / household / transaction id in the URL,
-        // PostHog would receive it. The before_send hook scrubs:
-        //  - any url field's query string + fragment
-        //  - any path segment that looks like a UUID, slug, or numeric id
-        //  - any property whose key name suggests decrypted content
-        // The Sentry init does the same on its side. Keep the two
-        // scrubbers in shape with each other.
-        before_send: scrubPostHogEvent,
-      });
-      posthog.register({ app: "orangeway", brand: "orange-way" });
-      analyticsStarted.current = true;
-    }
-
-    // Opt-out state is persisted by posthog to localStorage under its own
-    // key, independent of persistence: "memory". So a user who signed in
-    // during an earlier visit loads a later marketing page already opted
-    // out, and every capture below would be a silent no-op. This runs
-    // after init rather than as an else branch so it covers both the fresh
-    // load and the in-session return from the app. captureEventName false
-    // suppresses the default $opt_in event, which would otherwise report
-    // the transition we just declined to record. The route gate above has
-    // already established this is a marketing path, so opting back in
-    // cannot widen what we collect.
-    if (posthog.has_opted_out_capturing()) {
-      posthog.opt_in_capturing({ captureEventName: false });
-    }
-
-    posthog.capture("$pageview");
+    restoreAnalytics();
   }, [location.pathname]);
 
   // Bootstrap + refresh the live ORBI BTC/USD rate. The fx-rates convert()
@@ -157,119 +91,16 @@ function RootComponent() {
   }, []);
 
   return (
-    <PostHogProvider client={posthog}>
-      <ThemeProvider>
-        <AuthProvider>
-          <VaultProvider>
-            <HeadContent />
-            <Outlet />
-            <Suspense fallback={null}>
-              <Toaster />
-            </Suspense>
-            <AnalyticsNotice />
-          </VaultProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </PostHogProvider>
-  );
-}
-
-// One-time analytics-notice banner shown once per browser, dismissed via
-// localStorage (UI state, not tracking — exempt from consent under
-// GDPR Article 6 because it's strictly necessary for the banner not to
-// nag). Consistent wording across every Orange Way surface.
-// Renders only where analytics actually runs. It reads the same helper as
-// the init gate above, so the banner and the behaviour it describes cannot
-// drift apart: no analytics, no notice.
-function AnalyticsNotice() {
-  const location = useLocation();
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!isMarketingPath(location.pathname)) {
-      setShow(false);
-      return;
-    }
-    setShow(localStorage.getItem("ow_notice_dismissed") !== "1");
-  }, [location.pathname]);
-  useEffect(() => {
-    if (!show) return;
-    const onScroll = () => {
-      if (window.scrollY > 600) {
-        localStorage.setItem("ow_notice_dismissed", "1");
-        setShow(false);
-      }
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [show]);
-  if (!show) return null;
-  const dismiss = () => {
-    localStorage.setItem("ow_notice_dismissed", "1");
-    setShow(false);
-  };
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: 20,
-        bottom: 20,
-        zIndex: 9999,
-        maxWidth: 320,
-        padding: "14px 16px",
-        background: "#0F172A",
-        color: "#FAFAF9",
-        borderRadius: 14,
-        boxShadow: "0 12px 32px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.18)",
-        font: "12.5px/1.5 -apple-system, 'Plus Jakarta Sans', system-ui, sans-serif",
-        animation: "bbnotin 260ms cubic-bezier(0.16,1,0.3,1)",
-      }}
-      role="region"
-      aria-label="Analytics notice"
-    >
-      <style>{`@keyframes bbnotin{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="Close"
-        style={{
-          position: "absolute",
-          top: 6,
-          right: 8,
-          background: "transparent",
-          color: "#94A3B8",
-          border: 0,
-          fontSize: 18,
-          lineHeight: 1,
-          padding: "4px 6px",
-          cursor: "pointer",
-          borderRadius: 6,
-        }}
-      >
-        ×
-      </button>
-      <p style={{ margin: "0 0 10px 0", paddingRight: 18 }}>
-        Anonymous analytics —{" "}
-        <strong style={{ color: "#fff" }}>no tracking, no profiles, no cookies.</strong> A session
-        cookie is set only if you sign in, and is deleted when you sign out.
-      </p>
-      <button
-        type="button"
-        onClick={dismiss}
-        style={{
-          background: "#fb923c",
-          color: "#fff",
-          border: 0,
-          borderRadius: 8,
-          padding: "6px 14px",
-          font: "inherit",
-          fontWeight: 600,
-          fontSize: 12.5,
-          cursor: "pointer",
-        }}
-      >
-        Got it
-      </button>
-    </div>
+    <ThemeProvider>
+      <AuthProvider>
+        <VaultProvider>
+          <HeadContent />
+          <Outlet />
+          <Suspense fallback={null}>
+            <Toaster />
+          </Suspense>
+        </VaultProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

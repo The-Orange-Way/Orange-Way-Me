@@ -1,4 +1,4 @@
-import posthog from "posthog-js";
+import { captureException as captureAnalyticsException } from "@/lib/analytics";
 import { captureException as sentryCapture } from "@/lib/observability/sentry";
 
 // Centralized error logger for boundary onError handlers. Logs ONLY the
@@ -9,9 +9,9 @@ import { captureException as sentryCapture } from "@/lib/observability/sentry";
 export function logBoundaryError(error: Error, source: string): void {
   console.error(`[orangeway:${source}] render error`, error);
   try {
-    posthog.captureException?.(error, { source });
+    void captureAnalyticsException(error, { source });
   } catch {
-    // PostHog not initialized (SSR / test) — swallow.
+    // PostHog not initialized (SSR / test / no consent). Swallow.
   }
   try {
     sentryCapture(error, { tags: { source } });
