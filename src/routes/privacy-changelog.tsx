@@ -44,6 +44,16 @@ function PrivacyChangelogPage() {
 
         <section className="space-y-8">
           <div>
+            <h2 className="text-xl font-semibold">Version 2026.11.11</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+              <li>
+                PostHog on the marketing site now starts only after you click Sounds good. The
+                anonymous stats include heatmaps and session replays, with typed input masked. You
+                can change your choice anytime via Privacy choices in the footer.
+              </li>
+            </ul>
+          </div>
+          <div>
             <h2 className="text-xl font-semibold">Version 2026.07.02</h2>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
               <li>

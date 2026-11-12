@@ -5,6 +5,8 @@
  */
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { openPrivacyChoices } from "@/lib/analytics";
+import AnalyticsBanner from "@/components/AnalyticsBanner";
 
 const NAV = [
   { to: "/features", label: "Features" },
@@ -17,7 +19,9 @@ const NAV = [
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-full bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-2">
@@ -99,8 +103,15 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         </div>
         <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
           © {new Date().getFullYear()} Orange Way · Built for sovereignty
+          {" · "}
+          <button type="button" onClick={openPrivacyChoices} className="underline-offset-2 hover:text-foreground hover:underline">
+            Privacy choices
+          </button>
         </div>
       </footer>
+      </div>
+      </div>
+      <AnalyticsBanner />
     </div>
   );
 }

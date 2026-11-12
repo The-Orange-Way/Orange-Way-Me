@@ -17,6 +17,8 @@
  */
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { openPrivacyChoices } from "@/lib/analytics";
+import AnalyticsBanner from "@/components/AnalyticsBanner";
 import bookCover from "@/assets/orange-way/book-cover.png";
 import { useSignupForm } from "@/lib/marketing/useSignupForm";
 import { BitcoinMockup } from "@/components/marketing/mockups/BitcoinMockup";
@@ -181,7 +183,8 @@ export const Route = createFileRoute("/")({
 
 function LandingPage() {
   return (
-    <div style={{ background: C.surface, color: C.body, fontFamily: FONT_BODY }}>
+    <div className="flex h-dvh flex-col overflow-hidden" style={{ background: C.surface, color: C.body, fontFamily: FONT_BODY }}>
+      <div className="flex-1 overflow-y-auto">
       <Nav />
       <Hero />
       <Shift />
@@ -193,6 +196,8 @@ function LandingPage() {
       <Vision />
       <FinalCTA />
       <Footer />
+      </div>
+      <AnalyticsBanner />
     </div>
   );
 }
@@ -861,6 +866,14 @@ function Footer() {
         style={{ borderColor: C.border, color: C.muted }}
       >
         © {year} {COPY.footerLegalLine}
+        {" · "}
+        <button
+          type="button"
+          onClick={openPrivacyChoices}
+          className="transition-colors hover:text-orange-500"
+        >
+          Privacy choices
+        </button>
       </div>
     </footer>
   );

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { openPrivacyChoices } from "@/lib/analytics";
+import AnalyticsBanner from "@/components/AnalyticsBanner";
 import { useAuth } from "@/context/AuthContext";
 import { useSignupForm } from "@/lib/marketing/useSignupForm";
 import bookCover from "@/assets/orange-way/book-cover.png";
@@ -82,9 +84,10 @@ const fontDisplay = `"Fraunces", ui-serif, Georgia, serif`;
 function Landing() {
   return (
     <div
-      style={{ background: C.cream, color: C.brown, fontFamily: fontSans, minHeight: "100vh" }}
-      className="ow-me"
+      className="ow-me flex h-dvh flex-col overflow-hidden"
+      style={{ background: C.cream, color: C.brown, fontFamily: fontSans }}
     >
+      <div className="flex-1 overflow-y-auto">
       <Header />
       <Hero />
       <FeatureShowcase />
@@ -96,6 +99,8 @@ function Landing() {
       <BookSection />
       <FinalCTA />
       <Footer />
+      </div>
+      <AnalyticsBanner />
     </div>
   );
 }
@@ -1414,6 +1419,10 @@ function Footer() {
     <footer className="px-6 py-7 text-center" style={{ background: C.brown, color: C.cream }}>
       <p className="text-xs" style={{ opacity: 0.92 }}>
         {"OrangeWay · The finance app that minds its own business around your data · © 2026"}
+        {" · "}
+        <button type="button" onClick={openPrivacyChoices} className="underline underline-offset-2">
+          Privacy choices
+        </button>
       </p>
       <p className="mt-1 text-xs italic" style={{ fontFamily: fontDisplay, opacity: 0.55 }}>
         {"Not your keys, not your privacy."}

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import posthog from "posthog-js";
+import { resetUser } from "@/lib/analytics";
 import { supabase } from "@/integrations/supabase/client";
 import { buildSignUpOptions } from "@/lib/signup-options";
 
@@ -65,18 +65,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Set up listener BEFORE getSession.
     //
-    // We DO NOT call posthog.identify here. PostHog is configured with
-    // person_profiles: "never" (__root.tsx) so identify is a no-op today,
-    // but leaving the calls in is a foot-gun: flipping the config
-    // upstream would immediately ship the Supabase user id (UUID, but
-    // user-correlatable) to PostHog. ZKA-aligned posture is "don't
-    // associate any identifier with the analytics stream"; reset on
-    // sign-out is sufficient and remains.
+    // We DO NOT call posthog.identify here. Analytics is opt-in and
+    // marketing-only. ZKA-aligned posture is "don't associate any
+    // identifier with the analytics stream"; reset on sign-out is
+    // sufficient and remains (and is a no-op if PostHog never started).
     const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (!newSession?.user) {
-        posthog.reset();
+        void resetUser();
         // Clear the welcome-back greeting key on every sign-out path
         // (sign out, session expiry, account switch).
         // Privacy ruling (DL-0717): this key must not survive sign-out.
