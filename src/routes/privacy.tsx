@@ -164,15 +164,16 @@ function PrivacyPage() {
 
         <h3 className="mt-6 text-lg font-semibold">PostHog</h3>
         <p className="mt-2 text-muted-foreground">
-          Marketing-site analytics, only after you click Sounds good. Enabled on{" "}
-          <code>orangeway.app</code>. Disabled by default on self-hosted builds. Anonymous events
-          only; no cross-site cookies, no profiles. With your OK, this includes page views,
-          aggregate clicks, heatmaps and session replays of how the page is used. Typed input is
-          masked. URL query strings and known sensitive field names are stripped before send. Events
-          are sent to PostHog's EU Cloud, so analytics data is ingested and stored in the European
-          Union. The actual retention is the value the operator has configured on the PostHog
-          project; our target is 90 days. You can change your choice anytime via Privacy choices in
-          the footer.{" "}
+          Marketing-site analytics on <code>orangeway.app</code>. Disabled by default on self-hosted
+          builds. When you visit a marketing page, we send anonymous page counts: which pages are
+          visited, plus referrer, device and country. This uses no cookies, stores nothing on your
+          device, and builds no profile. If your browser sends a Do Not Track or Global Privacy
+          Control signal, this does not run. Only if you click Sounds good, this also includes
+          clicks, heatmaps and session replays of how the page is used. Typed input is masked. URL
+          query strings and known sensitive field names are stripped before send. Events are sent to
+          PostHog's EU Cloud, so analytics data is ingested and stored in the European Union. The
+          actual retention is the value the operator has configured on the PostHog project; our
+          target is 90 days. You can change your choice anytime via Privacy choices in the footer.{" "}
           <a
             href="https://posthog.com/dpa"
             className="underline"
@@ -213,8 +214,8 @@ function PrivacyPage() {
             EU Cloud, so analytics events are ingested and stored in the European Union, not
             transferred to the United States in the ordinary course. PostHog Inc. is a US company;
             the SCCs in its DPA cover any residual access from the US. Quebec Law 25 §17
-            implication: anonymous event-level analytics after you click Sounds good; no profile, no
-            cross-site identifier. Includes heatmaps and session replays with typed input masked.
+            implication: anonymous page counts by default; heatmaps and session replays with typed
+            input masked only after you click Sounds good; no profile, no cross-site identifier.
             Disabled entirely on self-hosted builds.
           </li>
           <li>

@@ -7,7 +7,10 @@ export const OPEN_PRIVACY_CHOICES = "open-privacy-choices";
 
 export type Consent = "granted" | "denied";
 
+const SESSION_RECORDING = { maskAllInputs: true, maskTextSelector: "[data-ph-mask]" };
+
 let started = false;
+let paused = false;
 
 function projectKey() {
   const fromEnv = import.meta.env.VITE_POSTHOG_KEY;
@@ -19,6 +22,20 @@ function pinnedHost() {
   return configured === "https://eu.i.posthog.com" || configured === "https://eu.posthog.com"
     ? configured
     : HOST;
+}
+
+export function hasTrackingProtection(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { msDoNotTrack?: string; globalPrivacyControl?: boolean };
+  const dnt =
+    nav.doNotTrack ||
+    (typeof window !== "undefined"
+      ? (window as Window & { doNotTrack?: string }).doNotTrack
+      : undefined) ||
+    nav.msDoNotTrack;
+  if (dnt === "1" || dnt === "yes") return true;
+  if (nav.globalPrivacyControl === true) return true;
+  return false;
 }
 
 export function readConsent(): Consent | null {
@@ -35,6 +52,31 @@ function writeConsent(value: Consent) {
   window.localStorage.setItem(CONSENT_KEY, value);
 }
 
+function scrubPostHogDeviceStore() {
+  if (typeof window === "undefined") return;
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key !== CONSENT_KEY && (key.startsWith("__ph_") || key.startsWith("ph_")))
+        keys.push(key);
+    }
+    for (const key of keys) window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+  try {
+    for (const part of document.cookie.split(";")) {
+      const name = part.split("=")[0]?.trim();
+      if (name && (name.startsWith("__ph_") || name.startsWith("ph_"))) {
+        document.cookie = `${name}=; Max-Age=0; path=/`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function openPrivacyChoices() {
   window.dispatchEvent(new Event(OPEN_PRIVACY_CHOICES));
 }
@@ -43,42 +85,78 @@ export function isAnalyticsStarted() {
   return started;
 }
 
-async function startCapture() {
+async function startTier1() {
+  if (typeof window === "undefined" || hasTrackingProtection()) return;
   const { default: posthog } = await import("posthog-js");
   if (started) {
-    posthog.opt_in_capturing();
-    posthog.startSessionRecording?.();
+    if (paused) {
+      posthog.opt_in_capturing();
+      scrubPostHogDeviceStore();
+      paused = false;
+    }
     return;
   }
   started = true;
   posthog.init(projectKey(), {
     api_host: pinnedHost(),
     persistence: "memory",
-    person_profiles: "identified_only",
+    disable_persistence: true,
+    person_profiles: "never",
     respect_dnt: true,
+    autocapture: false,
+    capture_heatmaps: false,
+    disable_session_recording: true,
+    disable_surveys: true,
+    capture_performance: false,
+    session_recording: SESSION_RECORDING,
+    capture_pageview: "history_change",
+    capture_pageleave: true,
+    opt_out_capturing_by_default: false,
+    before_send: scrubPostHogEvent,
+    loaded: (client) => {
+      scrubPostHogDeviceStore();
+      client.register({ app: "orangeway-app", brand: "orange-way" });
+    },
+  });
+  scrubPostHogDeviceStore();
+}
+
+async function enableTier2() {
+  if (hasTrackingProtection()) return;
+  await startTier1();
+  if (!started) return;
+  const { default: posthog } = await import("posthog-js");
+  posthog.set_config({
     autocapture: true,
     capture_heatmaps: true,
     disable_session_recording: false,
-    session_recording: { maskAllInputs: true, maskTextSelector: "[data-ph-mask]" },
-    capture_pageview: "history_change",
-    opt_out_capturing_by_default: true,
-    before_send: scrubPostHogEvent,
-    loaded: (client) => {
-      client.register({ app: "orangeway-app", brand: "orange-way" });
-      client.opt_in_capturing();
-      client.capture("$pageview");
-    },
+    session_recording: SESSION_RECORDING,
   });
+  posthog.startSessionRecording?.();
+  scrubPostHogDeviceStore();
+}
+
+async function disableTier2() {
+  if (!started) return;
+  const { default: posthog } = await import("posthog-js");
+  posthog.set_config({
+    autocapture: false,
+    capture_heatmaps: false,
+    disable_session_recording: true,
+  });
+  posthog.stopSessionRecording?.();
+  scrubPostHogDeviceStore();
 }
 
 export async function grantAnalytics() {
   writeConsent("granted");
-  await startCapture();
+  await enableTier2();
 }
 
 export async function denyAnalytics() {
   writeConsent("denied");
-  await pauseAnalytics();
+  await disableTier2();
+  await startTier1();
 }
 
 export async function pauseAnalytics() {
@@ -86,10 +164,15 @@ export async function pauseAnalytics() {
   const { default: posthog } = await import("posthog-js");
   posthog.opt_out_capturing();
   posthog.stopSessionRecording?.();
+  paused = true;
+  scrubPostHogDeviceStore();
 }
 
 export function restoreAnalytics() {
-  if (readConsent() === "granted") void grantAnalytics();
+  if (hasTrackingProtection()) return;
+  void startTier1().then(() => {
+    if (readConsent() === "granted") void enableTier2();
+  });
 }
 
 export async function resetUser() {

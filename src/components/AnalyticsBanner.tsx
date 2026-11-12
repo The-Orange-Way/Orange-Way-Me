@@ -5,10 +5,11 @@ import {
   grantAnalytics,
   OPEN_PRIVACY_CHOICES,
   readConsent,
+  hasTrackingProtection,
   restoreAnalytics,
 } from "@/lib/analytics";
 
-const COPY = "Help us improve this site with anonymous stats? No cookies.";
+const COPY = "Help us improve this site? We'd love to see which parts work. No cookies.";
 
 export function AnalyticsBanner() {
   const [visible, setVisible] = useState(false);
@@ -16,8 +17,10 @@ export function AnalyticsBanner() {
 
   useEffect(() => {
     restoreAnalytics();
-    if (!readConsent()) setVisible(true);
-    const onOpen = () => setVisible(true);
+    if (!hasTrackingProtection() && !readConsent()) setVisible(true);
+    const onOpen = () => {
+      if (!hasTrackingProtection()) setVisible(true);
+    };
     window.addEventListener(OPEN_PRIVACY_CHOICES, onOpen);
     return () => window.removeEventListener(OPEN_PRIVACY_CHOICES, onOpen);
   }, []);
